@@ -896,6 +896,32 @@ li {
   background: color-mix(in srgb, var(--accent-soft) 40%, #fff);
 }
 
+/* Tenant-branded workspace and portal */
+.shell.branded .mark,
+.center.branded .mark {
+  background: var(--accent);
+  color: var(--on-accent, #fff);
+}
+.sidebar .logo {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  object-fit: contain;
+  flex: none;
+  background: var(--surface-2);
+}
+.shell.branded button.primary,
+.shell.branded .btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent, #fff);
+}
+.shell.branded button.primary:hover,
+.shell.branded .btn.primary:hover {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
 .footnote {
   margin-top: 20px;
   padding-top: 16px;

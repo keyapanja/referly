@@ -22,7 +22,7 @@ export function tenantRoutes() {
     return c.json({
       principal: p,
       user: user ? publicUser(user) : null,
-      tenant: { id: tenant.id, name: tenant.name, slug: tenant.slug, currency: tenant.currency, timezone: tenant.timezone },
+      tenant: { id: tenant.id, name: tenant.name, slug: tenant.slug, currency: tenant.currency, timezone: tenant.timezone, logoUrl: tenant.logoUrl, branding: tenant.branding },
     });
   });
 

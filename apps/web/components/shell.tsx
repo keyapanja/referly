@@ -6,6 +6,7 @@ import { useEffect, type ReactNode } from "react";
 import { api, getToken, setToken } from "@/lib/api";
 import { useApi } from "@/lib/hooks";
 import { Icon, type IconName } from "./icons";
+import { brandStyle } from "@/lib/brand";
 
 type NavItem = readonly [href: string, label: string, icon: IconName];
 
@@ -85,16 +86,18 @@ export function Shell({ mode, children }: { mode: "merchant" | "portal"; childre
   }, [mode, router]);
 
   const tenantName: string = data?.tenant?.name ?? "";
+  const logoUrl: string | null = data?.tenant?.logoUrl ?? null;
+  const brand = brandStyle(data?.tenant?.branding?.primaryColor);
   const who: string = mode === "merchant" ? (data?.user?.name ?? "") : (data?.affiliate?.name ?? "");
   const whoSub: string = mode === "merchant" ? (data?.user?.role ?? "") : "Affiliate";
   const whoLabel = mode === "merchant" ? "Merchant workspace" : "Partner portal";
   const isActive = (href: string) => pathname === href || (href !== "/app" && href !== "/portal" && pathname.startsWith(href));
 
   return (
-    <div className="shell">
+    <div className="shell branded" style={brand}>
       <aside className="sidebar">
         <div className="brand">
-          <div className="mark">{tenantName ? initials(tenantName) : "A"}</div>
+          {logoUrl ? <img className="logo" src={logoUrl} alt="" /> : <div className="mark">{tenantName ? initials(tenantName) : "A"}</div>}
           <div style={{ minWidth: 0 }}>
             <div className="name">{tenantName || "Affiliate Platform"}</div>
             <small>{whoLabel}</small>
