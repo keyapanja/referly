@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { api } from "@/lib/api";
+import { api, upload } from "@/lib/api";
 import { useAction, useApi } from "@/lib/hooks";
 import { date } from "@/lib/format";
 import { Alert, Badge, Field, PageHeader, Table } from "@/components/ui";
@@ -10,6 +10,8 @@ const TYPES = ["image", "banner", "pdf", "video", "copy", "link", "guideline"];
 const TEXT_TYPES = new Set(["copy", "guideline"]);
 
 const emptyForm = { type: "image", title: "", url: "", body: "", usageInstructions: "", visibility: "all", programIds: [] as string[], affiliateIds: [] as string[] };
+const FILE_TYPES = new Set(["image", "banner", "pdf", "video"]);
+const ACCEPT: Record<string, string> = { image: "image/png,image/jpeg,image/gif,image/webp,image/svg+xml", banner: "image/png,image/jpeg,image/gif,image/webp,image/svg+xml", pdf: "application/pdf", video: "video/mp4,video/webm" };
 
 export default function AssetsPage() {
   const { data, error, reload } = useApi<any>("/v1/assets");
@@ -19,6 +21,8 @@ export default function AssetsPage() {
   const [show, setShow] = useState(false);
   const [form, setForm] = useState(emptyForm);
   const [editing, setEditing] = useState<any>(null);
+  const [file, setFile] = useState<File | null>(null);
+  const [source, setSource] = useState<"upload" | "url">("upload");
 
   const programName = (id: string) => programs?.programs?.find((p: any) => p.id === id)?.name ?? id;
   const affiliateName = (id: string) => affiliates?.affiliates?.find((a: any) => a.id === id)?.name ?? id;
@@ -64,25 +68,38 @@ export default function AssetsPage() {
             onSubmit={async (e) => {
               e.preventDefault();
               const text = TEXT_TYPES.has(form.type);
+              const useUpload = FILE_TYPES.has(form.type) && source === "upload";
+              if (useUpload && !file) return;
               const ok = await run(
-                () =>
-                  api("/v1/assets", {
+                async () => {
+                  let url: string | undefined = !text && form.url ? form.url : undefined;
+                  let stored: any = null;
+                  if (useUpload) {
+                    stored = (await upload<any>("/v1/assets/upload", file!)).file;
+                    url = stored.url;
+                  }
+                  return api("/v1/assets", {
                     method: "POST",
                     json: {
                       type: form.type,
-                      title: form.title,
-                      url: !text && form.url ? form.url : undefined,
+                      title: form.title || stored?.name,
+                      url,
+                      storageKey: stored?.key,
+                      contentType: stored?.contentType,
+                      sizeBytes: stored?.sizeBytes,
                       body: text || form.body ? form.body : undefined,
                       usageInstructions: form.usageInstructions || undefined,
                       visibility: form.visibility,
                       programIds: form.visibility === "restricted" ? form.programIds : [],
                       affiliateIds: form.visibility === "restricted" ? form.affiliateIds : [],
                     },
-                  }),
+                  });
+                },
                 "Asset added.",
               );
               if (ok) {
                 setForm(emptyForm);
+                setFile(null);
                 setShow(false);
                 reload();
               }
@@ -96,16 +113,34 @@ export default function AssetsPage() {
                   ))}
                 </select>
               </Field>
-              <Field label="Title">
-                <input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} required />
+              <Field label="Title" help={FILE_TYPES.has(form.type) && source === "upload" ? "Defaults to the file name." : undefined}>
+                <input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} required={!(FILE_TYPES.has(form.type) && source === "upload")} />
               </Field>
             </div>
             {TEXT_TYPES.has(form.type) ? (
               <Field label={form.type === "copy" ? "Approved copy" : "Guideline text"}>
                 <textarea value={form.body} onChange={(e) => setForm({ ...form, body: e.target.value })} required />
               </Field>
+            ) : FILE_TYPES.has(form.type) ? (
+              <>
+                <Field label="Source">
+                  <select value={source} onChange={(e) => setSource(e.target.value as "upload" | "url")}>
+                    <option value="upload">Upload a file (up to 25 MB)</option>
+                    <option value="url">Link to a file hosted elsewhere</option>
+                  </select>
+                </Field>
+                {source === "upload" ? (
+                  <Field label="File" help={file ? `${file.name} · ${(file.size / 1024 / 1024).toFixed(2)} MB` : "PNG, JPG, GIF, WebP, SVG, PDF, MP4 or WebM."}>
+                    <input type="file" accept={ACCEPT[form.type]} onChange={(e) => setFile(e.target.files?.[0] ?? null)} required />
+                  </Field>
+                ) : (
+                  <Field label="File URL">
+                    <input type="url" value={form.url} onChange={(e) => setForm({ ...form, url: e.target.value })} placeholder="https://" required />
+                  </Field>
+                )}
+              </>
             ) : (
-              <Field label="File or page URL">
+              <Field label="Page URL">
                 <input type="url" value={form.url} onChange={(e) => setForm({ ...form, url: e.target.value })} placeholder="https://" required />
               </Field>
             )}
@@ -120,7 +155,7 @@ export default function AssetsPage() {
             </Field>
             {form.visibility === "restricted" ? scopePicker(form, (v) => setForm({ ...form, ...v })) : null}
             <button className="primary" disabled={busy}>
-              Add asset
+              {busy ? "Uploading…" : "Add asset"}
             </button>
           </form>
         </div>

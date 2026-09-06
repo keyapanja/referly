@@ -11,3 +11,5 @@ next-env.d.ts
 Affiliate_Growth_Platform_PRD.docx
 *.docx
 Affiliate_Growth_Platform_PRD.txt
+data/
+**/data/

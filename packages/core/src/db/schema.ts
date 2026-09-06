@@ -490,6 +490,9 @@ export const assets = pgTable(
     title: text("title").notNull(),
     url: text("url"),
     body: text("body"),
+    storageKey: text("storage_key"),
+    contentType: text("content_type"),
+    sizeBytes: integer("size_bytes"),
     usageInstructions: text("usage_instructions"),
     status: text("status").notNull().default("active"), // active | archived
     visibility: text("visibility").notNull().default("all"), // all | restricted

@@ -58,6 +58,22 @@ export async function api<T = unknown>(path: string, init: { method?: string; js
   return body as T;
 }
 
+/** Multipart upload; returns the stored file descriptor from the API. */
+export async function upload<T = any>(path: string, file: File): Promise<T> {
+  const form = new FormData();
+  form.append("file", file, file.name);
+  const headers: Record<string, string> = {};
+  const token = getToken();
+  if (token) headers.authorization = `Bearer ${token}`;
+  const res = await fetch(`${API_URL}${path}`, { method: "POST", headers, body: form, credentials: "include" });
+  const body = await res.json().catch(() => null);
+  if (!res.ok) {
+    const err = body?.error ?? {};
+    throw new ApiError(res.status, err.code ?? "http", describe(err) || `upload failed (${res.status})`, err.details);
+  }
+  return body as T;
+}
+
 function describe(err: { message?: string; details?: { issues?: { path: (string | number)[]; message: string }[] } }): string {
   const issues = err.details?.issues;
   if (issues?.length) return issues.map((i) => `${i.path.join(".") || "input"}: ${i.message}`).join("; ");

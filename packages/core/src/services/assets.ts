@@ -31,6 +31,10 @@ export const createAssetSchema = z
     body: z.string().max(20000).optional(),
     usageInstructions: z.string().max(5000).optional(),
     visibility: z.enum(["all", "restricted"]).default("all"),
+    /** Set by the upload endpoint when the file lives in platform storage. */
+    storageKey: z.string().max(500).optional(),
+    contentType: z.string().max(100).optional(),
+    sizeBytes: z.number().int().min(0).optional(),
     ...permissionShape,
   })
   .superRefine((v, ctx) => {
@@ -53,6 +57,9 @@ export async function createAsset(db: DbLike, ctx: TenantContext, rawInput: Crea
         title: input.title,
         url: input.url ?? null,
         body: input.body ?? null,
+        storageKey: input.storageKey ?? null,
+        contentType: input.contentType ?? null,
+        sizeBytes: input.sizeBytes ?? null,
         usageInstructions: input.usageInstructions ?? null,
         status: "active",
         visibility: input.visibility,

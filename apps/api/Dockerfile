@@ -19,6 +19,8 @@ USER app
 ENV PORT=4000
 # Without DATABASE_URL the API falls back to embedded PGlite in this directory (mount a volume).
 ENV PGLITE_DIR=/app/data/pglite
+# Uploaded assets with STORAGE_PROVIDER=local (mount /app/data as a volume).
+ENV FILES_DIR=/app/data/files
 EXPOSE 4000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s CMD wget -qO- http://127.0.0.1:4000/health || exit 1
 CMD ["npx", "tsx", "apps/api/src/server.ts"]

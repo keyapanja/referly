@@ -63,7 +63,7 @@ Docker images for the API and web app, a `docker-compose.yml` with Postgres, and
 |---|---|
 | Auth | `POST /v1/auth/signup`, `/login`, `/logout`, `/verify-email`, `/forgot-password`, `/reset-password` |
 | Tenant | `GET/PATCH /v1/tenant`, `/me`, `/me/resend-verification`, `/team`, `/api-keys`, `/audit` |
-| Assets | `GET/POST /v1/assets`, `PATCH /:id`, `PUT /:id/permissions` (scope to programs, offers, affiliates) |
+| Assets | `GET/POST /v1/assets`, `POST /v1/assets/upload` (multipart, 25 MB, images/PDF/video), `PATCH /:id`, `PUT /:id/permissions` (scope to programs, offers, affiliates) |
 | Offers | `GET/POST /v1/offers`, `PATCH /v1/offers/:id`, `POST /v1/offers/:id/status` |
 | Programs | `GET/POST /v1/programs`, `PATCH /:id`, `POST /:id/status`, `POST /:id/offers` |
 | Affiliates | `GET/POST /v1/affiliates`, `POST /invites`, `/:id/approve|reject|suspend|reactivate`, `/:id/coupons`, `/:id/programs/:programId/override` |

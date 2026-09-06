@@ -3,6 +3,10 @@ import { createDb, messaging, type DbHandle } from "@referly/core";
 import { createApp, type App } from "../src/app";
 import { runOnce } from "../src/worker";
 import { resetRateLimits } from "../src/lib/ratelimit";
+import { LocalStorage } from "../src/storage";
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 
 /**
  * End-to-end walk through the PRD's MVP acceptance criteria (s17) over HTTP:
@@ -11,6 +15,7 @@ import { resetRateLimits } from "../src/lib/ratelimit";
  */
 
 let handle: DbHandle;
+let storage: LocalStorage;
 let app: App;
 let clock = new Date("2026-03-01T10:00:00Z");
 const now = () => new Date(clock);
@@ -19,7 +24,8 @@ const BASE = "http://api.test";
 
 beforeAll(async () => {
   handle = await createDb();
-  app = createApp({ db: handle.db, email, config: { baseUrl: BASE, webUrl: "http://web.test", cookieSecure: false, now } });
+  storage = new LocalStorage(await mkdtemp(path.join(tmpdir(), "referly-files-")), BASE);
+  app = createApp({ db: handle.db, email, storage, config: { baseUrl: BASE, webUrl: "http://web.test", cookieSecure: false, now } });
 });
 afterAll(() => handle.close());
 beforeAll(() => resetRateLimits());
@@ -283,6 +289,45 @@ describe("MVP acceptance over HTTP", () => {
     expect((await call("/v1/assets", { token: affiliateToken })).status).toBe(403);
   });
 
+  it("Assets: merchants can upload files; served with the right type; bad types and sizes rejected", async () => {
+    const png = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 73, 72, 68, 82]);
+    const form = new FormData();
+    form.append("file", new File([png], "banner.png", { type: "image/png" }));
+    const up = await app.request(BASE + "/v1/assets/upload", { method: "POST", headers: { authorization: `Bearer ${ownerToken}` }, body: form });
+    expect(up.status).toBe(201);
+    const { file } = await up.json();
+    expect(file.key).toMatch(/^tenants\/ten_[A-Za-z0-9]+\/assets\/[a-f0-9]{24}\.png$/);
+    expect(file.url).toBe(`${BASE}/files/${file.key}`);
+    expect(file.sizeBytes).toBe(png.length);
+
+    const served = await app.request(file.url);
+    expect(served.status).toBe(200);
+    expect(served.headers.get("content-type")).toBe("image/png");
+    expect(new Uint8Array(await served.arrayBuffer())).toEqual(png);
+    expect((await app.request(BASE + "/files/tenants/other/assets/nope.png")).status).toBe(404);
+    expect((await app.request(BASE + "/files/../package.json")).status).toBe(404);
+
+    const created = await call("/v1/assets", { method: "POST", token: ownerToken, json: { type: "banner", title: "Uploaded banner", url: file.url, storageKey: file.key, contentType: file.contentType, sizeBytes: file.sizeBytes } });
+    expect(created.status).toBe(201);
+    expect((await call("/portal/assets", { token: affiliateToken })).body.assets.some((a: any) => a.url === file.url)).toBe(true);
+
+    const bad = new FormData();
+    bad.append("file", new File([new Uint8Array([1, 2, 3])], "evil.exe", { type: "application/x-msdownload" }));
+    const rejected = await app.request(BASE + "/v1/assets/upload", { method: "POST", headers: { authorization: `Bearer ${ownerToken}` }, body: bad });
+    expect(rejected.status).toBe(400);
+    expect((await rejected.json()).error.message).toMatch(/unsupported file type/);
+
+    const big = new FormData();
+    big.append("file", new File([new Uint8Array(26 * 1024 * 1024)], "big.png", { type: "image/png" }));
+    const tooBig = await app.request(BASE + "/v1/assets/upload", { method: "POST", headers: { authorization: `Bearer ${ownerToken}` }, body: big });
+    expect(tooBig.status).toBe(400);
+    expect((await tooBig.json()).error.message).toMatch(/larger than 25 MB/);
+
+    // affiliates cannot upload
+    const asAffiliate = await app.request(BASE + "/v1/assets/upload", { method: "POST", headers: { authorization: `Bearer ${affiliateToken}` }, body: form });
+    expect(asAffiliate.status).toBe(403);
+  });
+
   it("Account: verification email on signup, resend, forgot and reset password", async () => {
     email.sent.length = 0;
     const signup = await call("/v1/auth/signup", { method: "POST", json: { name: "Verify Co", slug: "verify-co", owner: { name: "Vee", email: "vee@verify.co", password: "supersecret1" } } });
@@ -307,7 +352,7 @@ describe("MVP acceptance over HTTP", () => {
   });
 
   it("Rate limiting: public endpoints return 429 after the configured number of requests", async () => {
-    const limited = createApp({ db: handle.db, email, config: { baseUrl: BASE, webUrl: "http://web.test", cookieSecure: false, now, rateLimits: { redirect: 2, public: 2, auth: 2 } } });
+    const limited = createApp({ db: handle.db, email, storage, config: { baseUrl: BASE, webUrl: "http://web.test", cookieSecure: false, now, rateLimits: { redirect: 2, public: 2, auth: 2 } } });
     const hit = async (path: string, ip: string) => (await limited.request(BASE + path, { headers: { "x-forwarded-for": ip } })).status;
     expect(await hit("/r/nope", "10.0.0.1")).toBe(404);
     expect(await hit("/r/nope", "10.0.0.1")).toBe(404);

@@ -15,6 +15,13 @@
       "when": 1788707060412,
       "tag": "0001_auth_tokens",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1788709172477,
+      "tag": "0002_asset_storage",
+      "breakpoints": true
     }
   ]
 }

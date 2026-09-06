@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1127.0",
     "@hono/node-server": "^2.1.1",
     "@referly/core": "*",
     "hono": "^4.13.7",

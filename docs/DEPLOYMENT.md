@@ -49,6 +49,9 @@ api.yourdomain.com {
 | `RESEND_API_KEY` | api | With `resend`. |
 | `SMTP_URL` | api | With `smtp`, e.g. `smtp://user:pass@host:587`. |
 | `NEXT_PUBLIC_API_URL` | web (build) | API origin the browser calls. Equal to `BASE_URL`. |
+| `STORAGE_PROVIDER` | api | `local` (default; files under `FILES_DIR`, served at `BASE_URL/files/...`) or `s3`. |
+| `FILES_DIR` | api | Local storage directory. The Docker image uses `/app/data/files`; mount `/app/data`. |
+| `S3_BUCKET`, `S3_REGION`, `S3_ENDPOINT`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_PUBLIC_URL`, `S3_FORCE_PATH_STYLE` | api | With `s3`. Works with AWS S3, Cloudflare R2, MinIO, DigitalOcean Spaces. Objects are written public-read; `S3_PUBLIC_URL` is the origin (or CDN) they are served from. |
 
 ## Migrations
 
@@ -68,7 +71,7 @@ Commit the generated SQL. Never edit an applied migration.
 
 ## Operations
 
-- **Backups:** back up Postgres; nothing else is stateful.
+- **Backups:** back up Postgres, plus `FILES_DIR` (or the bucket) if merchants upload assets.
 - **Logs:** the API logs every request; sent emails appear in the message log (Messages page) with delivery status.
 - **Jobs:** the `jobs` table is the queue. `status = 'dead'` rows exhausted their retries and need a look.
 - **CI:** `.github/workflows/ci.yml` runs typecheck, tests and the web build on every push and PR. `docker.yml` publishes both images to GitHub Container Registry on pushes to `main` and on `v*` tags; set the repository variable `NEXT_PUBLIC_API_URL` to your API origin before relying on the web image.

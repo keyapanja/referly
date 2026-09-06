@@ -20,6 +20,7 @@ import { messageRoutes } from "./routes/messages";
 import { analyticsRoutes } from "./routes/analytics";
 import { assetRoutes } from "./routes/assets";
 import { rateLimit } from "./lib/ratelimit";
+import type { FileStorage } from "./storage";
 
 export interface AppConfig {
   /** Base URL of this API, used to build tracking/join links. */
@@ -36,6 +37,7 @@ export interface AppConfig {
 export interface AppDeps {
   db: Db;
   email: messaging.EmailProvider;
+  storage: FileStorage;
   config: AppConfig;
 }
 
@@ -65,6 +67,17 @@ export function createApp(deps: AppDeps) {
   app.use("/join/*", rateLimit({ name: "public", limit: rl.public, windowMs: 10 * 60_000 }));
   app.use("/invite/*", rateLimit({ name: "public", limit: rl.public, windowMs: 10 * 60_000 }));
   app.use("/v1/auth/*", rateLimit({ name: "auth", limit: rl.auth, windowMs: 15 * 60_000 }));
+
+  // Uploaded files (local storage only; S3 serves its own objects). Keys are unguessable and tenant-scoped.
+  app.get("/files/*", async (c) => {
+    if (!deps.storage.get) return c.notFound();
+    const key = c.req.path.slice("/files/".length);
+    const file = await deps.storage.get(key);
+    if (!file) return c.notFound();
+    return new Response(file.data as unknown as BodyInit, {
+      headers: { "content-type": file.contentType, "cache-control": "public, max-age=31536000, immutable", "content-length": String(file.data.byteLength) },
+    });
+  });
 
   // Public, unauthenticated: tracking redirect, join/apply, invites, signup/login.
   app.route("/", publicRoutes());
