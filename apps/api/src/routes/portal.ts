@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { z } from "zod";
-import { affiliates, commissions, conversions, offers, payouts, tenants, tracking, programs as programsSvc } from "@referly/core";
+import { affiliates, commissions, conversions, offers, payouts, tenants, tracking, programs as programsSvc, assets } from "@referly/core";
 import { requireAffiliatePrincipal, type AppEnv } from "../lib/auth";
 import { publicTenant } from "./auth";
 
@@ -89,6 +89,9 @@ export function portalRoutes() {
     return c.json(await commissions.commissionStatement(c.get("deps").db, c.get("ctx"), affiliateId, { from, to }));
   });
   r.get("/payouts", async (c) => c.json({ payouts: await payouts.listPayouts(c.get("deps").db, c.get("ctx"), { affiliateId: requireAffiliatePrincipal(c) }) }));
+
+  /** AST-02: only assets permitted for this affiliate's programs. */
+  r.get("/assets", async (c) => c.json({ assets: await assets.listAssetsForAffiliate(c.get("deps").db, c.get("ctx"), requireAffiliatePrincipal(c)) }));
 
   r.patch("/profile", async (c) => c.json({ affiliate: await affiliates.updateAffiliate(c.get("deps").db, c.get("ctx"), requireAffiliatePrincipal(c), await c.req.json()) }));
   r.put("/payout-profile", async (c) => c.json({ affiliate: await affiliates.setPayoutProfile(c.get("deps").db, c.get("ctx"), requireAffiliatePrincipal(c), await c.req.json()) }));

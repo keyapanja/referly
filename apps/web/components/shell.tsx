@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { api, getToken, setToken } from "@/lib/api";
 import { useApi } from "@/lib/hooks";
 import { Icon, type IconName } from "./icons";
@@ -24,6 +24,7 @@ const MERCHANT_NAV: { section: string; items: NavItem[] }[] = [
       ["/app/affiliates", "Affiliates", "users"],
       ["/app/offers", "Offers", "tag"],
       ["/app/programs", "Programs", "layers"],
+      ["/app/assets", "Assets", "image"],
     ],
   },
   {
@@ -50,6 +51,7 @@ const PORTAL_NAV: { section: string; items: NavItem[] }[] = [
       ["/portal", "Home", "home"],
       ["/portal/offers", "Offers", "gift"],
       ["/portal/links", "Links & Codes", "link"],
+      ["/portal/assets", "Assets", "image"],
     ],
   },
   {
@@ -80,6 +82,8 @@ export function Shell({ mode, children }: { mode: "merchant" | "portal"; childre
   const router = useRouter();
   const nav = mode === "merchant" ? MERCHANT_NAV : PORTAL_NAV;
   const { data, error } = useApi<any>(mode === "merchant" ? "/v1/tenant/me" : "/portal/me");
+  const [resent, setResent] = useState(false);
+  const needsVerification = mode === "merchant" && data?.user && data.user.emailVerified === false;
 
   useEffect(() => {
     if (!getToken()) router.replace(mode === "portal" ? "/login?portal=1" : "/login");
@@ -141,6 +145,24 @@ export function Shell({ mode, children }: { mode: "merchant" | "portal"; childre
       </aside>
       <main className="main">
         {error ? <div className="alert error">{error}</div> : null}
+        {needsVerification ? (
+          <div className="alert info" style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <Icon name="alert" />
+            <span style={{ flex: 1 }}>
+              Please verify your email address. We sent a link to <strong>{data.user.email}</strong>.
+            </span>
+            <button
+              className="sm"
+              disabled={resent}
+              onClick={async () => {
+                await api("/v1/tenant/me/resend-verification", { method: "POST" }).catch(() => {});
+                setResent(true);
+              }}
+            >
+              {resent ? "Sent" : "Resend"}
+            </button>
+          </div>
+        ) : null}
         {children}
       </main>
     </div>

@@ -37,6 +37,9 @@ function LoginForm() {
           </Field>
           <Field label="Password">
             <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+            <div className="help" style={{ textAlign: "right" }}>
+              <Link href="/forgot-password">Forgot password?</Link>
+            </div>
           </Field>
           <button className="primary" disabled={busy} type="submit">
             {busy ? "Signing in…" : "Sign in"}

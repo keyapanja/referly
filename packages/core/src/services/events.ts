@@ -8,6 +8,9 @@ import { enqueueJob } from "./jobs";
  * consume them, so every automated action traces back to a stored event.
  */
 export type DomainEventType =
+  | "user.verify_email"
+  | "user.email_verified"
+  | "user.password_reset_requested"
   | "affiliate.applied"
   | "affiliate.approved"
   | "affiliate.rejected"

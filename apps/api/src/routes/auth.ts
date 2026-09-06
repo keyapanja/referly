@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { getCookie } from "hono/cookie";
 import { z } from "zod";
-import { auth, tenants, affiliates } from "@referly/core";
+import { auth, tenants, affiliates, account } from "@referly/core";
 import { SESSION_COOKIE, clearSessionCookie, setSessionCookie, type AppEnv } from "../lib/auth";
 
 export function authRoutes() {
@@ -26,6 +26,22 @@ export function authRoutes() {
     return c.json({ tenant: publicTenant(result.tenant), user: publicUser(result.user), affiliateId: affiliate?.id ?? null, token: result.token });
   });
 
+  r.post("/verify-email", async (c) => {
+    const { token } = z.object({ token: z.string().min(10) }).parse(await c.req.json());
+    const user = await account.verifyEmail(c.get("deps").db, token, c.get("now")());
+    return c.json({ user: publicUser(user) });
+  });
+
+  r.post("/forgot-password", async (c) => {
+    await account.requestPasswordReset(c.get("deps").db, await c.req.json(), c.get("now")());
+    return c.json({ ok: true }); // never reveals whether the email exists
+  });
+
+  r.post("/reset-password", async (c) => {
+    const user = await account.resetPassword(c.get("deps").db, await c.req.json(), c.get("now")());
+    return c.json({ user: publicUser(user) });
+  });
+
   r.post("/logout", async (c) => {
     const { db } = c.get("deps");
     const token = getCookie(c, SESSION_COOKIE) ?? c.req.header("authorization")?.slice(7);
@@ -41,6 +57,6 @@ export function publicTenant(t: { id: string; name: string; slug: string; curren
   return { id: t.id, name: t.name, slug: t.slug, currency: t.currency, timezone: t.timezone, logoUrl: t.logoUrl, branding: t.branding, tone: t.tone };
 }
 
-export function publicUser(u: { id: string; name: string; email: string; role: string }) {
-  return { id: u.id, name: u.name, email: u.email, role: u.role };
+export function publicUser(u: { id: string; name: string; email: string; role: string; emailVerifiedAt?: Date | null }) {
+  return { id: u.id, name: u.name, email: u.email, role: u.role, emailVerified: !!u.emailVerifiedAt };
 }

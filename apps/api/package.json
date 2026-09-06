@@ -12,6 +12,10 @@
   "dependencies": {
     "@hono/node-server": "^2.1.1",
     "@referly/core": "*",
-    "hono": "^4.13.7"
+    "hono": "^4.13.7",
+    "nodemailer": "^10.0.0"
+  },
+  "devDependencies": {
+    "@types/nodemailer": "^8.0.1"
   }
 }

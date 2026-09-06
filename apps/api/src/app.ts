@@ -17,6 +17,8 @@ import { publicRoutes } from "./routes/public";
 import { portalRoutes } from "./routes/portal";
 import { messageRoutes } from "./routes/messages";
 import { analyticsRoutes } from "./routes/analytics";
+import { assetRoutes } from "./routes/assets";
+import { rateLimit } from "./lib/ratelimit";
 
 export interface AppConfig {
   /** Base URL of this API, used to build tracking/join links. */
@@ -26,6 +28,8 @@ export interface AppConfig {
   cookieSecure: boolean;
   /** Frozen clock for tests. */
   now?: () => Date;
+  /** Requests per window per IP. Windows: redirect 1 min, public 10 min, auth 15 min. */
+  rateLimits?: { redirect: number; public: number; auth: number };
 }
 
 export interface AppDeps {
@@ -47,6 +51,13 @@ export function createApp(deps: AppDeps) {
 
   app.get("/health", (c) => c.json({ ok: true }));
 
+  // Abuse protection on everything reachable without credentials (PRD s13).
+  const rl = deps.config.rateLimits ?? { redirect: 300, public: 30, auth: 30 };
+  app.use("/r/*", rateLimit({ name: "redirect", limit: rl.redirect, windowMs: 60_000 }));
+  app.use("/join/*", rateLimit({ name: "public", limit: rl.public, windowMs: 10 * 60_000 }));
+  app.use("/invite/*", rateLimit({ name: "public", limit: rl.public, windowMs: 10 * 60_000 }));
+  app.use("/v1/auth/*", rateLimit({ name: "auth", limit: rl.auth, windowMs: 15 * 60_000 }));
+
   // Public, unauthenticated: tracking redirect, join/apply, invites, signup/login.
   app.route("/", publicRoutes());
   app.route("/v1/auth", authRoutes());
@@ -63,6 +74,7 @@ export function createApp(deps: AppDeps) {
   app.route("/v1/payouts", payoutRoutes());
   app.route("/v1/messages", messageRoutes());
   app.route("/v1/analytics", analyticsRoutes());
+  app.route("/v1/assets", assetRoutes());
   app.route("/portal", portalRoutes());
 
   return app;

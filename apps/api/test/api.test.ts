@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createDb, messaging, type DbHandle } from "@referly/core";
 import { createApp, type App } from "../src/app";
 import { runOnce } from "../src/worker";
+import { resetRateLimits } from "../src/lib/ratelimit";
 
 /**
  * End-to-end walk through the PRD's MVP acceptance criteria (s17) over HTTP:
@@ -21,6 +22,7 @@ beforeAll(async () => {
   app = createApp({ db: handle.db, email, config: { baseUrl: BASE, webUrl: "http://web.test", cookieSecure: false, now } });
 });
 afterAll(() => handle.close());
+beforeAll(() => resetRateLimits());
 
 async function call<T = any>(path: string, init: RequestInit & { token?: string; json?: unknown } = {}): Promise<{ status: number; body: T; headers: Headers }> {
   const headers = new Headers(init.headers);
@@ -265,6 +267,59 @@ describe("MVP acceptance over HTTP", () => {
     expect(login.body.affiliateId).toBe(apply.body.affiliate.id);
     const home = await call("/portal/home", { token: login.body.token });
     expect(home.status).toBe(200);
+  });
+
+  it("Assets: affiliates only see assets permitted for their program (AST-02)", async () => {
+    const pub = await call("/v1/assets", { method: "POST", token: ownerToken, json: { type: "copy", title: "Pitch", body: "Say this." } });
+    expect(pub.status).toBe(201);
+    const other = await call("/v1/programs", { method: "POST", token: ownerToken, json: { name: "Other", commissionModel: "fixed", commissionFixedMinor: 100, offerIds: [offerId] } });
+    const restricted = await call("/v1/assets", { method: "POST", token: ownerToken, json: { type: "pdf", title: "Secret deck", url: "https://cdn.example.com/deck.pdf", visibility: "restricted", programIds: [other.body.program.id] } });
+    expect(restricted.status).toBe(201);
+    const mine = await call("/portal/assets", { token: affiliateToken });
+    expect(mine.status).toBe(200);
+    expect(mine.body.assets.map((a: any) => a.title)).toEqual(["Pitch"]);
+    await call(`/v1/assets/${restricted.body.asset.id}/permissions`, { method: "PUT", token: ownerToken, json: { programIds: [programId] } });
+    expect((await call("/portal/assets", { token: affiliateToken })).body.assets.map((a: any) => a.title).sort()).toEqual(["Pitch", "Secret deck"]);
+    expect((await call("/v1/assets", { token: affiliateToken })).status).toBe(403);
+  });
+
+  it("Account: verification email on signup, resend, forgot and reset password", async () => {
+    email.sent.length = 0;
+    const signup = await call("/v1/auth/signup", { method: "POST", json: { name: "Verify Co", slug: "verify-co", owner: { name: "Vee", email: "vee@verify.co", password: "supersecret1" } } });
+    expect(signup.body.user.emailVerified).toBe(false);
+    await runOnce({ db: handle.db, email, webUrl: "http://web.test", now });
+    const mail = email.sent.find((m) => m.to === "vee@verify.co" && m.subject.startsWith("Verify your email"));
+    const token = /verify-email\?token=([A-Za-z0-9]+)/.exec(mail!.body)![1]!;
+    expect((await call("/v1/auth/verify-email", { method: "POST", json: { token: "bogus-bogus-bogus" } })).status).toBe(400);
+    const verified = await call("/v1/auth/verify-email", { method: "POST", json: { token } });
+    expect(verified.status).toBe(200);
+    expect(verified.body.user.emailVerified).toBe(true);
+    expect((await call("/v1/tenant/me", { token: signup.body.token })).body.user.emailVerified).toBe(true);
+
+    expect((await call("/v1/auth/forgot-password", { method: "POST", json: { email: "nobody@verify.co" } })).status).toBe(200);
+    await call("/v1/auth/forgot-password", { method: "POST", json: { email: "vee@verify.co" } });
+    await runOnce({ db: handle.db, email, webUrl: "http://web.test", now });
+    const reset = email.sent.find((m) => m.to === "vee@verify.co" && m.subject === "Reset your password");
+    const resetToken = /reset-password\?token=([A-Za-z0-9]+)/.exec(reset!.body)![1]!;
+    expect((await call("/v1/auth/reset-password", { method: "POST", json: { token: resetToken, password: "brandnewpass1" } })).status).toBe(200);
+    expect((await call("/v1/tenant/me", { token: signup.body.token })).status).toBe(401); // sessions revoked
+    expect((await call("/v1/auth/login", { method: "POST", json: { email: "vee@verify.co", password: "brandnewpass1" } })).status).toBe(200);
+  });
+
+  it("Rate limiting: public endpoints return 429 after the configured number of requests", async () => {
+    const limited = createApp({ db: handle.db, email, config: { baseUrl: BASE, webUrl: "http://web.test", cookieSecure: false, now, rateLimits: { redirect: 2, public: 2, auth: 2 } } });
+    const hit = async (path: string, ip: string) => (await limited.request(BASE + path, { headers: { "x-forwarded-for": ip } })).status;
+    expect(await hit("/r/nope", "10.0.0.1")).toBe(404);
+    expect(await hit("/r/nope", "10.0.0.1")).toBe(404);
+    expect(await hit("/r/nope", "10.0.0.1")).toBe(429);
+    expect(await hit("/r/nope", "10.0.0.2")).toBe(404); // per IP
+    const login = async () => limited.request(BASE + "/v1/auth/login", { method: "POST", headers: { "content-type": "application/json", "x-forwarded-for": "10.0.0.9" }, body: JSON.stringify({ email: "nobody@example.com", password: "wrong-password" }) });
+    expect((await login()).status).toBe(401);
+    expect((await login()).status).toBe(401);
+    const blocked = await login();
+    expect(blocked.status).toBe(429);
+    expect(blocked.headers.get("retry-after")).toBeTruthy();
+    expect((await blocked.json()).error.code).toBe("rate_limited");
   });
 
   it("Validation and permissions errors are JSON with codes", async () => {

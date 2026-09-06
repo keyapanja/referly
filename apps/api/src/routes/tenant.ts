@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { z } from "zod";
-import { tenants, auth, audit, MERCHANT_ROLES } from "@referly/core";
+import { tenants, auth, audit, account, MERCHANT_ROLES } from "@referly/core";
 import { requireMerchantPrincipal, type AppEnv } from "../lib/auth";
 import { publicUser } from "./auth";
 
@@ -24,6 +24,14 @@ export function tenantRoutes() {
       user: user ? publicUser(user) : null,
       tenant: { id: tenant.id, name: tenant.name, slug: tenant.slug, currency: tenant.currency, timezone: tenant.timezone, logoUrl: tenant.logoUrl, branding: tenant.branding },
     });
+  });
+
+  r.post("/me/resend-verification", async (c) => {
+    const p = c.get("principal");
+    if (p.kind !== "user") return c.json({ ok: false }, 400);
+    const user = await auth.resolveUserById(c.get("deps").db, p.userId);
+    if (user) await account.requestEmailVerification(c.get("deps").db, c.get("ctx"), user);
+    return c.json({ ok: true });
   });
 
   r.get("/team", async (c) => c.json({ users: (await tenants.listTeam(c.get("deps").db, c.get("ctx"))).map(publicUser) }));

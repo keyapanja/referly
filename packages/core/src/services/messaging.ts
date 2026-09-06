@@ -1,7 +1,7 @@
 import { and, desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import type { DbLike } from "../db/client";
-import { messageLogs, messageTemplates, type MessageLog, type MessageTemplate } from "../db/schema";
+import { messageLogs, messageTemplates, tenants, type MessageLog, type MessageTemplate } from "../db/schema";
 import { newId } from "../ids";
 import { notFound, validation } from "../errors";
 import { type TenantContext, require as requirePerm } from "../context";
@@ -38,6 +38,8 @@ export const TEMPLATE_KEYS = [
   "payout_paid",
   "campaign_launched",
   "policy_updated",
+  "verify_email",
+  "password_reset",
 ] as const;
 export type TemplateKey = (typeof TEMPLATE_KEYS)[number];
 
@@ -72,6 +74,8 @@ export function defaultTemplates(tone: Tone): Array<{ key: TemplateKey; subject:
     { key: "payout_paid", subject: "Payout sent", body: `${g}\n\nWe sent your payout of {{amount}} {{currency}} on {{payout_date}}.\n\n${s}` },
     { key: "campaign_launched", subject: "New campaign: {{program_name}}", body: `${g}\n\nA new campaign is live. Check your portal for assets and details: {{portal_url}}\n\n${s}` },
     { key: "policy_updated", subject: "{{program_name}} terms updated", body: `${g}\n\nThe terms for {{program_name}} have changed. Please review and accept them in your portal: {{portal_url}}\n\n${s}` },
+    { key: "verify_email", subject: "Verify your email for {{business_name}}", body: `${g}\n\nConfirm your email address to finish setting up {{business_name}}: {{link}}\n\nThis link expires in 24 hours.\n\n${s}` },
+    { key: "password_reset", subject: "Reset your password", body: `${g}\n\nWe received a request to reset the password for your {{business_name}} account. Choose a new password here: {{link}}\n\nIf you did not ask for this, you can ignore this email. The link expires in 1 hour.\n\n${s}` },
   ];
 }
 
@@ -181,7 +185,14 @@ export interface SendTemplatedInput {
 
 /** Render a tenant template and send it, logging the outcome regardless of success. */
 export async function sendTemplated(db: DbLike, ctx: TenantContext, provider: EmailProvider, input: SendTemplatedInput): Promise<MessageLog> {
-  const template = await getTemplate(db, ctx, input.key);
+  let template = await getTemplate(db, ctx, input.key);
+  if (!template) {
+    // Tenants created before a template existed fall back to the platform default for their tone.
+    const tenant = await db.query.tenants.findFirst({ where: eq(tenants.id, ctx.tenantId) });
+    const tone = (tenant?.tone as Tone | undefined) ?? "friendly";
+    const fallback = defaultTemplates(tone).find((t) => t.key === input.key);
+    if (fallback) template = { id: "default", tenantId: ctx.tenantId, key: input.key, channel: "email", tone, subject: fallback.subject, body: fallback.body, enabled: true, createdAt: ctx.now(), updatedAt: ctx.now() };
+  }
   const base = {
     id: newId("messageLog"),
     tenantId: ctx.tenantId,

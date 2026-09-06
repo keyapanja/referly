@@ -28,6 +28,18 @@ Open http://localhost:3000/signup to run the guided onboarding. Emails are print
 
 Set `DATABASE_URL=postgres://...` to run against a real Postgres. Migrations in `packages/core/drizzle` apply automatically on boot.
 
+### Environment variables (API)
+
+| Variable | Purpose |
+|---|---|
+| `PORT`, `BASE_URL`, `WEB_URL` | API port, public API origin (tracking links), web app origin (join/invite/verify links) |
+| `DATABASE_URL` | Postgres connection; omit for embedded PGlite (`PGLITE_DIR`, default `.pglite`) |
+| `EMAIL_PROVIDER` | `console` (default), `resend`, or `smtp` |
+| `RESEND_API_KEY`, `EMAIL_FROM` | for `resend` |
+| `SMTP_URL`, `EMAIL_FROM` | for `smtp`, e.g. `smtp://user:pass@smtp.example.com:587` |
+
+Public endpoints are rate limited per client IP (click redirect 300/min; join and invite 30 per 10 min; auth 30 per 15 min). Limits are in-process; use one API instance or put a shared store behind `lib/ratelimit.ts`.
+
 ```bash
 npm test                 # core unit/integration tests + API end-to-end tests
 npm run typecheck
@@ -45,8 +57,9 @@ npm run typecheck
 
 | Area | Endpoints |
 |---|---|
-| Auth | `POST /v1/auth/signup`, `/login`, `/logout` |
-| Tenant | `GET/PATCH /v1/tenant`, `/team`, `/api-keys`, `/audit` |
+| Auth | `POST /v1/auth/signup`, `/login`, `/logout`, `/verify-email`, `/forgot-password`, `/reset-password` |
+| Tenant | `GET/PATCH /v1/tenant`, `/me`, `/me/resend-verification`, `/team`, `/api-keys`, `/audit` |
+| Assets | `GET/POST /v1/assets`, `PATCH /:id`, `PUT /:id/permissions` (scope to programs, offers, affiliates) |
 | Offers | `GET/POST /v1/offers`, `PATCH /v1/offers/:id`, `POST /v1/offers/:id/status` |
 | Programs | `GET/POST /v1/programs`, `PATCH /:id`, `POST /:id/status`, `POST /:id/offers` |
 | Affiliates | `GET/POST /v1/affiliates`, `POST /invites`, `/:id/approve|reject|suspend|reactivate`, `/:id/coupons`, `/:id/programs/:programId/override` |
@@ -54,7 +67,7 @@ npm run typecheck
 | Commissions | `GET /v1/commissions`, `POST /:id/approve|reverse`, `POST /adjustments`, `POST /settle` |
 | Payouts | `GET/POST /v1/payouts`, `GET /payable/:affiliateId`, `POST /batch-all`, `POST /external`, `POST /:id/processing|paid|failed|cancel` |
 | Public | `GET /r/:token` (click redirect), `GET/POST /join/:token[/apply]`, `GET/POST /invite/:token[/accept]` |
-| Portal | `GET /portal/me|home|offers|links|codes|conversions|commissions|earnings|payouts`, `POST /portal/links`, `PATCH /portal/profile`, `PUT /portal/payout-profile` |
+| Portal | `GET /portal/me|home|offers|links|codes|assets|conversions|commissions|earnings|payouts`, `POST /portal/links`, `PATCH /portal/profile`, `PUT /portal/payout-profile` |
 
 Integrations authenticate with `Authorization: Bearer rk_live_...` (API key). Users authenticate with a session cookie or `Authorization: Bearer <session token>`.
 

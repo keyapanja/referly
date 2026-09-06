@@ -103,6 +103,21 @@ export const sessions = pgTable(
   (t) => [index("sessions_user_idx").on(t.userId)],
 );
 
+export const authTokens = pgTable(
+  "auth_tokens",
+  {
+    id: id(),
+    tenantId: tenantRef(),
+    userId: text("user_id").notNull().references(() => users.id),
+    purpose: text("purpose").notNull(), // verify_email | reset_password
+    tokenHash: text("token_hash").notNull().unique(),
+    expiresAt: ts("expires_at").notNull(),
+    usedAt: ts("used_at"),
+    createdAt: createdAt(),
+  },
+  (t) => [index("auth_tokens_user_idx").on(t.userId, t.purpose)],
+);
+
 export const apiKeys = pgTable(
   "api_keys",
   {
@@ -649,6 +664,7 @@ export const schema = {
   tenants,
   users,
   sessions,
+  authTokens,
   apiKeys,
   offers,
   programs,
@@ -693,6 +709,8 @@ export type Commission = typeof commissions.$inferSelect;
 export type LedgerEntry = typeof ledgerEntries.$inferSelect;
 export type Payout = typeof payouts.$inferSelect;
 export type Asset = typeof assets.$inferSelect;
+export type AssetPermission = typeof assetPermissions.$inferSelect;
+export type AuthToken = typeof authTokens.$inferSelect;
 export type MessageTemplate = typeof messageTemplates.$inferSelect;
 export type MessageLog = typeof messageLogs.$inferSelect;
 export type AuditLog = typeof auditLogs.$inferSelect;

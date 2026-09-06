@@ -21,3 +21,5 @@ export * as messaging from "./services/messaging";
 export * as jobs from "./services/jobs";
 export * as events from "./services/events";
 export * as analytics from "./services/analytics";
+export * as assets from "./services/assets";
+export * as account from "./services/account";

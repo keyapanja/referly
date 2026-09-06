@@ -18,6 +18,8 @@ const PATHS: Record<string, string[]> = {
   logout: ["M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4", "m16 17 5-5-5-5", "M21 12H9"],
   check: ["m20 6-11 11-5-5"],
   copy: ["M8 8h12v12H8z", "M16 8V4H4v12h4"],
+  image: ["M3 5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5z", "M9 11a2 2 0 1 0 0-4 2 2 0 0 0 0 4z", "m21 15-5-5L5 21"],
+  alert: ["M12 9v4", "M12 17h.01", "M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"],
 };
 
 export type IconName = keyof typeof PATHS;

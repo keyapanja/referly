@@ -19,6 +19,8 @@ export interface WorkerDeps {
 
 /** Event → template mapping. Kept as data so it is inspectable (PRD "explainable automation"). */
 const NOTIFICATION_RULES: Partial<Record<eventsMod.DomainEventType, messaging.TemplateKey>> = {
+  "user.verify_email": "verify_email",
+  "user.password_reset_requested": "password_reset",
   "affiliate.invited": "affiliate_invite",
   "affiliate.applied": "affiliate_applied",
   "affiliate.approved": "affiliate_approved",
@@ -42,8 +44,8 @@ export function createHandlers(deps: WorkerDeps): Record<string, jobs.JobHandler
       const affiliateId = (event.data.affiliateId as string | undefined) ?? (event.entityType === "affiliate" ? event.entityId : undefined);
       const affiliate = affiliateId ? await deps.db.query.affiliates.findFirst({ where: eq(affiliatesTable.id, affiliateId) }) : null;
 
-      // Invites go to the invitee, who has no affiliate record yet.
-      const recipient = event.type === "affiliate.invited" ? (event.data.email as string) : affiliate?.email;
+      // Invites and account emails carry their recipient; everything else goes to the affiliate.
+      const recipient = (event.data.email as string | undefined) ?? affiliate?.email;
       if (!recipient) return;
       if (event.type === "conversion.created" && !event.data.commissionId) return; // unattributed sale: nobody to notify
 
@@ -65,7 +67,7 @@ export function createHandlers(deps: WorkerDeps): Record<string, jobs.JobHandler
           offer_name: offer?.name ?? "",
           amount: amountMinor !== undefined ? formatMinor(amountMinor) : "",
           currency: (event.data.currency as string | undefined) ?? tenant.currency,
-          link: event.type === "affiliate.invited" ? `${deps.webUrl}/invite/${event.data.token as string}` : `${deps.webUrl}/portal`,
+          link: linkFor(event, deps.webUrl),
           portal_url: `${deps.webUrl}/portal`,
           payout_date: (event.data.paidAt as string | undefined)?.slice(0, 10) ?? "",
           reason: (event.data.reason as string | undefined) ?? "",
@@ -78,6 +80,20 @@ export function createHandlers(deps: WorkerDeps): Record<string, jobs.JobHandler
       for (const { id } of all) await commissions.settleHoldingPeriods(deps.db, systemContext(id, now), now());
     },
   };
+}
+
+function linkFor(event: eventsMod.DomainEvent, webUrl: string): string {
+  const token = event.data.token as string | undefined;
+  switch (event.type) {
+    case "affiliate.invited":
+      return `${webUrl}/invite/${token}`;
+    case "user.verify_email":
+      return `${webUrl}/verify-email?token=${token}`;
+    case "user.password_reset_requested":
+      return `${webUrl}/reset-password?token=${token}`;
+    default:
+      return `${webUrl}/portal`;
+  }
 }
 
 function formatMinor(minor: number): string {

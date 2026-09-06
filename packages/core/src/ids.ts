@@ -32,6 +32,8 @@ export const ID_PREFIXES = {
   job: "job",
   webhookEndpoint: "whk",
   webhookDelivery: "whd",
+  authToken: "tok",
+  assetPermission: "asp",
 } as const;
 
 export type IdKind = keyof typeof ID_PREFIXES;

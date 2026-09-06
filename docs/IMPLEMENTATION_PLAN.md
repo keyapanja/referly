@@ -77,9 +77,9 @@ Payable balance = sum of payable commissions + approved adjustments - paid - rev
 
 1. Core package: schema, tenant context, state machines, attribution + commission + ledger services, job queue. Tests for multi-affiliate attribution, refunds, duplicate webhooks, cross-tenant access. **Done.**
 2. API: auth (email + password, sessions, API keys), onboarding, offers, programs, affiliates, invitations, links, click redirect, conversions webhook with idempotency, commissions, payouts, audit. **Done.**
-3. Notifications: template rendering with safe variables, email adapter, message log, event-driven worker. **Done.** Asset library: schema only, UI/API pending.
+3. Notifications: template rendering with safe variables, email adapter (console/Resend/SMTP), message log, event-driven worker. **Done.** Asset library with program/offer/affiliate scoping, merchant and portal UI. **Done.**
 4. Web: merchant onboarding flow, merchant app, affiliate portal, public join/invite pages. **Done.**
-5. Dashboards and CSV export (synchronous, small datasets). **Done.** Remaining for Phase 1: asset library UI/API, async export for large datasets, email provider adapter for production (SMTP/API), rate limiting on public endpoints, Postgres row-level security as a second isolation layer.
+5. Dashboards and CSV export (synchronous, small datasets). **Done.** Email verification, password reset, per-IP rate limiting on public endpoints. **Done.** Remaining for Phase 1: async export for large datasets, Postgres row-level security as a second isolation layer, file upload storage for assets (assets are URL or inline text today).
 6. Phase 2 candidates: campaigns, affiliate groups/tiers, automation rule builder UI, Stripe/Shopify adapters, custom domains, disputes workflow.
 
 ## 6. Contradictions and clarifications found in the PRD

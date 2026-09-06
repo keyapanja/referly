@@ -9,6 +9,7 @@ import { hashPassword } from "./auth";
 import { type TenantContext, require as requirePerm, tenantContext, MERCHANT_ROLES } from "../context";
 import { writeAudit, snapshot } from "./audit";
 import { seedDefaultTemplates } from "./messaging";
+import { requestEmailVerification } from "./account";
 
 export const createTenantSchema = z.object({
   name: z.string().min(1).max(120),
@@ -68,6 +69,7 @@ export async function createTenant(db: DbLike, rawInput: CreateTenantInput, now 
 
     const ctx = tenantContext(tenant!.id, { type: "user", id: owner!.id, role: "owner" }, () => now);
     await seedDefaultTemplates(tx, ctx);
+    await requestEmailVerification(tx, ctx, owner!);
     await writeAudit(tx, ctx, { entityType: "tenant", entityId: tenant!.id, action: "created", after: snapshot(tenant!) });
     return { tenant: tenant!, owner: owner! };
   });
