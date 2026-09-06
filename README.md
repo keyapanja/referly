@@ -9,7 +9,8 @@ Product contract: `Affiliate_Growth_Platform_PRD.docx`. Engineering plan and dec
 ```
 packages/core   Domain model, Postgres schema (Drizzle), services, rule engines, tests
 apps/api        Hono HTTP API: merchant API, public tracking/join endpoints, affiliate portal API, job worker
-apps/web        (next) Next.js merchant app + affiliate portal
+apps/web        Next.js merchant app (onboarding wizard, dashboard, affiliates, offers, programs, conversions,
+                commissions, payouts, analytics, messages, settings), affiliate portal, public join/invite pages
 docs/           Implementation plan
 ```
 
@@ -19,8 +20,11 @@ Requires Node 20+. No database install needed: without `DATABASE_URL` the API us
 
 ```bash
 npm install
-npm run dev:api          # http://localhost:4000
+npm run dev:api          # API on http://localhost:4000 (also runs the job worker)
+npm run dev:web          # Web on http://localhost:3000
 ```
+
+Open http://localhost:3000/signup to run the guided onboarding. Emails are printed to the API console in dev.
 
 Set `DATABASE_URL=postgres://...` to run against a real Postgres. Migrations in `packages/core/drizzle` apply automatically on boot.
 
