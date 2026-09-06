@@ -1,0 +1,49 @@
+# Self-hosted stack: Postgres + API/worker + web. Copy .env.example to .env first.
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: referly
+      POSTGRES_USER: referly
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-referly}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U referly -d referly"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://referly:${POSTGRES_PASSWORD:-referly}@db:5432/referly
+      BASE_URL: ${BASE_URL:-http://localhost:4000}
+      WEB_URL: ${WEB_URL:-http://localhost:3000}
+      EMAIL_PROVIDER: ${EMAIL_PROVIDER:-console}
+      EMAIL_FROM: ${EMAIL_FROM:-}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      SMTP_URL: ${SMTP_URL:-}
+    ports:
+      - "4000:4000"
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${BASE_URL:-http://localhost:4000}
+    depends_on:
+      - api
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+
+volumes:
+  pgdata:

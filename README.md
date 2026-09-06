@@ -45,6 +45,10 @@ npm test                 # core unit/integration tests + API end-to-end tests
 npm run typecheck
 ```
 
+## Deploy
+
+Docker images for the API and web app, a `docker-compose.yml` with Postgres, and GitHub Actions for CI and image publishing are included. See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
+
 ## Core concepts
 
 - **Tenant isolation.** Every business-owned row carries `tenant_id`. Every service takes a `TenantContext` and scopes its own queries. Public endpoints resolve the tenant from opaque tokens (tracking link, join link, invite), never from user input.

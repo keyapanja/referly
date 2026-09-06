@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { sql } from "drizzle-orm";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import type { Db } from "@referly/core";
@@ -49,7 +50,14 @@ export function createApp(deps: AppDeps) {
     await next();
   });
 
-  app.get("/health", (c) => c.json({ ok: true }));
+  app.get("/health", async (c) => {
+    try {
+      await deps.db.execute(sql`select 1`);
+      return c.json({ ok: true, db: "up" });
+    } catch (err) {
+      return c.json({ ok: false, db: "down", error: err instanceof Error ? err.message : String(err) }, 503);
+    }
+  });
 
   // Abuse protection on everything reachable without credentials (PRD s13).
   const rl = deps.config.rateLimits ?? { redirect: 300, public: 30, auth: 30 };
