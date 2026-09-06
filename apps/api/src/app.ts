@@ -16,6 +16,7 @@ import { payoutRoutes } from "./routes/payouts";
 import { publicRoutes } from "./routes/public";
 import { portalRoutes } from "./routes/portal";
 import { messageRoutes } from "./routes/messages";
+import { analyticsRoutes } from "./routes/analytics";
 
 export interface AppConfig {
   /** Base URL of this API, used to build tracking/join links. */
@@ -61,6 +62,7 @@ export function createApp(deps: AppDeps) {
   app.route("/v1/commissions", commissionRoutes());
   app.route("/v1/payouts", payoutRoutes());
   app.route("/v1/messages", messageRoutes());
+  app.route("/v1/analytics", analyticsRoutes());
   app.route("/portal", portalRoutes());
 
   return app;

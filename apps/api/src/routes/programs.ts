@@ -16,8 +16,8 @@ export function programRoutes() {
     const { db } = c.get("deps");
     const program = await programs.getProgram(db, c.get("ctx"), c.req.param("id"));
     const offers = await programs.listProgramOffers(db, c.get("ctx"), program.id);
-    const { baseUrl } = c.get("deps").config;
-    return c.json({ program, offers, joinUrl: `${baseUrl}/join/${program.joinToken}` });
+    const { webUrl } = c.get("deps").config;
+    return c.json({ program, offers, joinUrl: `${webUrl}/join/${program.joinToken}` });
   });
   r.patch("/:id", async (c) => {
     const body = await c.req.json();

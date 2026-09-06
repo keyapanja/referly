@@ -198,6 +198,20 @@ describe("MVP acceptance over HTTP", () => {
     expect(email.sent.some((m) => m.subject === "Payout sent" && m.body.includes("2026-04-10"))).toBe(true);
   });
 
+  it("Analytics: merchant can view attributed revenue, clicks, conversions and commissions", async () => {
+    const overview = await call("/v1/analytics/overview?from=2026-02-01T00:00:00Z&to=2026-05-01T00:00:00Z", { token: ownerToken });
+    expect(overview.status).toBe(200);
+    expect(overview.body).toMatchObject({ clicks: 1, attributedConversions: 2, attributedRevenueMinor: 3_400_000, activeAffiliates: 1 });
+    expect(overview.body.commissionByStatus.paid.totalMinor).toBe(500_000);
+    expect(overview.body.topAffiliates[0]).toMatchObject({ affiliateId, clicks: 1, conversions: 2 });
+    const byOffer = await call("/v1/analytics/offers?from=2026-02-01T00:00:00Z&to=2026-05-01T00:00:00Z", { token: ownerToken });
+    expect(byOffer.body.rows[0]).toMatchObject({ offerId, conversions: 2 });
+    const csv = await call("/v1/analytics/export/conversions", { token: ownerToken });
+    expect(csv.status).toBe(200);
+    expect(csv.headers.get("content-type")).toContain("text/csv");
+    expect(String(csv.body).split("\n")).toHaveLength(3); // header + 2 rows
+  });
+
   it("Notifications: message log records delivery status for key events", async () => {
     const log = await call("/v1/messages/log", { token: ownerToken });
     const keys = log.body.messages.map((m: any) => [m.templateKey, m.status]);

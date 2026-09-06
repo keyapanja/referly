@@ -6,3 +6,5 @@ dist/
 .env
 .env.local
 coverage/
+next-env.d.ts
+.claude/*.local.json

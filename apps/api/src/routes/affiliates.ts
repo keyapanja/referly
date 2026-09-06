@@ -15,7 +15,7 @@ export function affiliateRoutes() {
 
   r.post("/invites", async (c) => {
     const invite = await affiliates.inviteAffiliate(c.get("deps").db, c.get("ctx"), await c.req.json());
-    return c.json({ invite, acceptUrl: `${c.get("deps").config.baseUrl}/invite/${invite.token}` }, 201);
+    return c.json({ invite, acceptUrl: `${c.get("deps").config.webUrl}/invite/${invite.token}` }, 201);
   });
 
   /** AFF-06: profile + performance in one call. */
