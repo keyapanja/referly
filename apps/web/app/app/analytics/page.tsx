@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { API_URL, getToken } from "@/lib/api";
 import { useApi } from "@/lib/hooks";
 import { money, percent } from "@/lib/format";
@@ -9,7 +9,8 @@ import { Badge, Loading, PageHeader, Stat, Table } from "@/components/ui";
 
 export default function AnalyticsPage() {
   const [days, setDays] = useState(30);
-  const from = new Date(Date.now() - days * 86_400_000).toISOString();
+  // Memoised: a fresh timestamp on every render would change the query key and refetch forever.
+  const from = useMemo(() => new Date(Date.now() - days * 86_400_000).toISOString(), [days]);
   const q = `?from=${encodeURIComponent(from)}`;
   const { data: me } = useApi<any>("/v1/tenant/me");
   const { data: overview, error } = useApi<any>(`/v1/analytics/overview${q}`);
