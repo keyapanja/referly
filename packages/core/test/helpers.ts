@@ -1,4 +1,5 @@
 import { createDb, type Db, type DbHandle } from "../src/db/client";
+import { setSessionBypass } from "../src/db/rls";
 import { tenantContext, type TenantContext } from "../src/context";
 import * as tenants from "../src/services/tenants";
 import * as offers from "../src/services/offers";
@@ -36,7 +37,11 @@ export interface Workspace {
 
 let handle: DbHandle | null = null;
 export async function getDb(): Promise<Db> {
-  if (!handle) handle = await createDb();
+  if (!handle) {
+    handle = await createDb();
+    // Core tests exercise services directly on one connection; RLS is covered by rls.test.ts.
+    await setSessionBypass(handle.db);
+  }
   return handle.db;
 }
 export async function closeDb() {

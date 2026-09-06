@@ -79,7 +79,7 @@ Payable balance = sum of payable commissions + approved adjustments - paid - rev
 2. API: auth (email + password, sessions, API keys), onboarding, offers, programs, affiliates, invitations, links, click redirect, conversions webhook with idempotency, commissions, payouts, audit. **Done.**
 3. Notifications: template rendering with safe variables, email adapter (console/Resend/SMTP), message log, event-driven worker. **Done.** Asset library with program/offer/affiliate scoping, merchant and portal UI. **Done.**
 4. Web: merchant onboarding flow, merchant app, affiliate portal, public join/invite pages. **Done.**
-5. Dashboards and CSV export (synchronous, small datasets). **Done.** Email verification, password reset, per-IP rate limiting on public endpoints. **Done.** Asset file uploads (local or S3-compatible storage) and async CSV exports built by the worker and stored privately. **Done.** Remaining for Phase 1: Postgres row-level security as a second isolation layer, platform admin surface, billing and plan limits.
+5. Dashboards and CSV export (synchronous, small datasets). **Done.** Email verification, password reset, per-IP rate limiting on public endpoints. **Done.** Asset file uploads (local or S3-compatible storage) and async CSV exports built by the worker and stored privately. **Done.** Postgres row-level security with per-request transactions and per-job scoping. **Done.** Remaining for Phase 1: platform admin surface, billing and plan limits.
 6. Phase 2 candidates: campaigns, affiliate groups/tiers, automation rule builder UI, Stripe/Shopify adapters, custom domains, disputes workflow.
 
 ## 6. Contradictions and clarifications found in the PRD

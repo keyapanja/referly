@@ -3,7 +3,7 @@ import { drizzle as drizzlePg } from "drizzle-orm/node-postgres";
 import { migrate as migratePglite } from "drizzle-orm/pglite/migrator";
 import { migrate as migratePg } from "drizzle-orm/node-postgres/migrator";
 import type { PgDatabase, PgQueryResultHKT, PgTransaction } from "drizzle-orm/pg-core";
-import type { ExtractTablesWithRelations } from "drizzle-orm";
+import { sql, type ExtractTablesWithRelations } from "drizzle-orm";
 import { PGlite } from "@electric-sql/pglite";
 import pg from "pg";
 import path from "node:path";
@@ -42,12 +42,21 @@ export async function createDb(opts: { url?: string; dataDir?: string; migrate?:
   const client = opts.dataDir ? new PGlite(opts.dataDir) : new PGlite();
   const db = drizzlePglite(client, { schema });
   if (shouldMigrate) await migratePglite(db, { migrationsFolder });
+  // PGlite connects as a superuser, and superusers ignore row-level security. Run the app as a
+  // plain role so dev and tests are subject to the same policies as production.
+  await db.execute(sql`do $$ begin if not exists (select 1 from pg_roles where rolname = 'referly_app') then create role referly_app nosuperuser nocreatedb nocreaterole; end if; end $$`);
+  await db.execute(sql`grant all on all tables in schema public to referly_app`);
+  await db.execute(sql`grant usage, select, update on all sequences in schema public to referly_app`);
+  await db.execute(sql`set role referly_app`);
   return { db: db as unknown as Db, close: () => client.close() };
 }
 
-/** Run `fn` inside a transaction unless `db` already is one. */
+/**
+ * Run `fn` inside a transaction. When `db` is already a transaction this opens a savepoint,
+ * so an expected failure inside (for example a unique-violation race) does not poison the
+ * enclosing request transaction.
+ */
 export async function withTx<T>(db: DbLike, fn: (tx: Tx) => Promise<T>): Promise<T> {
-  if (isTx(db)) return fn(db);
   return db.transaction(async (tx) => fn(tx as unknown as Tx));
 }
 

@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { getCookie, setCookie } from "hono/cookie";
 import { tracking, programs, affiliates, auth, tenants, systemContext, notFound, validation, offers } from "@referly/core";
 import { setSessionCookie, type AppEnv } from "../lib/auth";
+import { scopeRequest } from "../lib/rls";
 import { publicTenant } from "./auth";
 
 export const CLICK_COOKIE = "referly_clicks";
@@ -51,6 +52,7 @@ export function publicRoutes() {
     const { db } = c.get("deps");
     const program = await programs.getProgramByJoinToken(db, c.req.param("token"));
     if (!program || program.status !== "active" || program.approvalMode === "invite_only") throw notFound("program");
+    await scopeRequest(c, program.tenantId);
     const ctx = systemContext(program.tenantId, c.get("now"));
     const tenant = await tenants.getTenant(db, ctx);
     const programOffers = await programs.listProgramOffers(db, ctx, program.id);
@@ -79,6 +81,7 @@ export function publicRoutes() {
     const { db } = c.get("deps");
     const program = await programs.getProgramByJoinToken(db, c.req.param("token"));
     if (!program) throw notFound("program");
+    await scopeRequest(c, program.tenantId);
     const ctx = systemContext(program.tenantId, c.get("now"));
     const { affiliate, membership } = await affiliates.applyToProgram(db, ctx, program.id, await c.req.json());
     // Applicants can sign in right away; the portal shows a "pending review" state until approved.
@@ -97,6 +100,7 @@ export function publicRoutes() {
     const { db } = c.get("deps");
     const invite = await affiliates.getInviteByToken(db, c.req.param("token"));
     if (!invite) throw notFound("invite");
+    await scopeRequest(c, invite.tenantId);
     const ctx = systemContext(invite.tenantId, c.get("now"));
     const [tenant, program] = await Promise.all([tenants.getTenant(db, ctx), programs.getProgram(db, ctx, invite.programId)]);
     return c.json({
@@ -110,6 +114,7 @@ export function publicRoutes() {
     const { db } = c.get("deps");
     const invite = await affiliates.getInviteByToken(db, c.req.param("token"));
     if (!invite) throw notFound("invite");
+    await scopeRequest(c, invite.tenantId);
     const ctx = systemContext(invite.tenantId, c.get("now"));
     const { affiliate } = await affiliates.acceptInvite(db, ctx, invite, await c.req.json());
     if (!affiliate.userId) throw validation("affiliate has no login");

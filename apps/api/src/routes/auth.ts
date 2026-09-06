@@ -3,6 +3,7 @@ import { getCookie } from "hono/cookie";
 import { z } from "zod";
 import { auth, tenants, affiliates, account } from "@referly/core";
 import { SESSION_COOKIE, clearSessionCookie, setSessionCookie, type AppEnv } from "../lib/auth";
+import { scopeRequest } from "../lib/rls";
 
 export function authRoutes() {
   const r = new Hono<AppEnv>();
@@ -12,6 +13,7 @@ export function authRoutes() {
     const { db } = c.get("deps");
     const body = await c.req.json();
     const { tenant, owner } = await tenants.createTenant(db, body, c.get("now")());
+    await scopeRequest(c, tenant.id);
     const session = await auth.createSession(db, owner, c.get("now")());
     setSessionCookie(c, session.token, session.expiresAt);
     return c.json({ tenant: publicTenant(tenant), user: publicUser(owner), token: session.token }, 201);
@@ -21,6 +23,7 @@ export function authRoutes() {
     const { db } = c.get("deps");
     const body = z.object({ email: z.string().email(), password: z.string(), tenantSlug: z.string().optional() }).parse(await c.req.json());
     const result = await auth.loginWithPassword(db, body, c.get("now")());
+    await scopeRequest(c, result.tenant.id);
     setSessionCookie(c, result.token, result.expiresAt);
     const affiliate = result.user.role === "affiliate" ? await affiliates.getAffiliateByUserId(db, result.tenant.id, result.user.id) : null;
     return c.json({ tenant: publicTenant(result.tenant), user: publicUser(result.user), affiliateId: affiliate?.id ?? null, token: result.token });

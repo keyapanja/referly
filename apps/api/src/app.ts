@@ -2,10 +2,11 @@ import { Hono } from "hono";
 import { sql } from "drizzle-orm";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
-import type { Db } from "@referly/core";
+import type { Db, DbLike } from "@referly/core";
 import type { messaging } from "@referly/core";
 import { errorHandler } from "./lib/errors";
 import { authMiddleware, type AppEnv } from "./lib/auth";
+import { rlsTransaction } from "./lib/rls";
 import { authRoutes } from "./routes/auth";
 import { tenantRoutes } from "./routes/tenant";
 import { offerRoutes } from "./routes/offers";
@@ -35,13 +36,14 @@ export interface AppConfig {
 }
 
 export interface AppDeps {
-  db: Db;
+  /** Root connection at construction; inside a request this is the request's transaction. */
+  db: DbLike;
   email: messaging.EmailProvider;
   storage: FileStorage;
   config: AppConfig;
 }
 
-export function createApp(deps: AppDeps) {
+export function createApp(deps: AppDeps & { db: Db }) {
   const app = new Hono<AppEnv>();
   app.onError(errorHandler);
   app.use("*", cors({ origin: deps.config.webUrl, credentials: true }));
@@ -78,6 +80,9 @@ export function createApp(deps: AppDeps) {
       headers: { "content-type": file.contentType, "cache-control": "public, max-age=31536000, immutable", "content-length": String(file.data.byteLength) },
     });
   });
+
+  // Every data-touching route runs in one transaction with row-level security active.
+  for (const prefix of ["/r/*", "/join/*", "/invite/*", "/v1/*", "/portal/*"]) app.use(prefix, rlsTransaction(deps.db));
 
   // Public, unauthenticated: tracking redirect, join/apply, invites, signup/login.
   app.route("/", publicRoutes());

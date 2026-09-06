@@ -2,6 +2,7 @@ import type { Context, MiddlewareHandler } from "hono";
 import { getCookie, setCookie, deleteCookie } from "hono/cookie";
 import { auth, affiliates, tenantContext, unauthenticated, forbidden, type TenantContext, type Role } from "@referly/core";
 import type { AppDeps } from "../app";
+import { scopeRequest } from "./rls";
 
 export const SESSION_COOKIE = "referly_session";
 
@@ -36,6 +37,7 @@ export function authMiddleware(): MiddlewareHandler<AppEnv> {
       if (!key) throw unauthenticated("invalid API key");
       c.set("principal", { kind: "api_key", apiKeyId: key.id, tenantId: key.tenantId, scopes: key.scopes });
       c.set("ctx", tenantContext(key.tenantId, { type: "api_key", id: key.id }, c.get("now")));
+      await scopeRequest(c, key.tenantId);
       return next();
     }
 
@@ -44,6 +46,7 @@ export function authMiddleware(): MiddlewareHandler<AppEnv> {
     const session = await auth.resolveSession(db, token, now);
     if (!session) throw unauthenticated("session expired");
 
+    await scopeRequest(c, session.tenantId);
     if (session.role === "affiliate") {
       const affiliate = await affiliates.getAffiliateByUserId(db, session.tenantId, session.user.id);
       if (!affiliate) throw forbidden("no affiliate profile");
