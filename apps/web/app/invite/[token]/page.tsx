@@ -6,6 +6,7 @@ import { api, setToken } from "@/lib/api";
 import { useAction, useApi } from "@/lib/hooks";
 import { money } from "@/lib/format";
 import { Alert, Field, Loading } from "@/components/ui";
+import { AuthBrand } from "@/components/shell";
 
 /** Invitation acceptance (journey B). */
 export default function InvitePage() {
@@ -21,7 +22,7 @@ export default function InvitePage() {
   return (
     <div className="center" style={{ ["--primary" as string]: data.tenant.branding?.primaryColor ?? "#2f5bea" }}>
       <div className="card">
-        {data.tenant.logoUrl ? <img src={data.tenant.logoUrl} alt="" style={{ maxHeight: 48, marginBottom: 12 }} /> : null}
+        {data.tenant.logoUrl ? <img src={data.tenant.logoUrl} alt="" style={{ maxHeight: 48, marginBottom: 16 }} /> : <AuthBrand name={data.tenant.name} subtitle="Invitation" />}
         <h1>{data.tenant.name} invited you to {p.name}</h1>
         <p className="muted">
           Earn {p.commissionModel === "percentage" ? `${p.commissionPercent}%` : money(p.commissionFixedMinor, data.tenant.currency)} on every sale you refer.

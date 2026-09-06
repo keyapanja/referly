@@ -7,6 +7,7 @@ import { api, setToken } from "@/lib/api";
 import { useAction, useApi } from "@/lib/hooks";
 import { money } from "@/lib/format";
 import { Alert, Field, Loading } from "@/components/ui";
+import { AuthBrand } from "@/components/shell";
 
 /** Branded application page (journey C). */
 export default function JoinPage() {
@@ -23,7 +24,7 @@ export default function JoinPage() {
   return (
     <div className="center wide" style={{ ["--primary" as string]: color }}>
       <div className="card">
-        {data.tenant.logoUrl ? <img src={data.tenant.logoUrl} alt="" style={{ maxHeight: 48, marginBottom: 12 }} /> : null}
+        {data.tenant.logoUrl ? <img src={data.tenant.logoUrl} alt="" style={{ maxHeight: 48, marginBottom: 16 }} /> : <AuthBrand name={data.tenant.name} subtitle="Partner program" />}
         <h1>Become a {data.tenant.name} partner</h1>
         <p className="muted">{p.description ?? `Promote ${data.tenant.name} and earn commission on every sale you refer.`}</p>
         <div className="grid cols-3" style={{ margin: "16px 0" }}>

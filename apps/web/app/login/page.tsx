@@ -6,6 +6,7 @@ import { Suspense, useState } from "react";
 import { api, setToken } from "@/lib/api";
 import { useAction } from "@/lib/hooks";
 import { Alert, Field } from "@/components/ui";
+import { AuthBrand } from "@/components/shell";
 
 function LoginForm() {
   const router = useRouter();
@@ -18,7 +19,8 @@ function LoginForm() {
   return (
     <div className="center">
       <div className="card">
-        <h1>{portal ? "Partner sign in" : "Sign in"}</h1>
+        <AuthBrand subtitle={portal ? "Partner portal" : "Merchant workspace"} />
+        <h1>{portal ? "Welcome back" : "Sign in"}</h1>
         <p className="muted">{portal ? "Access your links, earnings and payouts." : "Manage your affiliate program."}</p>
         <Alert kind="error">{error}</Alert>
         <form
@@ -41,7 +43,7 @@ function LoginForm() {
           </button>
         </form>
         {!portal ? (
-          <p className="muted" style={{ marginTop: 16 }}>
+          <p className="footnote">
             New business? <Link href="/signup">Create your workspace</Link>
           </p>
         ) : null}

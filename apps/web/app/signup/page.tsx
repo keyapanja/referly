@@ -7,6 +7,7 @@ import { api, setToken } from "@/lib/api";
 import { useAction } from "@/lib/hooks";
 import { Alert, CopyBox, Field } from "@/components/ui";
 import { toMinor } from "@/lib/format";
+import { AuthBrand } from "@/components/shell";
 
 const STEPS = ["Account", "Business", "First offer", "Program", "Invite"] as const;
 const OFFER_TYPES = ["coaching", "course", "workshop", "event", "membership", "consulting", "custom"];
@@ -92,6 +93,7 @@ export default function SignupPage() {
   return (
     <div className="center wide">
       <div className="card">
+        <AuthBrand subtitle="Self-serve setup" />
         <h1>Launch your affiliate program</h1>
         <p className="muted">About five minutes. You can change everything later.</p>
         <div className="steps">
@@ -227,7 +229,7 @@ export default function SignupPage() {
               )}
             </>
           )}
-          <div className="actions" style={{ marginTop: 8 }}>
+          <div className="actions" style={{ marginTop: 4 }}>
             {step > 0 && step < 2 ? (
               <button type="button" onClick={() => setStep(step - 1)}>
                 Back
@@ -254,7 +256,7 @@ export default function SignupPage() {
           </div>
         </form>
         {step === 0 ? (
-          <p className="muted" style={{ marginTop: 16 }}>
+          <p className="footnote">
             Already have a workspace? <Link href="/login">Sign in</Link>
           </p>
         ) : null}

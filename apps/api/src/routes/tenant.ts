@@ -16,8 +16,14 @@ export function tenantRoutes() {
 
   r.get("/me", async (c) => {
     const p = c.get("principal");
-    const tenant = await tenants.getTenant(c.get("deps").db, c.get("ctx"));
-    return c.json({ principal: p, tenant: { id: tenant.id, name: tenant.name, slug: tenant.slug, currency: tenant.currency, timezone: tenant.timezone } });
+    const { db } = c.get("deps");
+    const tenant = await tenants.getTenant(db, c.get("ctx"));
+    const user = p.kind === "user" ? await auth.resolveUserById(db, p.userId) : null;
+    return c.json({
+      principal: p,
+      user: user ? publicUser(user) : null,
+      tenant: { id: tenant.id, name: tenant.name, slug: tenant.slug, currency: tenant.currency, timezone: tenant.timezone },
+    });
   });
 
   r.get("/team", async (c) => c.json({ users: (await tenants.listTeam(c.get("deps").db, c.get("ctx"))).map(publicUser) }));

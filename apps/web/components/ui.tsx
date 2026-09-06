@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
+import { Icon } from "./icons";
 
 export function Badge({ value }: { value: string | null | undefined }) {
   if (!value) return null;
@@ -62,6 +63,7 @@ export function CopyBox({ value }: { value: string }) {
           }
         }}
       >
+        <Icon name={copied ? "check" : "copy"} width={13} height={13} />
         {copied ? "Copied" : "Copy"}
       </button>
     </span>
