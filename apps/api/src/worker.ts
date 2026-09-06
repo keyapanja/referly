@@ -1,6 +1,8 @@
 import { eq } from "drizzle-orm";
-import { affiliates as affiliatesTable, offers as offersTable, programs as programsTable, tenants as tenantsTable, type Db, type Job } from "@referly/core";
+import { schema, type Db, type Job } from "@referly/core";
 import { jobs, messaging, commissions, systemContext, events as eventsMod, tenants as tenantsSvc } from "@referly/core";
+
+const { affiliates: affiliatesTable, offers: offersTable, programs: programsTable, tenants: tenantsTable } = schema;
 
 /**
  * Background worker (PRD s21). Single process, DB-backed queue. Two job types in Phase 1:

@@ -1,4 +1,4 @@
-import { and, asc, eq, lte, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, lte, sql } from "drizzle-orm";
 import type { DbLike } from "../db/client";
 import { jobs, type Job } from "../db/schema";
 import { newId } from "../ids";
@@ -41,7 +41,7 @@ export async function claimNextJob(db: DbLike, now: Date = new Date(), types?: s
   const candidate = await db
     .select({ id: jobs.id })
     .from(jobs)
-    .where(and(eq(jobs.status, "queued"), lte(jobs.runAt, now), types?.length ? sql`${jobs.type} = any(${types})` : undefined))
+    .where(and(eq(jobs.status, "queued"), lte(jobs.runAt, now), types?.length ? inArray(jobs.type, types) : undefined))
     .orderBy(asc(jobs.runAt), asc(jobs.createdAt))
     .limit(1);
   const id = candidate[0]?.id;
