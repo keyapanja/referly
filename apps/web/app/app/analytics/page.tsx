@@ -1,11 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
-import { API_URL, getToken } from "@/lib/api";
+import { useEffect, useMemo, useState } from "react";
+import { API_URL, api, getToken } from "@/lib/api";
+import { useAction } from "@/lib/hooks";
+import { dateTime } from "@/lib/format";
 import { useApi } from "@/lib/hooks";
 import { money, percent } from "@/lib/format";
-import { Badge, Loading, PageHeader, Stat, Table } from "@/components/ui";
+import { Alert, Badge, Loading, PageHeader, Stat, Table } from "@/components/ui";
 
 export default function AnalyticsPage() {
   const [days, setDays] = useState(30);
@@ -19,14 +21,24 @@ export default function AnalyticsPage() {
   const { data: byProgram } = useApi<any>(`/v1/analytics/programs${q}`);
   const { data: bySource } = useApi<any>(`/v1/analytics/sources${q}`);
   const cur = me?.tenant?.currency ?? "USD";
+  const { data: exportsData, reload: reloadExports } = useApi<any>("/v1/analytics/exports");
+  const { busy, error: exportError, run } = useAction();
+  const [exportEntity, setExportEntity] = useState("conversions");
+  const pending = exportsData?.exports?.some((e: any) => e.status === "queued" || e.status === "running");
+  useEffect(() => {
+    if (!pending) return;
+    const t = setInterval(reloadExports, 2500);
+    return () => clearInterval(t);
+  }, [pending, reloadExports]);
 
-  async function download(entity: string) {
-    const res = await fetch(`${API_URL}/v1/analytics/export/${entity}`, { headers: { authorization: `Bearer ${getToken()}` } });
+  async function download(exp: any) {
+    const res = await fetch(`${API_URL}/v1/analytics/exports/${exp.id}/download`, { headers: { authorization: `Bearer ${getToken()}` } });
+    if (!res.ok) return;
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `${entity}.csv`;
+    a.download = `${exp.entity}-${String(exp.createdAt).slice(0, 10)}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   }
@@ -44,20 +56,43 @@ export default function AnalyticsPage() {
               <option value={90}>Last 90 days</option>
               <option value={365}>Last year</option>
             </select>
-            {["affiliates", "conversions", "commissions", "payouts"].map((e) => (
-              <button key={e} className="sm" onClick={() => download(e)}>
-                Export {e}
-              </button>
-            ))}
+            <select value={exportEntity} onChange={(e) => setExportEntity(e.target.value)} aria-label="Data to export">
+              {(exportsData?.entities ?? ["affiliates", "conversions", "commissions", "payouts"]).map((e: string) => (
+                <option key={e} value={e}>
+                  {e}
+                </option>
+              ))}
+            </select>
+            <button disabled={busy} onClick={() => run(() => api("/v1/analytics/exports", { method: "POST", json: { entity: exportEntity } }), "Export started.").then(reloadExports)}>
+              Export CSV
+            </button>
           </>
         }
       />
+      <Alert kind="error">{exportError}</Alert>
       <div className="grid cols-4" style={{ marginBottom: 16 }}>
         <Stat label="Total revenue" value={money(overview.revenueMinor, cur)} hint={`${overview.conversions} conversions`} />
         <Stat label="Affiliate-attributed" value={money(overview.attributedRevenueMinor, cur)} hint={`${overview.attributedConversions} conversions`} />
         <Stat label="Clicks" value={overview.clicks} hint={`${percent(overview.conversionRate)} conversion rate`} />
         <Stat label="Commission cost" value={money((overview.commissionByStatus.pending?.totalMinor ?? 0) + (overview.commissionByStatus.approved?.totalMinor ?? 0) + (overview.commissionByStatus.payable?.totalMinor ?? 0) + (overview.commissionByStatus.paid?.totalMinor ?? 0), cur)} />
       </div>
+      {exportsData?.exports?.length ? (
+        <div className="card">
+          <h2>Exports</h2>
+          <p className="muted">Exports are built in the background and stay downloadable for 7 days.</p>
+          <Table
+            rows={exportsData.exports}
+            keyOf={(e: any) => e.id}
+            columns={[
+              { header: "Requested", cell: (e: any) => dateTime(e.createdAt) },
+              { header: "Data", cell: (e: any) => e.entity },
+              { header: "Status", cell: (e: any) => <><Badge value={e.status} /> {e.error ? <span className="muted">{e.error}</span> : null}</> },
+              { header: "Rows", cell: (e: any) => e.rowCount ?? "—", num: true },
+              { header: "", cell: (e: any) => (e.status === "done" ? <button className="sm" onClick={() => download(e)}>Download</button> : null) },
+            ]}
+          />
+        </div>
+      ) : null}
       <div className="card">
         <h2>Affiliates</h2>
         <Table

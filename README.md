@@ -69,6 +69,7 @@ Docker images for the API and web app, a `docker-compose.yml` with Postgres, and
 | Affiliates | `GET/POST /v1/affiliates`, `POST /invites`, `/:id/approve|reject|suspend|reactivate`, `/:id/coupons`, `/:id/programs/:programId/override` |
 | Conversions | `POST /v1/conversions` (webhook/API/manual, idempotent), `GET /:id` (timeline), `POST /:id/refund|cancel|approve|dispute|reattribute` |
 | Commissions | `GET /v1/commissions`, `POST /:id/approve|reverse`, `POST /adjustments`, `POST /settle` |
+| Exports | `POST /v1/analytics/exports` (async CSV: affiliates, conversions, commissions, payouts, ledger, clicks), `GET /v1/analytics/exports`, `GET /:id`, `GET /:id/download` |
 | Payouts | `GET/POST /v1/payouts`, `GET /payable/:affiliateId`, `POST /batch-all`, `POST /external`, `POST /:id/processing|paid|failed|cancel` |
 | Public | `GET /r/:token` (click redirect), `GET/POST /join/:token[/apply]`, `GET/POST /invite/:token[/accept]` |
 | Portal | `GET /portal/me|home|offers|links|codes|assets|conversions|commissions|earnings|payouts`, `POST /portal/links`, `PATCH /portal/profile`, `PUT /portal/payout-profile` |

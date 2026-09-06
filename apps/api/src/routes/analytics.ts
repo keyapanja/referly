@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { analytics, conversions, commissions, affiliates, payouts } from "@referly/core";
+import { analytics, conversions, commissions, affiliates, payouts, exportsSvc, validation } from "@referly/core";
 import { requireMerchantPrincipal, type AppEnv } from "../lib/auth";
 
 function period(c: { req: { query: (k: string) => string | undefined } }, now: Date) {
@@ -20,7 +20,22 @@ export function analyticsRoutes() {
   r.get("/programs", async (c) => c.json({ rows: await analytics.byProgram(c.get("deps").db, c.get("ctx"), period(c, c.get("now")())) }));
   r.get("/sources", async (c) => c.json({ rows: await analytics.bySource(c.get("deps").db, c.get("ctx"), period(c, c.get("now")())) }));
 
-  /** AN-07: CSV export. Small datasets stream inline; large ones belong on the job queue (Phase 2). */
+  /** AN-07: async exports. Request → job builds the file → download while it is valid. */
+  r.post("/exports", async (c) => c.json({ export: await exportsSvc.requestExport(c.get("deps").db, c.get("ctx"), await c.req.json()) }, 202));
+  r.get("/exports", async (c) => c.json({ exports: await exportsSvc.listExports(c.get("deps").db, c.get("ctx")), entities: exportsSvc.EXPORT_ENTITIES }));
+  r.get("/exports/:id", async (c) => c.json({ export: await exportsSvc.getExport(c.get("deps").db, c.get("ctx"), c.req.param("id")) }));
+  r.get("/exports/:id/download", async (c) => {
+    const record = await exportsSvc.getExport(c.get("deps").db, c.get("ctx"), c.req.param("id"));
+    if (record.status !== "done" || !record.storageKey) throw validation(`export is ${record.status}`);
+    if (record.expiresAt && record.expiresAt.getTime() < c.get("now")().getTime()) throw validation("export has expired; request a new one");
+    const file = await c.get("deps").storage.get(record.storageKey);
+    if (!file) throw validation("export file is no longer available");
+    return new Response(file.data as unknown as BodyInit, {
+      headers: { "content-type": "text/csv; charset=utf-8", "content-disposition": `attachment; filename="${record.entity}-${record.createdAt.toISOString().slice(0, 10)}.csv"`, "cache-control": "private, no-store" },
+    });
+  });
+
+  /** Synchronous export for small datasets (capped); the async endpoints above handle the rest. */
   r.get("/export/:entity", async (c) => {
     const { db } = c.get("deps");
     const ctx = c.get("ctx");
@@ -42,20 +57,10 @@ export function analyticsRoutes() {
       default:
         return c.json({ error: { code: "not_found", message: "unknown export" } }, 404);
     }
-    const csv = toCsv(rows);
+    const csv = exportsSvc.toCsv(rows.map((r) => Object.fromEntries(Object.entries(r).filter(([k]) => !["passwordHash", "customerEmailHash", "applicationAnswers", "candidates", "calculationBasis", "metadata", "payoutProfileRef", "tenantId", "seq"].includes(k)).map(([k, v]) => [k, v instanceof Date ? v.toISOString() : v !== null && typeof v === "object" ? JSON.stringify(v) : v]))));
     c.header("content-type", "text/csv; charset=utf-8");
     c.header("content-disposition", `attachment; filename="${entity}.csv"`);
     return c.body(csv);
   });
   return r;
-}
-
-function toCsv(rows: Record<string, unknown>[]): string {
-  if (!rows.length) return "";
-  const cols = Object.keys(rows[0]!).filter((k) => !["passwordHash", "customerEmailHash", "applicationAnswers", "candidates", "calculationBasis", "metadata"].includes(k));
-  const esc = (v: unknown) => {
-    const s = v == null ? "" : v instanceof Date ? v.toISOString() : typeof v === "object" ? JSON.stringify(v) : String(v);
-    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-  };
-  return [cols.join(","), ...rows.map((r) => cols.map((k) => esc(r[k])).join(","))].join("\n");
 }

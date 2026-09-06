@@ -22,6 +22,13 @@
       "when": 1788709172477,
       "tag": "0002_asset_storage",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1788709992240,
+      "tag": "0003_exports",
+      "breakpoints": true
     }
   ]
 }

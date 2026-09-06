@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import { schema, type Db, type Job } from "@referly/core";
-import { jobs, messaging, commissions, systemContext, events as eventsMod, tenants as tenantsSvc } from "@referly/core";
+import { jobs, messaging, commissions, systemContext, events as eventsMod, tenants as tenantsSvc, exportsSvc } from "@referly/core";
+import { PRIVATE_PREFIX, type FileStorage } from "./storage";
 
 const { affiliates: affiliatesTable, offers: offersTable, programs: programsTable, tenants: tenantsTable } = schema;
 
@@ -13,6 +14,7 @@ const { affiliates: affiliatesTable, offers: offersTable, programs: programsTabl
 export interface WorkerDeps {
   db: Db;
   email: messaging.EmailProvider;
+  storage: FileStorage;
   webUrl: string;
   now?: () => Date;
 }
@@ -73,6 +75,36 @@ export function createHandlers(deps: WorkerDeps): Record<string, jobs.JobHandler
           reason: (event.data.reason as string | undefined) ?? "",
         },
       });
+    },
+
+    /** AN-07: build a CSV page by page and store it privately; the API streams it back to authorised users. */
+    export_csv: async (job: Job) => {
+      const { exportId, tenantId } = job.payload as { exportId: string; tenantId: string };
+      const ctx = systemContext(tenantId, now);
+      const record = await exportsSvc.getExport(deps.db, ctx, exportId);
+      await exportsSvc.markExportRunning(deps.db, ctx, exportId);
+      try {
+        const chunks: string[] = [];
+        let columns: string[] | null = null;
+        let rowCount = 0;
+        for await (const page of exportsSvc.iterateExportRows(deps.db, ctx, record.entity as exportsSvc.ExportEntity)) {
+          if (!columns) {
+            columns = Object.keys(page[0]!);
+            chunks.push(exportsSvc.toCsv(page, columns));
+          } else {
+            chunks.push(exportsSvc.toCsv(page, columns).split("\n").slice(1).join("\n"));
+          }
+          rowCount += page.length;
+        }
+        const csv = chunks.join("") || `${record.entity}\n`;
+        const data = new TextEncoder().encode(csv);
+        const key = `${PRIVATE_PREFIX}tenants/${tenantId}/exports/${exportId}.csv`;
+        await deps.storage.put(key, data, "text/csv; charset=utf-8", { private: true });
+        await exportsSvc.markExportDone(deps.db, ctx, exportId, { storageKey: key, rowCount, sizeBytes: data.byteLength });
+      } catch (err) {
+        await exportsSvc.markExportFailed(deps.db, ctx, exportId, err instanceof Error ? err.message : String(err));
+        throw err;
+      }
     },
 
     settle_holding_periods: async () => {

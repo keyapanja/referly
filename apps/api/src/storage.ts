@@ -18,11 +18,18 @@ export interface StoredFile {
   sizeBytes: number;
 }
 
-export interface FileStorage {
-  put(key: string, data: Uint8Array, contentType: string): Promise<StoredFile>;
-  /** Only meaningful for local storage, which the API serves itself. */
-  get?(key: string): Promise<{ data: Uint8Array; contentType: string } | null>;
+export interface PutOptions {
+  /** Not publicly readable; only reachable through an authenticated API endpoint. */
+  private?: boolean;
 }
+
+export interface FileStorage {
+  put(key: string, data: Uint8Array, contentType: string, opts?: PutOptions): Promise<StoredFile>;
+  get(key: string): Promise<{ data: Uint8Array; contentType: string } | null>;
+}
+
+/** Keys under this prefix are never served by the public /files route. */
+export const PRIVATE_PREFIX = "private/";
 
 export const ALLOWED_UPLOAD_TYPES: Record<string, string> = {
   "image/png": "png",
@@ -66,7 +73,7 @@ export class LocalStorage implements FileStorage {
     return full;
   }
 
-  async put(key: string, data: Uint8Array, contentType: string): Promise<StoredFile> {
+  async put(key: string, data: Uint8Array, contentType: string, _opts?: PutOptions): Promise<StoredFile> {
     const full = this.resolve(key);
     await mkdir(path.dirname(full), { recursive: true });
     await writeFile(full, data);
@@ -113,11 +120,33 @@ export class S3Storage implements FileStorage {
     return this.client;
   }
 
-  async put(key: string, data: Uint8Array, contentType: string): Promise<StoredFile> {
+  async put(key: string, data: Uint8Array, contentType: string, opts?: PutOptions): Promise<StoredFile> {
     const { PutObjectCommand } = await import("@aws-sdk/client-s3");
     const client = await this.s3();
-    await client.send(new PutObjectCommand({ Bucket: this.opts.bucket, Key: key, Body: data, ContentType: contentType, ACL: "public-read", CacheControl: "public, max-age=31536000, immutable" }));
-    return { key, url: `${this.opts.publicUrl.replace(/\/$/, "")}/${key}`, contentType, sizeBytes: data.byteLength };
+    const isPrivate = opts?.private ?? key.startsWith(PRIVATE_PREFIX);
+    await client.send(
+      new PutObjectCommand({
+        Bucket: this.opts.bucket,
+        Key: key,
+        Body: data,
+        ContentType: contentType,
+        ...(isPrivate ? {} : { ACL: "public-read", CacheControl: "public, max-age=31536000, immutable" }),
+      }),
+    );
+    return { key, url: isPrivate ? "" : `${this.opts.publicUrl.replace(/\/$/, "")}/${key}`, contentType, sizeBytes: data.byteLength };
+  }
+
+  async get(key: string) {
+    const { GetObjectCommand } = await import("@aws-sdk/client-s3");
+    const client = await this.s3();
+    try {
+      const res = await client.send(new GetObjectCommand({ Bucket: this.opts.bucket, Key: key }));
+      const data = await res.Body!.transformToByteArray();
+      return { data, contentType: res.ContentType ?? "application/octet-stream" };
+    } catch (err) {
+      if ((err as { name?: string }).name === "NoSuchKey") return null;
+      throw err;
+    }
   }
 }
 

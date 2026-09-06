@@ -645,6 +645,25 @@ export const jobs = pgTable(
   (t) => [index("jobs_status_run_at_idx").on(t.status, t.runAt)],
 );
 
+export const exports = pgTable(
+  "exports",
+  {
+    id: id(),
+    tenantId: tenantRef(),
+    entity: text("entity").notNull(),
+    status: text("status").notNull().default("queued"), // queued | running | done | failed
+    rowCount: integer("row_count"),
+    sizeBytes: integer("size_bytes"),
+    storageKey: text("storage_key"),
+    error: text("error"),
+    requestedByUserId: text("requested_by_user_id").references(() => users.id),
+    createdAt: createdAt(),
+    completedAt: ts("completed_at"),
+    expiresAt: ts("expires_at"),
+  },
+  (t) => [index("exports_tenant_idx").on(t.tenantId, t.createdAt)],
+);
+
 export const webhookDeliveries = pgTable(
   "webhook_deliveries",
   {
@@ -692,6 +711,7 @@ export const schema = {
   automationRuns,
   auditLogs,
   jobs,
+  exports,
   webhookDeliveries,
 };
 
@@ -714,6 +734,7 @@ export type Payout = typeof payouts.$inferSelect;
 export type Asset = typeof assets.$inferSelect;
 export type AssetPermission = typeof assetPermissions.$inferSelect;
 export type AuthToken = typeof authTokens.$inferSelect;
+export type Export = typeof exports.$inferSelect;
 export type MessageTemplate = typeof messageTemplates.$inferSelect;
 export type MessageLog = typeof messageLogs.$inferSelect;
 export type AuditLog = typeof auditLogs.$inferSelect;

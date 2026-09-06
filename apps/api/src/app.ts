@@ -20,7 +20,7 @@ import { messageRoutes } from "./routes/messages";
 import { analyticsRoutes } from "./routes/analytics";
 import { assetRoutes } from "./routes/assets";
 import { rateLimit } from "./lib/ratelimit";
-import type { FileStorage } from "./storage";
+import { PRIVATE_PREFIX, type FileStorage } from "./storage";
 
 export interface AppConfig {
   /** Base URL of this API, used to build tracking/join links. */
@@ -70,8 +70,8 @@ export function createApp(deps: AppDeps) {
 
   // Uploaded files (local storage only; S3 serves its own objects). Keys are unguessable and tenant-scoped.
   app.get("/files/*", async (c) => {
-    if (!deps.storage.get) return c.notFound();
     const key = c.req.path.slice("/files/".length);
+    if (key.startsWith(PRIVATE_PREFIX)) return c.notFound();
     const file = await deps.storage.get(key);
     if (!file) return c.notFound();
     return new Response(file.data as unknown as BodyInit, {

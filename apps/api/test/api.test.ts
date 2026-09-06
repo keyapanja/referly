@@ -85,7 +85,7 @@ describe("MVP acceptance over HTTP", () => {
     expect(invite.status).toBe(201);
     const acceptToken = invite.body.invite.token;
 
-    await runOnce({ db: handle.db, email, webUrl: "http://web.test", now });
+    await runOnce({ db: handle.db, email, storage, webUrl: "http://web.test", now });
     const inviteMail = email.sent.find((m) => m.to === "sam@partner.io");
     expect(inviteMail?.subject).toBe("You're invited to join Alumni Partners");
     expect(inviteMail?.body).toContain(`http://web.test/invite/${acceptToken}`);
@@ -162,7 +162,7 @@ describe("MVP acceptance over HTTP", () => {
     expect(portal.body.balances.pendingMinor).toBe(500_000);
     expect(portal.body.metrics).toMatchObject({ clicks: 1, conversions: 1, revenueMinor: 2_500_000, conversionRate: 1 });
 
-    await runOnce({ db: handle.db, email, webUrl: "http://web.test", now });
+    await runOnce({ db: handle.db, email, storage, webUrl: "http://web.test", now });
     expect(email.sent.find((m) => m.to === "sam@partner.io" && m.subject === "New sale attributed to you")?.body).toContain("25000.00 INR");
   });
 
@@ -174,7 +174,7 @@ describe("MVP acceptance over HTTP", () => {
     expect(refund.status).toBe(200);
     expect(refund.body.conversion.status).toBe("refunded");
     expect(refund.body.commission.status).toBe("reversed");
-    await runOnce({ db: handle.db, email, webUrl: "http://web.test", now });
+    await runOnce({ db: handle.db, email, storage, webUrl: "http://web.test", now });
     expect(email.sent.some((m) => m.subject === "Commission adjusted" && m.body.includes("customer cancelled week 2"))).toBe(true);
   });
 
@@ -202,7 +202,7 @@ describe("MVP acceptance over HTTP", () => {
     const earnings = await call("/portal/earnings", { token: affiliateToken });
     expect(earnings.body.balances).toMatchObject({ availableMinor: 0, paidMinor: 500_000 });
 
-    await runOnce({ db: handle.db, email, webUrl: "http://web.test", now });
+    await runOnce({ db: handle.db, email, storage, webUrl: "http://web.test", now });
     expect(email.sent.some((m) => m.subject === "Payout sent" && m.body.includes("2026-04-10"))).toBe(true);
   });
 
@@ -217,7 +217,7 @@ describe("MVP acceptance over HTTP", () => {
     const csv = await call("/v1/analytics/export/conversions", { token: ownerToken });
     expect(csv.status).toBe(200);
     expect(csv.headers.get("content-type")).toContain("text/csv");
-    expect(String(csv.body).split("\n")).toHaveLength(3); // header + 2 rows
+    expect(String(csv.body).trim().split("\n")).toHaveLength(3); // header + 2 rows
   });
 
   it("Notifications: message log records delivery status for key events", async () => {
@@ -289,6 +289,37 @@ describe("MVP acceptance over HTTP", () => {
     expect((await call("/v1/assets", { token: affiliateToken })).status).toBe(403);
   });
 
+  it("Exports: async CSV export runs in the worker, is private, and downloads for the owner only", async () => {
+    const req = await call("/v1/analytics/exports", { method: "POST", token: ownerToken, json: { entity: "conversions" } });
+    expect(req.status).toBe(202);
+    expect(req.body.export.status).toBe("queued");
+    const id = req.body.export.id;
+    expect((await call(`/v1/analytics/exports/${id}/download`, { token: ownerToken })).status).toBe(400); // not ready
+
+    await runOnce({ db: handle.db, email, storage, webUrl: "http://web.test", now });
+    const done = await call(`/v1/analytics/exports/${id}`, { token: ownerToken });
+    expect(done.body.export).toMatchObject({ status: "done", rowCount: 2 });
+    expect(done.body.export.storageKey).toMatch(/^private\/tenants\//);
+    // private objects are not served publicly
+    expect((await app.request(BASE + "/files/" + done.body.export.storageKey)).status).toBe(404);
+
+    const dl = await call(`/v1/analytics/exports/${id}/download`, { token: ownerToken });
+    expect(dl.status).toBe(200);
+    expect(dl.headers.get("content-type")).toContain("text/csv");
+    const lines = String(dl.body).trim().split("\n");
+    expect(lines).toHaveLength(3);
+    expect(lines[0]).toContain("externalOrderId");
+    expect(lines[0]).not.toContain("customerEmailHash");
+    expect(lines.slice(1).join("\n")).toContain("ORDER-1001");
+
+    // other tenant, affiliate: no access; unknown entity rejected
+    const other = await call("/v1/auth/login", { method: "POST", json: { email: "ola@other.co", password: "supersecret1" } });
+    expect((await call(`/v1/analytics/exports/${id}`, { token: other.body.token })).status).toBe(404);
+    expect((await call(`/v1/analytics/exports/${id}/download`, { token: affiliateToken })).status).toBe(403);
+    expect((await call("/v1/analytics/exports", { method: "POST", token: ownerToken, json: { entity: "users" } })).status).toBe(400);
+    expect((await call("/v1/analytics/exports", { token: ownerToken })).body.exports.map((e: any) => e.id)).toContain(id);
+  });
+
   it("Assets: merchants can upload files; served with the right type; bad types and sizes rejected", async () => {
     const png = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 73, 72, 68, 82]);
     const form = new FormData();
@@ -332,7 +363,7 @@ describe("MVP acceptance over HTTP", () => {
     email.sent.length = 0;
     const signup = await call("/v1/auth/signup", { method: "POST", json: { name: "Verify Co", slug: "verify-co", owner: { name: "Vee", email: "vee@verify.co", password: "supersecret1" } } });
     expect(signup.body.user.emailVerified).toBe(false);
-    await runOnce({ db: handle.db, email, webUrl: "http://web.test", now });
+    await runOnce({ db: handle.db, email, storage, webUrl: "http://web.test", now });
     const mail = email.sent.find((m) => m.to === "vee@verify.co" && m.subject.startsWith("Verify your email"));
     const token = /verify-email\?token=([A-Za-z0-9]+)/.exec(mail!.body)![1]!;
     expect((await call("/v1/auth/verify-email", { method: "POST", json: { token: "bogus-bogus-bogus" } })).status).toBe(400);
@@ -343,7 +374,7 @@ describe("MVP acceptance over HTTP", () => {
 
     expect((await call("/v1/auth/forgot-password", { method: "POST", json: { email: "nobody@verify.co" } })).status).toBe(200);
     await call("/v1/auth/forgot-password", { method: "POST", json: { email: "vee@verify.co" } });
-    await runOnce({ db: handle.db, email, webUrl: "http://web.test", now });
+    await runOnce({ db: handle.db, email, storage, webUrl: "http://web.test", now });
     const reset = email.sent.find((m) => m.to === "vee@verify.co" && m.subject === "Reset your password");
     const resetToken = /reset-password\?token=([A-Za-z0-9]+)/.exec(reset!.body)![1]!;
     expect((await call("/v1/auth/reset-password", { method: "POST", json: { token: resetToken, password: "brandnewpass1" } })).status).toBe(200);
