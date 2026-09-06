@@ -8,3 +8,5 @@ dist/
 coverage/
 next-env.d.ts
 .claude/*.local.json
+Affiliate_Growth_Platform_PRD.docx
+*.docx
