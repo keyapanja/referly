@@ -869,6 +869,33 @@ li {
   width: 100%;
   margin-top: 4px;
 }
+/* Merchant-branded public pages: accent variables are overridden inline. */
+.center.branded {
+  background: radial-gradient(70% 55% at 50% 0%, var(--accent-soft) 0%, var(--bg) 100%);
+}
+.center.branded .mark {
+  background: var(--accent);
+  color: var(--on-accent, #fff);
+}
+.center.branded button.primary,
+.center.branded .btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent, #fff);
+}
+.center.branded button.primary:hover,
+.center.branded .btn.primary:hover {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+.center.branded .stat .value {
+  color: var(--accent);
+}
+.center.branded .stat {
+  border-color: var(--accent-soft);
+  background: color-mix(in srgb, var(--accent-soft) 40%, #fff);
+}
+
 .footnote {
   margin-top: 20px;
   padding-top: 16px;

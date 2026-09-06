@@ -7,6 +7,7 @@ import { useAction, useApi } from "@/lib/hooks";
 import { money } from "@/lib/format";
 import { Alert, Field, Loading } from "@/components/ui";
 import { AuthBrand } from "@/components/shell";
+import { brandStyle } from "@/lib/brand";
 
 /** Invitation acceptance (journey B). */
 export default function InvitePage() {
@@ -20,7 +21,7 @@ export default function InvitePage() {
   const expired = data.invite.status !== "sent" || new Date(data.invite.expiresAt) < new Date();
 
   return (
-    <div className="center" style={{ ["--primary" as string]: data.tenant.branding?.primaryColor ?? "#2f5bea" }}>
+    <div className="center branded" style={brandStyle(data.tenant.branding?.primaryColor)}>
       <div className="card">
         {data.tenant.logoUrl ? <img src={data.tenant.logoUrl} alt="" style={{ maxHeight: 48, marginBottom: 16 }} /> : <AuthBrand name={data.tenant.name} subtitle="Invitation" />}
         <h1>{data.tenant.name} invited you to {p.name}</h1>

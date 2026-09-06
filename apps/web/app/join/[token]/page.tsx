@@ -8,6 +8,7 @@ import { useAction, useApi } from "@/lib/hooks";
 import { money } from "@/lib/format";
 import { Alert, Field, Loading } from "@/components/ui";
 import { AuthBrand } from "@/components/shell";
+import { brandStyle } from "@/lib/brand";
 
 /** Branded application page (journey C). */
 export default function JoinPage() {
@@ -18,11 +19,10 @@ export default function JoinPage() {
   const [form, setForm] = useState({ name: "", email: "", password: "", website: "", audience: "", acceptTerms: false });
   const [done, setDone] = useState<any>(null);
   if (!data) return <Loading error={error ? "This application page is not available." : null} />;
-  const color = data.tenant.branding?.primaryColor ?? "#2f5bea";
   const p = data.program;
 
   return (
-    <div className="center wide" style={{ ["--primary" as string]: color }}>
+    <div className="center wide branded" style={brandStyle(data.tenant.branding?.primaryColor)}>
       <div className="card">
         {data.tenant.logoUrl ? <img src={data.tenant.logoUrl} alt="" style={{ maxHeight: 48, marginBottom: 16 }} /> : <AuthBrand name={data.tenant.name} subtitle="Partner program" />}
         <h1>Become a {data.tenant.name} partner</h1>
