@@ -6,6 +6,7 @@ import { newId, newToken } from "../ids";
 import { notFound, validation } from "../errors";
 import { type TenantContext, require as requirePerm } from "../context";
 import { writeAudit, snapshot } from "./audit";
+import { assertWithinLimit } from "./plans";
 import { emitEvent } from "./events";
 import { PROGRAM_TRANSITIONS, assertTransition, type ProgramStatus } from "../statemachine";
 import { percentToBps } from "../money";
@@ -44,6 +45,7 @@ export type CreateProgramInput = z.input<typeof createProgramSchema>;
 export async function createProgram(db: DbLike, ctx: TenantContext, rawInput: CreateProgramInput): Promise<Program> {
   requirePerm(ctx, "programs.write");
   const input = createProgramSchema.parse(rawInput);
+  await assertWithinLimit(db, ctx, "programs");
   const [row] = await db
     .insert(programs)
     .values({

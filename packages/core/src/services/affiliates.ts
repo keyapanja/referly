@@ -7,6 +7,7 @@ import { newId, newToken } from "../ids";
 import { conflict, notFound, validation } from "../errors";
 import { type TenantContext, require as requirePerm, requireAffiliate } from "../context";
 import { writeAudit, snapshot } from "./audit";
+import { assertWithinLimit } from "./plans";
 import { emitEvent } from "./events";
 import { AFFILIATE_TRANSITIONS, assertTransition, type AffiliateStatus } from "../statemachine";
 import { hashPassword } from "./auth";
@@ -326,6 +327,7 @@ export async function getMembership(db: DbLike, ctx: TenantContext, affiliateId:
 
 async function transition(db: DbLike, ctx: TenantContext, before: Affiliate, to: AffiliateStatus, reason?: string): Promise<Affiliate> {
   assertTransition("affiliate", AFFILIATE_TRANSITIONS, before.status as AffiliateStatus, to);
+  if (to === "active" && before.status !== "active") await assertWithinLimit(db, ctx, "activeAffiliates");
   const [after] = await db
     .update(affiliates)
     .set({ status: to, suspendedAt: to === "suspended" ? ctx.now() : null, updatedAt: ctx.now() })
@@ -357,6 +359,7 @@ async function findOrCreateAffiliate(db: DbLike, ctx: TenantContext, input: Find
     if (existing.status === "suspended") throw conflict("this affiliate account is suspended");
     return existing;
   }
+  if (input.initialStatus === "active") await assertWithinLimit(db, ctx, "activeAffiliates");
 
   let userId: string | null = null;
   if (input.password) {

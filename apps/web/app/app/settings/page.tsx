@@ -10,6 +10,7 @@ export default function SettingsPage() {
   const { data, error, reload } = useApi<any>("/v1/tenant");
   const { data: team, reload: reloadTeam } = useApi<any>("/v1/tenant/team");
   const { data: audit } = useApi<any>("/v1/tenant/audit?limit=30");
+  const { data: billing } = useApi<any>("/v1/tenant/billing");
   const { busy, error: actionError, success, run } = useAction();
   const [form, setForm] = useState<any>(null);
   const [member, setMember] = useState({ name: "", email: "", password: "", role: "admin" });
@@ -31,6 +32,48 @@ export default function SettingsPage() {
       <Alert kind="error">{error ?? actionError}</Alert>
       <Alert kind="success">{success}</Alert>
       <div className="grid cols-2">
+        <div className="card">
+          <h2>Plan and usage</h2>
+          {billing ? (
+            <>
+              <p className="muted">
+                <strong style={{ color: "var(--text)" }}>{billing.plan.name}</strong> · {billing.plan.description}
+              </p>
+              {(["activeAffiliates", "programs", "teamMembers", "monthlyConversions"] as const).map((key) => {
+                const limit = billing.limits[key];
+                const used = billing.usage[key];
+                const pct = limit ? Math.min(100, Math.round((used / limit) * 100)) : 0;
+                const label = { activeAffiliates: "Active affiliates", programs: "Programs", teamMembers: "Team members", monthlyConversions: "Tracked conversions this month" }[key];
+                return (
+                  <div key={key} className="usage">
+                    <div className="usage-row">
+                      <span>{label}</span>
+                      <span className="muted">
+                        {used} / {limit ?? "unlimited"}
+                      </span>
+                    </div>
+                    <div className="bar">
+                      <div className={`fill ${pct >= 100 ? "over" : pct >= 90 ? "near" : ""}`} style={{ width: `${limit ? pct : 5}%` }} />
+                    </div>
+                  </div>
+                );
+              })}
+              <p className="help" style={{ marginTop: 12 }}>
+                Affiliates, programs and team members are hard limits. Tracked conversions are never rejected; going over is flagged here and on Home.
+                {billing.supportEmail ? (
+                  <>
+                    {" "}
+                    To change your plan, email <a href={`mailto:${billing.supportEmail}`}>{billing.supportEmail}</a>.
+                  </>
+                ) : (
+                  " To change your plan, contact your platform administrator."
+                )}
+              </p>
+            </>
+          ) : (
+            <div className="empty">Loading…</div>
+          )}
+        </div>
         <div className="card">
           <h2>Business and branding</h2>
           <form

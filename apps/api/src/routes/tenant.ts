@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { z } from "zod";
-import { tenants, auth, audit, account, MERCHANT_ROLES } from "@referly/core";
+import { tenants, auth, audit, account, plans, MERCHANT_ROLES } from "@referly/core";
 import { requireMerchantPrincipal, type AppEnv } from "../lib/auth";
 import { publicUser } from "./auth";
 
@@ -32,6 +32,12 @@ export function tenantRoutes() {
     const user = await auth.resolveUserById(c.get("deps").db, p.userId);
     if (user) await account.requestEmailVerification(c.get("deps").db, c.get("ctx"), user);
     return c.json({ ok: true });
+  });
+
+  /** PRD s19: plan, usage against limits, and warnings. */
+  r.get("/billing", async (c) => {
+    const summary = await plans.getBillingSummary(c.get("deps").db, c.get("ctx"));
+    return c.json({ ...summary, supportEmail: c.get("deps").config.supportEmail ?? null, plans: Object.values(plans.PLANS).map((p) => ({ id: p.id, name: p.name, description: p.description, limits: p.limits, features: p.features })) });
   });
 
   r.get("/team", async (c) => c.json({ users: (await tenants.listTeam(c.get("deps").db, c.get("ctx"))).map(publicUser) }));

@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { createDb, messaging, type DbHandle } from "@referly/core";
+import { createDb, messaging, platform, withRlsBypass, type DbHandle } from "@referly/core";
 import { createApp, type App } from "../src/app";
 import { runOnce } from "../src/worker";
 import { resetRateLimits } from "../src/lib/ratelimit";
@@ -396,6 +396,65 @@ describe("MVP acceptance over HTTP", () => {
     expect(blocked.status).toBe(429);
     expect(blocked.headers.get("retry-after")).toBeTruthy();
     expect((await blocked.json()).error.code).toBe("rate_limited");
+  });
+
+  it("Billing: merchants see plan and usage; hard limits return 402 plan_limit", async () => {
+    const billing = await call("/v1/tenant/billing", { token: ownerToken });
+    expect(billing.status).toBe(200);
+    expect(billing.body.plan.id).toBe("starter");
+    expect(billing.body.usage.activeAffiliates).toBeGreaterThanOrEqual(1);
+    expect(billing.body.limits.activeAffiliates).toBe(25);
+    expect(billing.body.plans.map((p: any) => p.id)).toEqual(["starter", "growth", "pro", "enterprise"]);
+    expect((await call("/v1/tenant/billing", { token: affiliateToken })).status).toBe(403);
+  });
+
+  it("Platform admin: bootstrap, cross-tenant listing, plan and limit changes, suspension", async () => {
+    const admin = await withRlsBypass(handle.db, (tx) => platform.ensurePlatformAdmin(tx, { email: "root@platform.test", password: "rootpass123" }, now()));
+    expect(admin.role).toBe("platform_admin");
+    // merchants cannot reach admin routes
+    expect((await call("/admin/overview", { token: ownerToken })).status).toBe(403);
+
+    const login = await call("/v1/auth/login", { method: "POST", json: { email: "root@platform.test", password: "rootpass123" } });
+    expect(login.status).toBe(200);
+    expect(login.body.user.role).toBe("platform_admin");
+    const adminToken = login.body.token;
+
+    const overview = await call("/admin/overview", { token: adminToken });
+    expect(overview.status).toBe(200);
+    expect(overview.body.tenants.total).toBeGreaterThanOrEqual(2);
+
+    const list = await call("/admin/tenants?q=coach", { token: adminToken });
+    const coach = list.body.tenants.find((t: any) => t.tenant.slug === "coach-co");
+    expect(coach).toBeTruthy();
+    const used: number = coach.activeAffiliates;
+    expect(used).toBe((await call("/v1/tenant/billing", { token: ownerToken })).body.usage.activeAffiliates);
+    expect(coach.owners[0].email).toBe("priya@coach.co");
+    const tenantId = coach.tenant.id;
+
+    // tighten the affiliate limit to what is already used: the next activation is refused with 402
+    const patched = await call(`/admin/tenants/${tenantId}`, { method: "PATCH", token: adminToken, json: { planId: "growth", planLimits: { activeAffiliates: used }, reason: "test" } });
+    expect(patched.status).toBe(200);
+    expect(patched.body.tenant.planId).toBe("growth");
+    const detail = await call(`/admin/tenants/${tenantId}`, { token: adminToken });
+    expect(detail.body.limits).toMatchObject({ activeAffiliates: used, programs: 5 });
+    const invite = await call("/v1/affiliates/invites", { method: "POST", token: ownerToken, json: { programId, email: "extra@partner.io", name: "Extra" } });
+    const blocked = await call(`/invite/${invite.body.invite.token}/accept`, { method: "POST", json: { name: "Extra Partner", password: "partnerpass1", acceptTerms: true } });
+    expect(blocked.status).toBe(402);
+    expect(blocked.body.error.code).toBe("plan_limit");
+    expect((await call("/v1/tenant/billing", { token: ownerToken })).body.warnings[0]).toMatchObject({ key: "activeAffiliates", level: "reached" });
+    await call(`/admin/tenants/${tenantId}`, { method: "PATCH", token: adminToken, json: { planLimits: null } });
+
+    // suspension locks the workspace out of the API and out of sign-in; reactivation restores it
+    await call(`/admin/tenants/${tenantId}`, { method: "PATCH", token: adminToken, json: { status: "suspended", reason: "unpaid" } });
+    expect((await call("/v1/offers", { token: ownerToken })).status).toBe(403);
+    expect((await call("/v1/auth/login", { method: "POST", json: { email: "priya@coach.co", password: "supersecret1" } })).status).toBe(401);
+    await call(`/admin/tenants/${tenantId}`, { method: "PATCH", token: adminToken, json: { status: "active" } });
+    expect((await call("/v1/offers", { token: ownerToken })).status).toBe(200);
+
+    // audit trail carries the admin's change
+    const audit = await call("/v1/tenant/audit?limit=5", { token: ownerToken });
+    expect(audit.body.entries.some((e: any) => e.action === "admin_update" && e.reason === "unpaid")).toBe(true);
+    expect((await call("/admin/jobs", { token: adminToken })).status).toBe(200);
   });
 
   it("Validation and permissions errors are JSON with codes", async () => {

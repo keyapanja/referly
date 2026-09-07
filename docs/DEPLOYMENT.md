@@ -49,6 +49,8 @@ api.yourdomain.com {
 | `RESEND_API_KEY` | api | With `resend`. |
 | `SMTP_URL` | api | With `smtp`, e.g. `smtp://user:pass@host:587`. |
 | `NEXT_PUBLIC_API_URL` | web (build) | API origin the browser calls. Equal to `BASE_URL`. |
+| `PLATFORM_ADMIN_EMAIL`, `PLATFORM_ADMIN_PASSWORD`, `PLATFORM_ADMIN_NAME` | api | Creates the platform admin account on boot if it does not exist (idempotent). Sign in at `WEB_URL/login`; admins land on `/admin`. |
+| `PLATFORM_SUPPORT_EMAIL` | api | Shown to merchants on the Plan and usage card for plan changes. |
 | `STORAGE_PROVIDER` | api | `local` (default; files under `FILES_DIR`, served at `BASE_URL/files/...`) or `s3`. |
 | `FILES_DIR` | api | Local storage directory. The Docker image uses `/app/data/files`; mount `/app/data`. |
 | `S3_BUCKET`, `S3_REGION`, `S3_ENDPOINT`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_PUBLIC_URL`, `S3_FORCE_PATH_STYLE` | api | With `s3`. Works with AWS S3, Cloudflare R2, MinIO, DigitalOcean Spaces. Objects are written public-read; `S3_PUBLIC_URL` is the origin (or CDN) they are served from. |
@@ -66,6 +68,12 @@ cd packages/core && npx drizzle-kit generate --name <change>
 ```
 
 Commit the generated SQL. Never edit an applied migration.
+
+## Platform admin and plans
+
+For local development the API also reads `apps/api/.env` (ignored by git) at startup, so you can keep the admin credentials there.
+
+Set `PLATFORM_ADMIN_EMAIL` and `PLATFORM_ADMIN_PASSWORD` before the first boot. The admin area at `/admin` lists tenants with usage, lets you change a tenant's plan (`starter`, `growth`, `pro`, `enterprise`), set custom limits, suspend or reactivate a workspace, and retry dead jobs. Plan limits live in `packages/core/src/services/plans.ts`; no prices are in code.
 
 ## First run
 

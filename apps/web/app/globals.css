@@ -823,6 +823,36 @@ li {
   margin: 3px 0;
 }
 
+/* Usage bars ----------------------------------------------------------- */
+.usage {
+  margin: 10px 0;
+}
+.usage-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+  margin-bottom: 4px;
+}
+.bar {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+.bar .fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 999px;
+  transition: width 0.3s ease;
+}
+.bar .fill.near {
+  background: var(--warning);
+}
+.bar .fill.over {
+  background: var(--danger);
+}
+
 /* Auth and public pages --------------------------------------------- */
 .center {
   min-height: 100vh;

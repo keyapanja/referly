@@ -10,6 +10,7 @@ import { type TenantContext, require as requirePerm, tenantContext, MERCHANT_ROL
 import { writeAudit, snapshot } from "./audit";
 import { seedDefaultTemplates } from "./messaging";
 import { requestEmailVerification } from "./account";
+import { assertWithinLimit } from "./plans";
 
 export const createTenantSchema = z.object({
   name: z.string().min(1).max(120),
@@ -149,6 +150,7 @@ export async function addTeamMember(db: DbLike, ctx: TenantContext, rawInput: z.
   const email = input.email.trim().toLowerCase();
   const existing = await db.query.users.findFirst({ where: and(eq(users.tenantId, ctx.tenantId), eq(users.email, email)) });
   if (existing) throw conflict(`user ${email} already exists in this workspace`);
+  await assertWithinLimit(db, ctx, "teamMembers");
   const [user] = await db
     .insert(users)
     .values({

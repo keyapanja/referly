@@ -29,7 +29,7 @@ function LoginForm() {
             const res = await run(() => api<any>("/v1/auth/login", { method: "POST", json: { email, password }, token: null }));
             if (!res) return;
             setToken(res.token);
-            router.replace(res.user.role === "affiliate" ? "/portal" : "/app");
+            router.replace(res.user.role === "affiliate" ? "/portal" : res.user.role === "platform_admin" ? "/admin" : "/app");
           }}
         >
           <Field label="Email">

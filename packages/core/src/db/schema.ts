@@ -40,6 +40,8 @@ export const tenants = pgTable("tenants", {
   status: text("status").notNull().default("active"), // active | suspended | closed
   kind: text("kind").notNull().default("business"), // business | platform
   planId: text("plan_id").notNull().default("starter"),
+  /** Per-tenant limit overrides set by a platform admin; null keys mean unlimited. */
+  planLimits: jsonb("plan_limits").$type<Record<string, number | null>>(),
   currency: text("currency").notNull().default("USD"),
   timezone: text("timezone").notNull().default("UTC"),
   locale: text("locale").notNull().default("en"),

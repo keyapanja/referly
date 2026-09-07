@@ -20,6 +20,7 @@ import { portalRoutes } from "./routes/portal";
 import { messageRoutes } from "./routes/messages";
 import { analyticsRoutes } from "./routes/analytics";
 import { assetRoutes } from "./routes/assets";
+import { adminRoutes } from "./routes/admin";
 import { rateLimit } from "./lib/ratelimit";
 import { PRIVATE_PREFIX, type FileStorage } from "./storage";
 
@@ -31,6 +32,8 @@ export interface AppConfig {
   cookieSecure: boolean;
   /** Frozen clock for tests. */
   now?: () => Date;
+  /** Shown to merchants who need a plan change. */
+  supportEmail?: string;
   /** Requests per window per IP. Windows: redirect 1 min, public 10 min, auth 15 min. */
   rateLimits?: { redirect: number; public: number; auth: number };
 }
@@ -82,7 +85,7 @@ export function createApp(deps: AppDeps & { db: Db }) {
   });
 
   // Every data-touching route runs in one transaction with row-level security active.
-  for (const prefix of ["/r/*", "/join/*", "/invite/*", "/v1/*", "/portal/*"]) app.use(prefix, rlsTransaction(deps.db));
+  for (const prefix of ["/r/*", "/join/*", "/invite/*", "/v1/*", "/portal/*", "/admin/*"]) app.use(prefix, rlsTransaction(deps.db));
 
   // Public, unauthenticated: tracking redirect, join/apply, invites, signup/login.
   app.route("/", publicRoutes());
@@ -91,6 +94,8 @@ export function createApp(deps: AppDeps & { db: Db }) {
   // Everything below resolves a tenant context from a session or API key.
   app.use("/v1/*", authMiddleware());
   app.use("/portal/*", authMiddleware());
+  app.use("/admin/*", authMiddleware());
+  app.route("/admin", adminRoutes());
   app.route("/v1/tenant", tenantRoutes());
   app.route("/v1/offers", offerRoutes());
   app.route("/v1/programs", programRoutes());

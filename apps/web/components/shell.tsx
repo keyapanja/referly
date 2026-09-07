@@ -68,6 +68,17 @@ const PORTAL_NAV: { section: string; items: NavItem[] }[] = [
   },
 ];
 
+const PLATFORM_NAV: { section: string; items: NavItem[] }[] = [
+  {
+    section: "Platform",
+    items: [
+      ["/admin", "Overview", "home"],
+      ["/admin/tenants", "Tenants", "layers"],
+      ["/admin/jobs", "Jobs", "sliders"],
+    ],
+  },
+];
+
 function initials(name: string): string {
   return name
     .split(/\s+/)
@@ -77,11 +88,11 @@ function initials(name: string): string {
     .join("");
 }
 
-export function Shell({ mode, children }: { mode: "merchant" | "portal"; children: ReactNode }) {
+export function Shell({ mode, children }: { mode: "merchant" | "portal" | "platform"; children: ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
-  const nav = mode === "merchant" ? MERCHANT_NAV : PORTAL_NAV;
-  const { data, error } = useApi<any>(mode === "merchant" ? "/v1/tenant/me" : "/portal/me");
+  const nav = mode === "merchant" ? MERCHANT_NAV : mode === "platform" ? PLATFORM_NAV : PORTAL_NAV;
+  const { data, error } = useApi<any>(mode === "portal" ? "/portal/me" : "/v1/tenant/me");
   const [resent, setResent] = useState(false);
   const needsVerification = mode === "merchant" && data?.user && data.user.emailVerified === false;
 
@@ -92,10 +103,10 @@ export function Shell({ mode, children }: { mode: "merchant" | "portal"; childre
   const tenantName: string = data?.tenant?.name ?? "";
   const logoUrl: string | null = data?.tenant?.logoUrl ?? null;
   const brand = brandStyle(data?.tenant?.branding?.primaryColor);
-  const who: string = mode === "merchant" ? (data?.user?.name ?? "") : (data?.affiliate?.name ?? "");
-  const whoSub: string = mode === "merchant" ? (data?.user?.role ?? "") : "Affiliate";
-  const whoLabel = mode === "merchant" ? "Merchant workspace" : "Partner portal";
-  const isActive = (href: string) => pathname === href || (href !== "/app" && href !== "/portal" && pathname.startsWith(href));
+  const who: string = mode === "portal" ? (data?.affiliate?.name ?? "") : (data?.user?.name ?? "");
+  const whoSub: string = mode === "portal" ? "Affiliate" : (data?.user?.role ?? "").replace("_", " ");
+  const whoLabel = mode === "merchant" ? "Merchant workspace" : mode === "platform" ? "Platform admin" : "Partner portal";
+  const isActive = (href: string) => pathname === href || (href !== "/app" && href !== "/portal" && href !== "/admin" && pathname.startsWith(href));
 
   return (
     <div className="shell branded" style={brand}>

@@ -1,6 +1,6 @@
 import type { Context, MiddlewareHandler } from "hono";
 import { getCookie, setCookie, deleteCookie } from "hono/cookie";
-import { auth, affiliates, tenantContext, unauthenticated, forbidden, type TenantContext, type Role } from "@referly/core";
+import { auth, affiliates, tenants, tenantContext, unauthenticated, forbidden, type TenantContext, type Role } from "@referly/core";
 import type { AppDeps } from "../app";
 import { scopeRequest } from "./rls";
 
@@ -47,6 +47,10 @@ export function authMiddleware(): MiddlewareHandler<AppEnv> {
     if (!session) throw unauthenticated("session expired");
 
     await scopeRequest(c, session.tenantId);
+    if (session.role !== "platform_admin") {
+      const tenant = await tenants.getTenant(db, tenantContext(session.tenantId, { type: "system", role: "owner" }, c.get("now")));
+      if (tenant.status !== "active") throw forbidden(`workspace is ${tenant.status}`);
+    }
     if (session.role === "affiliate") {
       const affiliate = await affiliates.getAffiliateByUserId(db, session.tenantId, session.user.id);
       if (!affiliate) throw forbidden("no affiliate profile");

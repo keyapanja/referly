@@ -6,7 +6,8 @@ export type DomainErrorCode =
   | "unauthenticated"
   | "invalid_transition"
   | "tenant_mismatch"
-  | "rate_limited";
+  | "rate_limited"
+  | "plan_limit";
 
 export class DomainError extends Error {
   readonly code: DomainErrorCode;
@@ -35,6 +36,8 @@ export class DomainError extends Error {
         return 409;
       case "rate_limited":
         return 429;
+      case "plan_limit":
+        return 402;
     }
   }
 }

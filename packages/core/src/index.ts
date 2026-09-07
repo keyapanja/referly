@@ -25,3 +25,5 @@ export * as analytics from "./services/analytics";
 export * as assets from "./services/assets";
 export * as account from "./services/account";
 export * as exportsSvc from "./services/exports";
+export * as plans from "./services/plans";
+export * as platform from "./services/platform";

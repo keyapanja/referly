@@ -53,7 +53,7 @@ export async function loginWithPassword(db: DbLike, input: { tenantSlug?: string
     .select({ user: users, tenant: tenants })
     .from(users)
     .innerJoin(tenants, eq(users.tenantId, tenants.id))
-    .where(and(eq(users.email, email), eq(users.status, "active"), input.tenantSlug ? eq(tenants.slug, input.tenantSlug) : undefined));
+    .where(and(eq(users.email, email), eq(users.status, "active"), eq(tenants.status, "active"), input.tenantSlug ? eq(tenants.slug, input.tenantSlug) : undefined));
   for (const row of rows) {
     if (await verifyPassword(input.password, row.user.passwordHash)) {
       const session = await createSession(db, row.user, now);

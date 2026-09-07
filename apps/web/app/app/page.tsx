@@ -9,6 +9,7 @@ import { Loading, PageHeader, Stat, Table } from "@/components/ui";
 export default function MerchantHome() {
   const { data: me } = useApi<any>("/v1/tenant/me");
   const { data, error } = useApi<any>("/v1/analytics/overview");
+  const { data: billing } = useApi<any>("/v1/tenant/billing");
   const cur = me?.tenant?.currency ?? "USD";
   if (!data) return <Loading error={error} />;
   const cs = data.commissionByStatus ?? {};
@@ -22,6 +23,16 @@ export default function MerchantHome() {
   return (
     <>
       <PageHeader title="Home" subtitle="Last 30 days" />
+      {billing?.warnings?.length ? (
+        <div className="alert info">
+          {billing.warnings.map((w: any) => (
+            <div key={w.key}>
+              {w.level === "reached" ? "Limit reached: " : "Almost at your limit: "}
+              {w.label} {w.usage} / {w.limit} on the {billing.plan.name} plan. <Link href="/app/settings">See plan and usage</Link>.
+            </div>
+          ))}
+        </div>
+      ) : null}
       <div className="grid cols-4" style={{ marginBottom: 16 }}>
         <Stat label="Affiliate-attributed revenue" value={money(data.attributedRevenueMinor, cur)} hint={`${data.attributedConversions} conversions`} />
         <Stat label="Clicks" value={data.clicks} hint={`${percent(data.conversionRate)} conversion rate`} />
