@@ -31,6 +31,11 @@ function PayoutsList() {
                 <option key={s}>{s}</option>
               ))}
             </select>
+            {data?.connectedProviders?.length && data?.payouts?.some((p: any) => p.canSend) ? (
+              <button disabled={busy} onClick={() => run(async () => { const r = await api<any>("/v1/payouts/send-all", { method: "POST" }); return `${r.queued.length} sent to providers${r.skipped.length ? `, ${r.skipped.length} skipped` : ""}.`; }, undefined).then(reload)}>
+                Send all drafts via providers
+              </button>
+            ) : null}
             <button className="primary" disabled={busy} onClick={() => run(async () => { const r = await api<any>("/v1/payouts/batch-all", { method: "POST" }); return r.payouts.length; }).then((n) => { if (n !== undefined) reload(); })}>
               Create batches for everyone payable
             </button>
@@ -103,13 +108,18 @@ function PayoutsList() {
             { header: "Created", cell: (p: any) => dateTime(p.createdAt) },
             { header: "Affiliate", cell: (p: any) => <Link href={`/app/affiliates/${p.affiliateId}`}>{name(p.affiliateId)}</Link> },
             { header: "Amount", cell: (p: any) => money(p.amountMinor, p.currency), num: true },
-            { header: "Method", cell: (p: any) => p.method ?? "—" },
-            { header: "Reference", cell: (p: any) => <span className="mono">{p.externalReference ?? p.failureReason ?? "—"}</span> },
+            { header: "Method", cell: (p: any) => <>{p.method ?? p.payoutMethod ?? "—"}{p.provider ? <div className="muted">{p.provider === "stripe_connect" ? "Stripe" : "PayPal"}{p.providerStatus ? ` · ${p.providerStatus}` : ""}</div> : null}</> },
+            { header: "Reference", cell: (p: any) => <span className="mono">{p.externalReference ?? p.providerRef ?? p.failureReason ?? "—"}</span> },
             { header: "Status", cell: (p: any) => <Badge value={p.status} /> },
             {
               header: "",
               cell: (p: any) => (
                 <span className="actions">
+                  {p.canSend ? (
+                    <button className="sm primary" disabled={busy} onClick={() => run(() => api(`/v1/payouts/${p.id}/send`, { method: "POST" }), `Sending via ${p.providerId === "paypal" ? "PayPal" : "Stripe"}…`).then(reload)}>
+                      Send via {p.providerId === "paypal" ? "PayPal" : "Stripe"}
+                    </button>
+                  ) : null}
                   {p.status === "draft" && (
                     <button className="sm" disabled={busy} onClick={() => run(() => api(`/v1/payouts/${p.id}/processing`, { method: "POST" })).then(reload)}>
                       Start

@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { sql } from "drizzle-orm";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
-import type { Db, DbLike } from "@referly/core";
+import type { Db, DbLike, integrations } from "@referly/core";
 import type { messaging } from "@referly/core";
 import { errorHandler } from "./lib/errors";
 import { authMiddleware, type AppEnv } from "./lib/auth";
@@ -47,6 +47,8 @@ export interface AppDeps {
   email: messaging.EmailProvider;
   storage: FileStorage;
   config: AppConfig;
+  /** Overrides for payout provider construction (tests inject an in-memory provider). */
+  payoutProviders?: integrations.IntegrationDeps;
 }
 
 export function createApp(deps: AppDeps & { db: Db }) {

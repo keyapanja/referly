@@ -75,6 +75,7 @@ export const RLS_TABLES = [
   "affiliate_groups",
   "affiliate_group_members",
   "program_rate_tiers",
+  "tenant_integrations",
   "audit_logs",
   "webhook_deliveries",
   "exports",

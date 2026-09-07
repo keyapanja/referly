@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { z } from "zod";
-import { affiliates, commissions, conversions, offers, payouts, tenants, tracking, programs as programsSvc, assets, campaigns, tiers } from "@referly/core";
+import { affiliates, commissions, conversions, offers, payouts, tenants, tracking, programs as programsSvc, assets, campaigns, tiers, integrations } from "@referly/core";
 import { requireAffiliatePrincipal, type AppEnv } from "../lib/auth";
 import { publicTenant } from "./auth";
 
@@ -108,7 +108,19 @@ export function portalRoutes() {
     const to = q.to ? new Date(q.to) : c.get("now")();
     return c.json(await commissions.commissionStatement(c.get("deps").db, c.get("ctx"), affiliateId, { from, to }));
   });
-  r.get("/payouts", async (c) => c.json({ payouts: await payouts.listPayouts(c.get("deps").db, c.get("ctx"), { affiliateId: requireAffiliatePrincipal(c) }) }));
+  r.get("/payouts", async (c) => {
+    const { db } = c.get("deps");
+    const ctx = c.get("ctx");
+    const affiliateId = requireAffiliatePrincipal(c);
+    const [rows, automated] = await Promise.all([payouts.listPayouts(db, ctx, { affiliateId }), integrations.automatedMethods(db, ctx)]);
+    return c.json({ payouts: rows, automatedMethods: automated });
+  });
+  /** Stripe Connect Express onboarding for the affiliate's own account. */
+  r.post("/payouts/connect/stripe", async (c) => {
+    const { webUrl } = c.get("deps").config;
+    const link = await integrations.startStripeOnboarding(c.get("deps").db, c.get("ctx"), requireAffiliatePrincipal(c), { returnUrl: `${webUrl}/portal/payouts?connected=stripe`, refreshUrl: `${webUrl}/portal/payouts?refresh=stripe` }, c.get("deps").payoutProviders);
+    return c.json(link);
+  });
 
   /** Campaigns the affiliate is invited to or active in (AST-05). */
   r.get("/campaigns", async (c) => c.json({ campaigns: await campaigns.listCampaignsForAffiliate(c.get("deps").db, c.get("ctx"), requireAffiliatePrincipal(c)) }));

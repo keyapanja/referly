@@ -31,3 +31,6 @@ export * as campaigns from "./services/campaigns";
 export * as automation from "./services/automation";
 export * as groups from "./services/groups";
 export * as tiers from "./services/tiers";
+export * as integrations from "./services/integrations";
+export * as payoutProviders from "./services/payoutProviders";
+export { encryptJson, decryptJson } from "./crypto";

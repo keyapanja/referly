@@ -476,6 +476,11 @@ export const payouts = pgTable(
     methodRef: text("method_ref"),
     externalReference: text("external_reference"),
     failureReason: text("failure_reason"),
+    /** Provider-driven payouts: which adapter, its reference, raw status and the idempotency key used. */
+    provider: text("provider"),
+    providerRef: text("provider_ref"),
+    providerStatus: text("provider_status"),
+    idempotencyKey: text("idempotency_key"),
     paidAt: ts("paid_at"),
     createdByUserId: text("created_by_user_id").references(() => users.id),
     createdAt: createdAt(),
@@ -645,6 +650,23 @@ export const automationRuns = pgTable(
     createdAt: createdAt(),
   },
   (t) => [index("automation_runs_rule_idx").on(t.ruleId, t.createdAt), index("automation_runs_entity_idx").on(t.ruleId, t.entityType, t.entityId)],
+);
+
+/** Per-tenant integration credentials, encrypted at rest (PRD s13, s14). */
+export const tenantIntegrations = pgTable(
+  "tenant_integrations",
+  {
+    id: id(),
+    tenantId: tenantRef(),
+    provider: text("provider").notNull(), // stripe_connect | paypal
+    credentialsEnc: text("credentials_enc").notNull(),
+    hint: text("hint").notNull(),
+    status: text("status").notNull().default("connected"), // connected | disabled
+    lastVerifiedAt: ts("last_verified_at"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [uniqueIndex("tenant_integrations_uq").on(t.tenantId, t.provider)],
 );
 
 /** AFF-04: affiliate groups (partner type, channel, geography, negotiated rate). */
@@ -823,6 +845,7 @@ export const schema = {
   affiliateGroups,
   affiliateGroupMembers,
   programRateTiers,
+  tenantIntegrations,
   auditLogs,
   jobs,
   exports,
@@ -852,6 +875,7 @@ export type Export = typeof exports.$inferSelect;
 export type Campaign = typeof campaigns.$inferSelect;
 export type Task = typeof tasks.$inferSelect;
 export type AffiliateGroup = typeof affiliateGroups.$inferSelect;
+export type TenantIntegration = typeof tenantIntegrations.$inferSelect;
 export type ProgramRateTier = typeof programRateTiers.$inferSelect;
 export type AutomationRun = typeof automationRuns.$inferSelect;
 export type AutomationRule = typeof automationRules.$inferSelect;

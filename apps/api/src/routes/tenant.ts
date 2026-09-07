@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { z } from "zod";
-import { tenants, auth, audit, account, plans, MERCHANT_ROLES } from "@referly/core";
+import { tenants, auth, audit, account, plans, integrations, MERCHANT_ROLES } from "@referly/core";
 import { requireMerchantPrincipal, type AppEnv } from "../lib/auth";
 import { publicUser } from "./auth";
 
@@ -38,6 +38,18 @@ export function tenantRoutes() {
   r.get("/billing", async (c) => {
     const summary = await plans.getBillingSummary(c.get("deps").db, c.get("ctx"));
     return c.json({ ...summary, supportEmail: c.get("deps").config.supportEmail ?? null, plans: Object.values(plans.PLANS).map((p) => ({ id: p.id, name: p.name, description: p.description, limits: p.limits, features: p.features })) });
+  });
+
+  /** Payout providers (PRD s14): credentials are verified with the provider and stored encrypted. */
+  r.get("/integrations", async (c) => c.json({ integrations: await integrations.listIntegrations(c.get("deps").db, c.get("ctx")), providers: integrations.PROVIDER_FOR_METHOD }));
+  r.post("/integrations/:provider", async (c) => {
+    const { credentials } = z.object({ credentials: z.record(z.string(), z.unknown()) }).parse(await c.req.json());
+    const row = await integrations.connectPayoutProvider(c.get("deps").db, c.get("ctx"), c.req.param("provider") as integrations.PayoutProviderId, credentials, c.get("deps").payoutProviders);
+    return c.json({ integration: integrations.publicIntegration(row) }, 201);
+  });
+  r.delete("/integrations/:provider", async (c) => {
+    await integrations.disconnectPayoutProvider(c.get("deps").db, c.get("ctx"), c.req.param("provider") as integrations.PayoutProviderId);
+    return c.json({ ok: true });
   });
 
   r.get("/team", async (c) => c.json({ users: (await tenants.listTeam(c.get("deps").db, c.get("ctx"))).map(publicUser) }));

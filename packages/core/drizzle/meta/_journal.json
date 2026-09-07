@@ -64,6 +64,13 @@
       "when": 1788793543392,
       "tag": "0008_groups_tiers",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1788794278587,
+      "tag": "0009_payout_providers",
+      "breakpoints": true
     }
   ]
 }

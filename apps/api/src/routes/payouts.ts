@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { z } from "zod";
-import { payouts } from "@referly/core";
+import { payouts, integrations, affiliates as affiliatesSvc } from "@referly/core";
 import { requireMerchantPrincipal, type AppEnv } from "../lib/auth";
 
 export function payoutRoutes() {
@@ -12,8 +12,24 @@ export function payoutRoutes() {
 
   r.get("/", async (c) => {
     const q = c.req.query();
-    return c.json({ payouts: await payouts.listPayouts(c.get("deps").db, c.get("ctx"), { affiliateId: q.affiliateId, status: q.status as never }) });
+    const { db } = c.get("deps");
+    const ctx = c.get("ctx");
+    const [rows, connected] = await Promise.all([payouts.listPayouts(db, ctx, { affiliateId: q.affiliateId, status: q.status as never }), integrations.connectedProviders(db, ctx)]);
+    const affiliateIds = [...new Set(rows.map((p) => p.affiliateId))];
+    const affs = await Promise.all(affiliateIds.map((id) => affiliatesSvc.getAffiliate(db, ctx, id)));
+    const byId = new Map(affs.map((a) => [a.id, a]));
+    return c.json({
+      connectedProviders: connected,
+      payouts: rows.map((p) => {
+        const a = byId.get(p.affiliateId);
+        const provider = a?.payoutMethod ? integrations.PROVIDER_FOR_METHOD[a.payoutMethod] : undefined;
+        return { ...p, affiliateName: a?.name ?? null, payoutMethod: a?.payoutMethod ?? null, canSend: p.status === "draft" && !!provider && connected.includes(provider) && !!a?.payoutProfileRef, providerId: provider ?? null };
+      }),
+    });
   });
+  /** Provider-driven payouts: queue one draft, or every draft that can be automated. */
+  r.post("/send-all", async (c) => c.json(await integrations.queueAllDraftPayouts(c.get("deps").db, c.get("ctx"))));
+  r.post("/:id/send", async (c) => c.json({ payout: await integrations.queueProviderPayout(c.get("deps").db, c.get("ctx"), c.req.param("id")) }));
   r.get("/payable/:affiliateId", async (c) => c.json(await payouts.getPayableSummary(c.get("deps").db, c.get("ctx"), c.req.param("affiliateId"))));
   r.post("/", async (c) => c.json({ payout: await payouts.createPayoutBatch(c.get("deps").db, c.get("ctx"), await c.req.json()) }, 201));
   r.post("/batch-all", async (c) => c.json({ payouts: await payouts.createPayoutBatchesForAll(c.get("deps").db, c.get("ctx")) }, 201));

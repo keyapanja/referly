@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
 import { schema, type Db, type DbLike, type Job, type TenantContext } from "@referly/core";
-import { jobs, messaging, commissions, systemContext, events as eventsMod, tenants as tenantsSvc, exportsSvc, withTenantScope, withRlsBypass, campaigns as campaignsSvc, automation } from "@referly/core";
+import { jobs, messaging, commissions, systemContext, events as eventsMod, tenants as tenantsSvc, exportsSvc, withTenantScope, withRlsBypass, campaigns as campaignsSvc, automation, integrations } from "@referly/core";
 import { PRIVATE_PREFIX, type FileStorage } from "./storage";
 
 const { affiliates: affiliatesTable, offers: offersTable, programs: programsTable, tenants: tenantsTable } = schema;
@@ -17,6 +17,7 @@ export interface WorkerDeps {
   storage: FileStorage;
   webUrl: string;
   now?: () => Date;
+  payoutProviders?: integrations.IntegrationDeps;
 }
 
 /** Event → template mapping. Kept as data so it is inspectable (PRD "explainable automation"). */
@@ -122,12 +123,19 @@ export function createHandlers(deps: WorkerDeps): Record<string, jobs.JobHandler
       });
     },
 
+    /** Provider-driven payout: one HTTP call per payout, idempotent by payout id. */
+    send_payout: async (job: Job) => {
+      const { payoutId, tenantId } = job.payload as { payoutId: string; tenantId: string };
+      await withTenantScope(deps.db, tenantId, (db) => integrations.executeProviderPayout(db, systemContext(tenantId, now), payoutId, deps.payoutProviders));
+    },
+
     settle_holding_periods: async () => {
       const all = await withRlsBypass(deps.db, (db) => db.select({ id: tenantsTable.id }).from(tenantsTable).where(eq(tenantsTable.status, "active")));
       for (const { id } of all)
         await withTenantScope(deps.db, id, async (db) => {
           await commissions.settleHoldingPeriods(db, systemContext(id, now), now());
           await campaignsSvc.endExpiredCampaigns(db, systemContext(id, now), now());
+          await integrations.pollProviderPayouts(db, systemContext(id, now), deps.payoutProviders);
         });
     },
   };

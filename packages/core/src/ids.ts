@@ -38,6 +38,7 @@ export const ID_PREFIXES = {
   campaignParticipant: "cpp",
   campaignAsset: "cpa",
   task: "tsk",
+  integration: "int",
   rateTier: "tier",
   affiliateGroupMember: "grm",
   affiliateGroup: "grp",

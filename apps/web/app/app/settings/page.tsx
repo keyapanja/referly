@@ -4,13 +4,16 @@ import { useEffect, useState } from "react";
 import { api, API_URL } from "@/lib/api";
 import { useAction, useApi } from "@/lib/hooks";
 import { dateTime } from "@/lib/format";
-import { Alert, CopyBox, Field, Loading, PageHeader, Table } from "@/components/ui";
+import { Alert, Badge, CopyBox, Field, Loading, PageHeader, Table } from "@/components/ui";
 
 export default function SettingsPage() {
   const { data, error, reload } = useApi<any>("/v1/tenant");
   const { data: team, reload: reloadTeam } = useApi<any>("/v1/tenant/team");
   const { data: audit } = useApi<any>("/v1/tenant/audit?limit=30");
   const { data: billing } = useApi<any>("/v1/tenant/billing");
+  const { data: integ, reload: reloadInteg } = useApi<any>("/v1/tenant/integrations");
+  const [stripeKey, setStripeKey] = useState("");
+  const [paypal, setPaypal] = useState({ clientId: "", clientSecret: "", sandbox: true });
   const { busy, error: actionError, success, run } = useAction();
   const [form, setForm] = useState<any>(null);
   const [member, setMember] = useState({ name: "", email: "", password: "", role: "admin" });
@@ -182,6 +185,67 @@ export default function SettingsPage() {
               </Field>
               <button disabled={busy}>Create API key</button>
             </form>
+          </div>
+          <div className="card">
+            <h2>Payout providers</h2>
+            <p className="muted">Pay affiliates automatically. Credentials are verified with the provider and stored encrypted; only a hint is shown afterwards. Manual payouts keep working alongside.</p>
+            {(["stripe_connect", "paypal"] as const).map((provider) => {
+              const row = integ?.integrations?.find((i: any) => i.provider === provider);
+              const label = provider === "stripe_connect" ? "Stripe Connect" : "PayPal Payouts";
+              return (
+                <div key={provider} style={{ borderTop: "1px solid var(--border)", paddingTop: 12, marginTop: 12 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                    <div>
+                      <strong>{label}</strong> {row ? <Badge value="connected" /> : <Badge value="disabled" />}
+                      {row ? <div className="muted mono">{row.hint}</div> : <div className="muted">{provider === "stripe_connect" ? "Transfers to affiliates' connected Stripe accounts." : "Sends payouts to affiliates' PayPal email addresses."}</div>}
+                    </div>
+                    {row ? (
+                      <button className="sm danger" disabled={busy} onClick={() => run(() => api(`/v1/tenant/integrations/${provider}`, { method: "DELETE" }), "Disconnected.").then(reloadInteg)}>
+                        Disconnect
+                      </button>
+                    ) : null}
+                  </div>
+                  {!row ? (
+                    <form
+                      style={{ marginTop: 10 }}
+                      onSubmit={async (e) => {
+                        e.preventDefault();
+                        const credentials = provider === "stripe_connect" ? { secretKey: stripeKey } : paypal;
+                        const ok = await run(() => api(`/v1/tenant/integrations/${provider}`, { method: "POST", json: { credentials } }), `${label} connected.`);
+                        if (ok) {
+                          setStripeKey("");
+                          setPaypal({ clientId: "", clientSecret: "", sandbox: true });
+                          reloadInteg();
+                        }
+                      }}
+                    >
+                      {provider === "stripe_connect" ? (
+                        <Field label="Stripe secret key" help="From the Stripe dashboard (Developers → API keys). Restricted keys with transfer and account permissions also work.">
+                          <input type="password" value={stripeKey} onChange={(e) => setStripeKey(e.target.value)} placeholder="sk_live_…" required />
+                        </Field>
+                      ) : (
+                        <>
+                          <div className="row">
+                            <Field label="Client ID">
+                              <input value={paypal.clientId} onChange={(e) => setPaypal({ ...paypal, clientId: e.target.value })} required />
+                            </Field>
+                            <Field label="Client secret">
+                              <input type="password" value={paypal.clientSecret} onChange={(e) => setPaypal({ ...paypal, clientSecret: e.target.value })} required />
+                            </Field>
+                          </div>
+                          <label className="checkbox" style={{ marginBottom: 10 }}>
+                            <input type="checkbox" checked={paypal.sandbox} onChange={(e) => setPaypal({ ...paypal, sandbox: e.target.checked })} /> Sandbox account
+                          </label>
+                        </>
+                      )}
+                      <button className="sm" disabled={busy}>
+                        Connect {label}
+                      </button>
+                    </form>
+                  ) : null}
+                </div>
+              );
+            })}
           </div>
           <div className="card">
             <h2>Team</h2>

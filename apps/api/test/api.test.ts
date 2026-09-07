@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { createDb, messaging, platform, withRlsBypass, type DbHandle } from "@referly/core";
+import { createDb, messaging, platform, withRlsBypass, payoutProviders, type DbHandle } from "@referly/core";
+import { sql } from "drizzle-orm";
 import { createApp, type App } from "../src/app";
 import { runOnce } from "../src/worker";
 import { resetRateLimits } from "../src/lib/ratelimit";
@@ -20,12 +21,14 @@ let app: App;
 let clock = new Date("2026-03-01T10:00:00Z");
 const now = () => new Date(clock);
 const email = new messaging.MemoryEmailProvider();
+const memoryPayoutProvider = new payoutProviders.MemoryPayoutProvider("stripe_connect");
+const memoryPayouts = { factory: () => memoryPayoutProvider };
 const BASE = "http://api.test";
 
 beforeAll(async () => {
   handle = await createDb();
   storage = new LocalStorage(await mkdtemp(path.join(tmpdir(), "referly-files-")), BASE);
-  app = createApp({ db: handle.db, email, storage, config: { baseUrl: BASE, webUrl: "http://web.test", cookieSecure: false, now } });
+  app = createApp({ db: handle.db, email, storage, payoutProviders: memoryPayouts, config: { baseUrl: BASE, webUrl: "http://web.test", cookieSecure: false, now } });
 });
 afterAll(() => handle.close());
 beforeAll(() => resetRateLimits());
@@ -495,6 +498,46 @@ describe("MVP acceptance over HTTP", () => {
     expect((await call(`/v1/affiliates/${affiliateId}`, { token: ownerToken })).body.groups.map((g: any) => g.name)).toEqual(["Alumni"]);
     expect((await call(`/v1/groups/${group.body.group.id}`, { method: "DELETE", token: ownerToken })).status).toBe(409);
     expect((await call("/v1/groups", { token: affiliateToken })).status).toBe(403);
+  });
+
+  it("Payout providers: connect, affiliate onboarding, send through the worker, commissions settle", async () => {
+    // credentials are validated (shape) and verified (provider), then stored encrypted with only a hint exposed
+    expect((await call("/v1/tenant/integrations/stripe_connect", { method: "POST", token: ownerToken, json: { credentials: { secretKey: "nope" } } })).status).toBe(400);
+    const connected = await call("/v1/tenant/integrations/stripe_connect", { method: "POST", token: ownerToken, json: { credentials: { secretKey: "sk_test_abcdefghij1234" } } });
+    expect(connected.status).toBe(201);
+    expect(connected.body.integration).toMatchObject({ provider: "stripe_connect", status: "connected", hint: "sk_test_…1234" });
+    expect(JSON.stringify(connected.body)).not.toContain("abcdefghij");
+    expect((await call("/v1/tenant/integrations", { token: affiliateToken })).status).toBe(403);
+
+    // the affiliate connects a Stripe account from the portal
+    const onboarding = await call("/portal/payouts/connect/stripe", { method: "POST", token: affiliateToken });
+    expect(onboarding.status).toBe(200);
+    expect(onboarding.body.url).toContain("onboard");
+    expect((await call("/portal/me", { token: affiliateToken })).body.affiliate).toMatchObject({ payoutMethod: "stripe_connect", payoutProfileRef: onboarding.body.accountId });
+    expect((await call("/portal/payouts", { token: affiliateToken })).body.automatedMethods).toEqual(["stripe_connect"]);
+
+    // settle what is payable, batch it, send it through the provider in the worker
+    clock = new Date("2026-09-01T10:00:00Z"); // past every holding period; sessions expired, so sign in again
+    ownerToken = (await call("/v1/auth/login", { method: "POST", json: { email: "priya@coach.co", password: "supersecret1" } })).body.token;
+    affiliateToken = (await call("/v1/auth/login", { method: "POST", json: { email: "sam@partner.io", password: "partnerpass1" } })).body.token;
+    const settled = await call("/v1/commissions/settle", { method: "POST", token: ownerToken });
+    expect(settled.body.settled.length).toBeGreaterThan(0);
+    const batches = await call("/v1/payouts/batch-all", { method: "POST", token: ownerToken });
+    const draft = batches.body.payouts.find((p: any) => p.affiliateId === affiliateId);
+    expect(draft).toBeTruthy();
+    const listed = await call("/v1/payouts", { token: ownerToken });
+    expect(listed.body.connectedProviders).toEqual(["stripe_connect"]);
+    expect(listed.body.payouts.find((p: any) => p.id === draft.id)).toMatchObject({ canSend: true, providerId: "stripe_connect", affiliateName: "Sam Partner" });
+    const sent = await call(`/v1/payouts/${draft.id}/send`, { method: "POST", token: ownerToken });
+    expect(sent.status).toBe(200);
+    expect(sent.body.payout).toMatchObject({ status: "processing", provider: "stripe_connect" });
+    await runOnce({ db: handle.db, email, storage, webUrl: "http://web.test", now, payoutProviders: memoryPayouts });
+    const paid = await call(`/v1/payouts/${draft.id}`, { token: ownerToken });
+    expect(paid.body.payout).toMatchObject({ status: "paid", externalReference: "tr_mem_1" });
+    expect(paid.body.reconciled).toBe(true);
+    expect(paid.body.commissionCount).toBeGreaterThan(0);
+    expect((await call("/portal/payouts", { token: affiliateToken })).body.payouts.some((p: any) => p.id === draft.id && p.status === "paid")).toBe(true);
+    expect((await call("/v1/tenant/integrations/stripe_connect", { method: "DELETE", token: ownerToken })).status).toBe(200);
   });
 
   it("Validation and permissions errors are JSON with codes", async () => {

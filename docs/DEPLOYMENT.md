@@ -51,6 +51,7 @@ api.yourdomain.com {
 | `NEXT_PUBLIC_API_URL` | web (build) | API origin the browser calls. Equal to `BASE_URL`. |
 | `PLATFORM_ADMIN_EMAIL`, `PLATFORM_ADMIN_PASSWORD`, `PLATFORM_ADMIN_NAME` | api | Creates the platform admin account on boot if it does not exist (idempotent). Sign in at `WEB_URL/login`; admins land on `/admin`. |
 | `PLATFORM_SUPPORT_EMAIL` | api | Shown to merchants on the Plan and usage card for plan changes. |
+| `INTEGRATION_SECRET` | api | Key for encrypting merchants' payout-provider credentials at rest (AES-256-GCM). Required in production; rotate by re-connecting providers. |
 | `STORAGE_PROVIDER` | api | `local` (default; files under `FILES_DIR`, served at `BASE_URL/files/...`) or `s3`. |
 | `FILES_DIR` | api | Local storage directory. The Docker image uses `/app/data/files`; mount `/app/data`. |
 | `S3_BUCKET`, `S3_REGION`, `S3_ENDPOINT`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_PUBLIC_URL`, `S3_FORCE_PATH_STYLE` | api | With `s3`. Works with AWS S3, Cloudflare R2, MinIO, DigitalOcean Spaces. Objects are written public-read; `S3_PUBLIC_URL` is the origin (or CDN) they are served from. |
