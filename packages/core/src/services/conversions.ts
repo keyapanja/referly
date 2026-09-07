@@ -12,6 +12,7 @@ import { emitEvent } from "./events";
 import { CONVERSION_TRANSITIONS, assertTransition, type ConversionStatus } from "../statemachine";
 import { resolveAttribution, type AttributionDecision } from "./attribution";
 import { createCommissionForConversion, reduceCommissionRow, reverseCommissionRow } from "./commissions";
+import { evaluateBonus, findLiveCampaign } from "./campaigns";
 import { getMembership } from "./affiliates";
 import { proportion } from "../money";
 
@@ -87,6 +88,7 @@ export async function recordConversion(db: DbLike, ctx: TenantContext, rawInput:
         decision = (await resolveAttribution(tx, ctx, { offerId: input.offerId ?? null, occurredAt, clickTokens, couponCode: input.couponCode ?? null })).decision;
       }
 
+      const campaign = decision ? await findLiveCampaign(tx, ctx, { programId: decision.programId, affiliateId: decision.affiliateId, offerId: input.offerId ?? null, at: occurredAt }) : null;
       const [conversion] = await tx
         .insert(conversions)
         .values({
@@ -104,6 +106,7 @@ export async function recordConversion(db: DbLike, ctx: TenantContext, rawInput:
           status: "pending",
           affiliateId: decision?.affiliateId ?? null,
           programId: decision?.programId ?? null,
+          campaignId: campaign?.id ?? null,
           attributionSource: decision ? (decision.rule === "manual" ? "manual" : decision.source) : "none",
           isTest: decision?.isTest ?? false,
           metadata: input.metadata,
@@ -118,7 +121,8 @@ export async function recordConversion(db: DbLike, ctx: TenantContext, rawInput:
       if (decision) {
         attribution = await insertAttribution(tx, ctx, conversion!, decision, manualReason);
         const program = (await tx.query.programs.findFirst({ where: eq(programs.id, decision.programId) }))!;
-        commission = await createCommissionForConversion(tx, ctx, { conversion: conversion!, attributionId: attribution.id, affiliateId: decision.affiliateId, program, isTest: decision.isTest });
+        commission = await createCommissionForConversion(tx, ctx, { conversion: conversion!, attributionId: attribution.id, affiliateId: decision.affiliateId, program, isTest: decision.isTest, campaign });
+        if (campaign && !decision.isTest) await evaluateBonus(tx, ctx, campaign, decision.affiliateId, conversion!.currency);
       }
       await writeAudit(tx, ctx, { entityType: "conversion", entityId: conversion!.id, action: "created", after: snapshot(conversion!), reason: manualReason });
       await emitEvent(tx, ctx, "conversion.created", { type: "conversion", id: conversion!.id }, {

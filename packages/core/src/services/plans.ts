@@ -140,5 +140,16 @@ export async function assertWithinLimit(db: DbLike, ctx: TenantContext, key: Har
   }
 }
 
+/** Throws `plan_limit` (HTTP 402) when the tenant's plan does not include a feature. */
+export async function assertFeature(db: DbLike, ctx: TenantContext, feature: keyof Plan["features"]): Promise<void> {
+  const tenant = await db.query.tenants.findFirst({ where: eq(tenants.id, ctx.tenantId) });
+  if (!tenant) throw notFound("tenant");
+  const plan = getPlan(tenant.planId);
+  if (!plan.features[feature]) {
+    const label = { customBranding: "Custom branding", customDomain: "Custom domains", campaigns: "Campaigns", automation: "Automation rules", prioritySupport: "Priority support" }[feature];
+    throw new DomainError("plan_limit", `${label} are not included in the ${plan.name} plan. Upgrade to use them.`, { feature, planId: tenant.planId });
+  }
+}
+
 /** Convenience for SQL callers that already have the numbers. */
 export const usageSql = sql;

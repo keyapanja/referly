@@ -35,6 +35,8 @@ export const ID_PREFIXES = {
   authToken: "tok",
   assetPermission: "asp",
   export: "exp",
+  campaignParticipant: "cpp",
+  campaignAsset: "cpa",
 } as const;
 
 export type IdKind = keyof typeof ID_PREFIXES;

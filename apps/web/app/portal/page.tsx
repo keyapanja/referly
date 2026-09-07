@@ -22,6 +22,20 @@ export default function PortalHome() {
       </div>
       <div className="grid cols-2">
         <div className="card">
+          <h2>Campaigns</h2>
+          {data.campaigns?.length ? (
+            <ul>
+              {data.campaigns.map((c: any) => (
+                <li key={c.id}>
+                  <Link href="/portal/campaigns">{c.name}</Link> <span className="muted">· {c.participantStatus === "invited" ? "invitation waiting" : c.live ? "live" : "upcoming"}</span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="muted">No campaigns right now.</p>
+          )}
+        </div>
+        <div className="card">
           <h2>Quick actions</h2>
           {data.links.length === 0 ? (
             <p>

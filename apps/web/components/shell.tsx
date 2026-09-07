@@ -25,6 +25,7 @@ const MERCHANT_NAV: { section: string; items: NavItem[] }[] = [
       ["/app/offers", "Offers", "tag"],
       ["/app/programs", "Programs", "layers"],
       ["/app/assets", "Assets", "image"],
+      ["/app/campaigns", "Campaigns", "megaphone"],
     ],
   },
   {
@@ -52,6 +53,7 @@ const PORTAL_NAV: { section: string; items: NavItem[] }[] = [
       ["/portal/offers", "Offers", "gift"],
       ["/portal/links", "Links & Codes", "link"],
       ["/portal/assets", "Assets", "image"],
+      ["/portal/campaigns", "Campaigns", "megaphone"],
     ],
   },
   {

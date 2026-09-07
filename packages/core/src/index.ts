@@ -27,3 +27,4 @@ export * as account from "./services/account";
 export * as exportsSvc from "./services/exports";
 export * as plans from "./services/plans";
 export * as platform from "./services/platform";
+export * as campaigns from "./services/campaigns";

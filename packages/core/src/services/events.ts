@@ -33,6 +33,7 @@ export type DomainEventType =
   | "payout.failed"
   | "program.activated"
   | "program.updated"
+  | "campaign.invited"
   | "campaign.started"
   | "campaign.ended";
 

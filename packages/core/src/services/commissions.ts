@@ -9,6 +9,7 @@ import {
   programOffers,
   programs,
   type AffiliateProgram,
+  type Campaign,
   type Commission,
   type CommissionCalculationBasis,
   type Conversion,
@@ -35,8 +36,10 @@ export interface RateResolution {
   overrideSource: CommissionCalculationBasis["overrideSource"];
 }
 
-/** Precedence: affiliate-specific override > program-offer override > program default. */
-export function resolveRate(program: Program, programOffer?: ProgramOffer | null, membership?: AffiliateProgram | null): RateResolution {
+/** Precedence: live campaign override > affiliate-specific override > program-offer override > program default. */
+export function resolveRate(program: Program, programOffer?: ProgramOffer | null, membership?: AffiliateProgram | null, campaign?: Campaign | null): RateResolution {
+  if (campaign?.commissionRateBpsOverride != null) return { model: "percentage", rateBps: campaign.commissionRateBpsOverride, overrideSource: "campaign" };
+  if (campaign?.commissionFixedMinorOverride != null) return { model: "fixed", fixedMinor: campaign.commissionFixedMinorOverride, overrideSource: "campaign" };
   if (membership?.customCommissionRateBps != null) return { model: "percentage", rateBps: membership.customCommissionRateBps, overrideSource: "affiliate_program" };
   if (membership?.customCommissionFixedMinor != null) return { model: "fixed", fixedMinor: membership.customCommissionFixedMinor, overrideSource: "affiliate_program" };
   if (programOffer?.commissionRateBpsOverride != null) return { model: "percentage", rateBps: programOffer.commissionRateBpsOverride, overrideSource: "program_offer" };
@@ -118,6 +121,8 @@ export interface CreateCommissionArgs {
   affiliateId: string;
   program: Program;
   isTest: boolean;
+  /** Live campaign the affiliate is an active participant in, if any. */
+  campaign?: Campaign | null;
 }
 
 /** Called inside the conversion transaction. Snapshots the rate so later rule edits do not change it. */
@@ -128,7 +133,7 @@ export async function createCommissionForConversion(tx: Tx, ctx: TenantContext, 
       : Promise.resolve(null),
     tx.query.affiliatePrograms.findFirst({ where: and(eq(affiliatePrograms.affiliateId, args.affiliateId), eq(affiliatePrograms.programId, args.program.id)) }),
   ]);
-  const rate = resolveRate(args.program, programOffer, membership);
+  const rate = resolveRate(args.program, programOffer, membership, args.campaign);
   const { amountMinor, basis } = computeCommission(args.conversion, args.program, rate);
   const payableAt = new Date(args.conversion.occurredAt.getTime() + args.program.holdingDays * 86_400_000);
   const [row] = await tx
@@ -140,6 +145,7 @@ export async function createCommissionForConversion(tx: Tx, ctx: TenantContext, 
       attributionId: args.attributionId,
       affiliateId: args.affiliateId,
       programId: args.program.id,
+      campaignId: args.campaign?.id ?? null,
       amountMinor,
       originalAmountMinor: amountMinor,
       currency: args.conversion.currency,

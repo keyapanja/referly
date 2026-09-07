@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { analytics, conversions, commissions, affiliates, payouts, exportsSvc, validation } from "@referly/core";
+import { analytics, conversions, commissions, affiliates, payouts, exportsSvc, validation, campaigns } from "@referly/core";
 import { requireMerchantPrincipal, type AppEnv } from "../lib/auth";
 
 function period(c: { req: { query: (k: string) => string | undefined } }, now: Date) {
@@ -18,6 +18,8 @@ export function analyticsRoutes() {
   r.get("/affiliates", async (c) => c.json({ rows: await analytics.byAffiliate(c.get("deps").db, c.get("ctx"), period(c, c.get("now")())) }));
   r.get("/offers", async (c) => c.json({ rows: await analytics.byOffer(c.get("deps").db, c.get("ctx"), period(c, c.get("now")())) }));
   r.get("/programs", async (c) => c.json({ rows: await analytics.byProgram(c.get("deps").db, c.get("ctx"), period(c, c.get("now")())) }));
+  /** AN-05: campaign-period performance. */
+  r.get("/campaigns", async (c) => c.json({ rows: await campaigns.listCampaigns(c.get("deps").db, c.get("ctx")) }));
   r.get("/sources", async (c) => c.json({ rows: await analytics.bySource(c.get("deps").db, c.get("ctx"), period(c, c.get("now")())) }));
 
   /** AN-07: async exports. Request → job builds the file → download while it is valid. */

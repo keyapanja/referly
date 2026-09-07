@@ -43,6 +43,13 @@
       "when": 1788790701171,
       "tag": "0005_plan_limits",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1788791843150,
+      "tag": "0006_campaigns",
+      "breakpoints": true
     }
   ]
 }

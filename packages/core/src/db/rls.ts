@@ -65,6 +65,8 @@ export const RLS_TABLES = [
   "assets",
   "asset_permissions",
   "campaigns",
+  "campaign_participants",
+  "campaign_assets",
   "message_templates",
   "message_logs",
   "automation_rules",

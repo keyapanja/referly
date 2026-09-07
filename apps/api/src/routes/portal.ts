@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { z } from "zod";
-import { affiliates, commissions, conversions, offers, payouts, tenants, tracking, programs as programsSvc, assets } from "@referly/core";
+import { affiliates, commissions, conversions, offers, payouts, tenants, tracking, programs as programsSvc, assets, campaigns } from "@referly/core";
 import { requireAffiliatePrincipal, type AppEnv } from "../lib/auth";
 import { publicTenant } from "./auth";
 
@@ -26,13 +26,14 @@ export function portalRoutes() {
     const { db } = c.get("deps");
     const ctx = c.get("ctx");
     const affiliateId = requireAffiliatePrincipal(c);
-    const [balances, clicks, recentConversions, links, codes, nextPayout] = await Promise.all([
+    const [balances, clicks, recentConversions, links, codes, nextPayout, campaignRows] = await Promise.all([
       commissions.getBalances(db, ctx, affiliateId),
       tracking.listClicks(db, ctx, { affiliateId, limit: 1000 }),
       conversions.listConversions(db, ctx, { affiliateId, limit: 10 }),
       tracking.listTrackingLinks(db, ctx, affiliateId),
       tracking.listCouponCodes(db, ctx, affiliateId),
       payouts.listPayouts(db, ctx, { affiliateId, limit: 1 }),
+      campaigns.listCampaignsForAffiliate(db, ctx, affiliateId),
     ]);
     const allConversions = await conversions.listConversions(db, ctx, { affiliateId, limit: 10_000 });
     const valid = allConversions.filter((x) => x.status !== "cancelled" && x.status !== "reversed");
@@ -49,6 +50,7 @@ export function portalRoutes() {
       links: links.map((l) => ({ ...l, url: tracking.trackingUrl(c.get("deps").config.baseUrl, l) })),
       codes,
       lastPayout: nextPayout[0] ?? null,
+      campaigns: campaignRows.map((r) => ({ id: r.campaign.id, name: r.campaign.name, live: r.campaign.live, endAt: r.campaign.endAt, participantStatus: r.participantStatus })),
     });
   });
 
@@ -89,6 +91,10 @@ export function portalRoutes() {
     return c.json(await commissions.commissionStatement(c.get("deps").db, c.get("ctx"), affiliateId, { from, to }));
   });
   r.get("/payouts", async (c) => c.json({ payouts: await payouts.listPayouts(c.get("deps").db, c.get("ctx"), { affiliateId: requireAffiliatePrincipal(c) }) }));
+
+  /** Campaigns the affiliate is invited to or active in (AST-05). */
+  r.get("/campaigns", async (c) => c.json({ campaigns: await campaigns.listCampaignsForAffiliate(c.get("deps").db, c.get("ctx"), requireAffiliatePrincipal(c)) }));
+  r.post("/campaigns/:id/join", async (c) => c.json({ participant: await campaigns.joinCampaign(c.get("deps").db, c.get("ctx"), c.req.param("id"), requireAffiliatePrincipal(c)) }));
 
   /** AST-02: only assets permitted for this affiliate's programs. */
   r.get("/assets", async (c) => c.json({ assets: await assets.listAssetsForAffiliate(c.get("deps").db, c.get("ctx"), requireAffiliatePrincipal(c)) }));

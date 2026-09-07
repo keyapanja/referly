@@ -354,6 +354,8 @@ export const conversions = pgTable(
     status: text("status").notNull().default("pending"), // pending | approved | refunded | cancelled | reversed | disputed
     affiliateId: text("affiliate_id").references(() => affiliates.id),
     programId: text("program_id").references(() => programs.id),
+    /** Live campaign that applied at the time of the conversion, if any. */
+    campaignId: text("campaign_id"),
     attributionSource: text("attribution_source").notNull().default("none"), // link | coupon | manual | none
     isTest: boolean("is_test").notNull().default(false),
     metadata: jsonb("metadata").$type<Record<string, unknown>>().notNull().default({}),
@@ -408,6 +410,7 @@ export const commissions = pgTable(
     attributionId: text("attribution_id").references(() => attributions.id),
     affiliateId: text("affiliate_id").notNull().references(() => affiliates.id),
     programId: text("program_id").notNull().references(() => programs.id),
+    campaignId: text("campaign_id"),
     amountMinor: money("amount_minor").notNull(),
     originalAmountMinor: money("original_amount_minor").notNull(),
     currency: text("currency").notNull(),
@@ -434,7 +437,7 @@ export interface CommissionCalculationBasis {
   basisAmountMinor: number;
   rateBps?: number;
   fixedMinor?: number;
-  overrideSource: "program" | "program_offer" | "affiliate_program";
+  overrideSource: "program" | "program_offer" | "affiliate_program" | "campaign";
 }
 
 export const ledgerEntries = pgTable(
@@ -529,10 +532,40 @@ export const campaigns = pgTable(
     status: text("status").notNull().default("draft"), // draft | scheduled | active | ended | cancelled
     commissionRateBpsOverride: integer("commission_rate_bps_override"),
     commissionFixedMinorOverride: money("commission_fixed_minor_override"),
-    bonusRule: jsonb("bonus_rule").$type<{ thresholdMinor: number; bonusMinor: number } | null>(),
+    /** Restrict to some of the program's offers; null means every offer in the program. */
+    offerIds: jsonb("offer_ids").$type<string[] | null>(),
+    bonusRule: jsonb("bonus_rule").$type<{ metric: "conversions" | "revenue"; threshold: number; bonusMinor: number } | null>(),
     createdAt: createdAt(),
+    updatedAt: updatedAt(),
   },
   (t) => [index("campaigns_tenant_idx").on(t.tenantId)],
+);
+
+export const campaignParticipants = pgTable(
+  "campaign_participants",
+  {
+    id: id(),
+    tenantId: tenantRef(),
+    campaignId: text("campaign_id").notNull().references(() => campaigns.id),
+    affiliateId: text("affiliate_id").notNull().references(() => affiliates.id),
+    status: text("status").notNull().default("invited"), // invited | active
+    invitedAt: ts("invited_at").notNull(),
+    joinedAt: ts("joined_at"),
+    bonusAwardedAt: ts("bonus_awarded_at"),
+    bonusLedgerEntryId: text("bonus_ledger_entry_id"),
+  },
+  (t) => [uniqueIndex("campaign_participants_uq").on(t.campaignId, t.affiliateId), index("campaign_participants_affiliate_idx").on(t.tenantId, t.affiliateId)],
+);
+
+export const campaignAssets = pgTable(
+  "campaign_assets",
+  {
+    id: id(),
+    tenantId: tenantRef(),
+    campaignId: text("campaign_id").notNull().references(() => campaigns.id),
+    assetId: text("asset_id").notNull().references(() => assets.id),
+  },
+  (t) => [uniqueIndex("campaign_assets_uq").on(t.campaignId, t.assetId)],
 );
 
 export const messageTemplates = pgTable(
@@ -707,6 +740,8 @@ export const schema = {
   assets,
   assetPermissions,
   campaigns,
+  campaignParticipants,
+  campaignAssets,
   messageTemplates,
   messageLogs,
   automationRules,
@@ -737,6 +772,8 @@ export type Asset = typeof assets.$inferSelect;
 export type AssetPermission = typeof assetPermissions.$inferSelect;
 export type AuthToken = typeof authTokens.$inferSelect;
 export type Export = typeof exports.$inferSelect;
+export type Campaign = typeof campaigns.$inferSelect;
+export type CampaignParticipant = typeof campaignParticipants.$inferSelect;
 export type MessageTemplate = typeof messageTemplates.$inferSelect;
 export type MessageLog = typeof messageLogs.$inferSelect;
 export type AuditLog = typeof auditLogs.$inferSelect;

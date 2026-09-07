@@ -80,6 +80,10 @@ Payable balance = sum of payable commissions + approved adjustments - paid - rev
 3. Notifications: template rendering with safe variables, email adapter (console/Resend/SMTP), message log, event-driven worker. **Done.** Asset library with program/offer/affiliate scoping, merchant and portal UI. **Done.**
 4. Web: merchant onboarding flow, merchant app, affiliate portal, public join/invite pages. **Done.**
 5. Dashboards and CSV export (synchronous, small datasets). **Done.** Email verification, password reset, per-IP rate limiting on public endpoints. **Done.** Asset file uploads (local or S3-compatible storage) and async CSV exports built by the worker and stored privately. **Done.** Postgres row-level security with per-request transactions and per-job scoping. **Done.** Platform admin surface (tenants, plans, custom limits, suspension, dead-job retry) and plan limits with usage metering. **Done.** Phase 1 is complete; payment collection (Stripe Billing) is deliberately deferred until pricing is validated (PRD s19).
+
+### Phase 2 progress
+
+- **Campaigns (AST-03..05, AN-05). Done.** Time-bound promotions per program with an optional commission override (highest precedence while live), a once-per-affiliate bonus on a conversions or revenue threshold, campaign assets, explicit participation (invite in the merchant app, join in the portal), notifications on invite, automatic ending by the scheduler, and campaign performance in Analytics. Gated to plans with the campaigns feature.
 6. Phase 2 candidates: campaigns, affiliate groups/tiers, automation rule builder UI, Stripe/Shopify adapters, custom domains, disputes workflow.
 
 ## 6. Contradictions and clarifications found in the PRD

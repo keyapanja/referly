@@ -24,6 +24,7 @@ export const TEMPLATE_VARIABLES = [
   "payout_date",
   "portal_url",
   "reason",
+  "campaign_name",
 ] as const;
 export type TemplateVariable = (typeof TEMPLATE_VARIABLES)[number];
 
@@ -72,7 +73,7 @@ export function defaultTemplates(tone: Tone): Array<{ key: TemplateKey; subject:
     { key: "commission_approved", subject: "Commission approved", body: `${g}\n\nYour commission of {{amount}} {{currency}} has been approved.\n\n${s}` },
     { key: "commission_reversed", subject: "Commission adjusted", body: `${g}\n\nA commission of {{amount}} {{currency}} was reversed. Reason: {{reason}}\n\n${s}` },
     { key: "payout_paid", subject: "Payout sent", body: `${g}\n\nWe sent your payout of {{amount}} {{currency}} on {{payout_date}}.\n\n${s}` },
-    { key: "campaign_launched", subject: "New campaign: {{program_name}}", body: `${g}\n\nA new campaign is live. Check your portal for assets and details: {{portal_url}}\n\n${s}` },
+    { key: "campaign_launched", subject: "You're invited: {{campaign_name}}", body: `${g}\n\n{{business_name}} has invited you to the {{campaign_name}} campaign for {{program_name}}. Join it in your portal to get the campaign rate, bonus and creative: {{portal_url}}\n\n${s}` },
     { key: "policy_updated", subject: "{{program_name}} terms updated", body: `${g}\n\nThe terms for {{program_name}} have changed. Please review and accept them in your portal: {{portal_url}}\n\n${s}` },
     { key: "verify_email", subject: "Verify your email for {{business_name}}", body: `${g}\n\nConfirm your email address to finish setting up {{business_name}}: {{link}}\n\nThis link expires in 24 hours.\n\n${s}` },
     { key: "password_reset", subject: "Reset your password", body: `${g}\n\nWe received a request to reset the password for your {{business_name}} account. Choose a new password here: {{link}}\n\nIf you did not ask for this, you can ignore this email. The link expires in 1 hour.\n\n${s}` },

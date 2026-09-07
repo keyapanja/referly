@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
 import { schema, type Db, type Job } from "@referly/core";
-import { jobs, messaging, commissions, systemContext, events as eventsMod, tenants as tenantsSvc, exportsSvc, withTenantScope, withRlsBypass } from "@referly/core";
+import { jobs, messaging, commissions, systemContext, events as eventsMod, tenants as tenantsSvc, exportsSvc, withTenantScope, withRlsBypass, campaigns as campaignsSvc } from "@referly/core";
 import { PRIVATE_PREFIX, type FileStorage } from "./storage";
 
 const { affiliates: affiliatesTable, offers: offersTable, programs: programsTable, tenants: tenantsTable } = schema;
@@ -32,6 +32,7 @@ const NOTIFICATION_RULES: Partial<Record<eventsMod.DomainEventType, messaging.Te
   "commission.reversed": "commission_reversed",
   "payout.paid": "payout_paid",
   "program.updated": "policy_updated",
+  "campaign.invited": "campaign_launched",
 };
 
 export function createHandlers(deps: WorkerDeps): Record<string, jobs.JobHandler> {
@@ -67,6 +68,7 @@ export function createHandlers(deps: WorkerDeps): Record<string, jobs.JobHandler
           affiliate_name: affiliate?.name ?? (event.data.name as string | undefined) ?? recipient,
           business_name: tenant.name,
           program_name: program?.name ?? "",
+          campaign_name: (event.data.campaignName as string | undefined) ?? "",
           offer_name: offer?.name ?? "",
           amount: amountMinor !== undefined ? formatMinor(amountMinor) : "",
           currency: (event.data.currency as string | undefined) ?? tenant.currency,
@@ -114,7 +116,11 @@ export function createHandlers(deps: WorkerDeps): Record<string, jobs.JobHandler
 
     settle_holding_periods: async () => {
       const all = await withRlsBypass(deps.db, (db) => db.select({ id: tenantsTable.id }).from(tenantsTable).where(eq(tenantsTable.status, "active")));
-      for (const { id } of all) await withTenantScope(deps.db, id, (db) => commissions.settleHoldingPeriods(db, systemContext(id, now), now()));
+      for (const { id } of all)
+        await withTenantScope(deps.db, id, async (db) => {
+          await commissions.settleHoldingPeriods(db, systemContext(id, now), now());
+          await campaignsSvc.endExpiredCampaigns(db, systemContext(id, now), now());
+        });
     },
   };
 }

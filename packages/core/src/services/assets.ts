@@ -7,6 +7,7 @@ import { newId } from "../ids";
 import { notFound } from "../errors";
 import { type TenantContext, require as requirePerm, requireAffiliate } from "../context";
 import { writeAudit, snapshot } from "./audit";
+import { campaignAssetIdsForAffiliate } from "./campaigns";
 
 /**
  * Asset library (AST-01, AST-02). Assets are links to hosted files or inline copy. Visibility
@@ -168,5 +169,7 @@ export async function listAssetsForAffiliate(db: DbLike, ctx: TenantContext, aff
       .filter((p) => (p.programId && programSet.has(p.programId)) || (p.offerId && offerIds.has(p.offerId)) || p.affiliateId === affiliateId)
       .map((p) => p.assetId),
   );
+  // AST-04: assets attached to a live campaign the affiliate has joined.
+  for (const id of await campaignAssetIdsForAffiliate(db, ctx, affiliateId)) allowed.add(id);
   return all.filter((a) => a.visibility === "all" || allowed.has(a.id));
 }

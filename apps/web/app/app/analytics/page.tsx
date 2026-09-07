@@ -20,6 +20,7 @@ export default function AnalyticsPage() {
   const { data: byOffer } = useApi<any>(`/v1/analytics/offers${q}`);
   const { data: byProgram } = useApi<any>(`/v1/analytics/programs${q}`);
   const { data: bySource } = useApi<any>(`/v1/analytics/sources${q}`);
+  const { data: byCampaign } = useApi<any>("/v1/analytics/campaigns");
   const cur = me?.tenant?.currency ?? "USD";
   const { data: exportsData, reload: reloadExports } = useApi<any>("/v1/analytics/exports");
   const { busy, error: exportError, run } = useAction();
@@ -132,6 +133,22 @@ export default function AnalyticsPage() {
               { header: "Active affiliates", cell: (r: any) => r.activeAffiliates, num: true },
               { header: "Revenue", cell: (r: any) => money(r.revenueMinor, cur), num: true },
               { header: "Commission", cell: (r: any) => money(r.commissionMinor, cur), num: true },
+            ]}
+          />
+        </div>
+        <div className="card">
+          <h2>Campaigns</h2>
+          <Table
+            rows={byCampaign?.rows}
+            keyOf={(r: any) => r.id}
+            empty="No campaigns yet."
+            columns={[
+              { header: "Campaign", cell: (r: any) => <Link href={`/app/campaigns/${r.id}`}>{r.name}</Link> },
+              { header: "Status", cell: (r: any) => <Badge value={r.status} /> },
+              { header: "Active", cell: (r: any) => r.performance.participants.active, num: true },
+              { header: "Sales", cell: (r: any) => r.performance.conversions, num: true },
+              { header: "Revenue", cell: (r: any) => money(r.performance.revenueMinor, cur), num: true },
+              { header: "Cost", cell: (r: any) => money(r.performance.commissionMinor + r.performance.bonusesMinor, cur), num: true },
             ]}
           />
         </div>
