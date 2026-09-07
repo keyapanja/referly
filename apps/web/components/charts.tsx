@@ -16,19 +16,20 @@ export interface Point {
 }
 
 /** Axis ticks on a 1-2-5 step so counts stay whole numbers and money lands on round values. */
-function ticks(max: number): number[] {
+function ticks(max: number, integer = false): number[] {
   if (max <= 0) return [0, 1];
   const rough = max / 4;
   const pow = 10 ** Math.floor(Math.log10(rough));
   const n = rough / pow;
-  const step = (n <= 1 ? 1 : n <= 2 ? 2 : n <= 5 ? 5 : 10) * pow;
+  let step = (n <= 1 ? 1 : n <= 2 ? 2 : n <= 5 ? 5 : 10) * pow;
+  if (integer && step < 1) step = 1;
   const out: number[] = [];
   for (let v = 0; v < max + step - 1e-9 && out.length < 8; v += step) out.push(Number(v.toFixed(6)));
   return out;
 }
 
-function niceMax(max: number): number {
-  const t = ticks(max);
+function niceMax(max: number, integer = false): number {
+  const t = ticks(max, integer);
   return t[t.length - 1] || 1;
 }
 
@@ -53,20 +54,22 @@ interface ChartProps {
   format: (v: number) => string;
   prevLabel?: string;
   height?: number;
+  /** Whole-number series (counts): axis steps never go below 1. */
+  integer?: boolean;
 }
 
-export function SeriesChart({ points, kind, format, prevLabel = "previous period" }: ChartProps) {
+export function SeriesChart({ points, kind, format, prevLabel = "previous period", integer = false }: ChartProps) {
   const id = useId();
   const [hover, setHover] = useState<number | null>(null);
   const max = useMemo(() => Math.max(0, ...points.map((p) => Math.max(p.value, p.prev ?? 0))), [points]);
-  const top = niceMax(max);
+  const top = niceMax(max, integer);
   const innerW = W - PAD.left - PAD.right;
   const innerH = H - PAD.top - PAD.bottom;
   const n = points.length;
   const x = (i: number) => (n <= 1 ? PAD.left + innerW / 2 : PAD.left + (innerW * i) / (n - 1));
   const y = (v: number) => PAD.top + innerH - (innerH * v) / top;
   const hasPrev = points.some((p) => p.prev != null);
-  const yTicks = ticks(max);
+  const yTicks = ticks(max, integer);
   const labelEvery = Math.max(1, Math.ceil(n / 6));
 
   const linePath = (key: "value" | "prev") =>

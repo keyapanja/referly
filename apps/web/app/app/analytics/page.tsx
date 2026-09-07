@@ -139,10 +139,10 @@ export default function AnalyticsPage() {
           <SeriesChart points={points("attributedRevenueMinor")} kind="line" format={moneyFmt} />
         </ChartCard>
         <ChartCard title="Attributed sales" subtitle={`per ${series?.current?.granularity ?? "period"}`} legend={legend}>
-          <SeriesChart points={points("attributedConversions")} kind="columns" format={countFmt} />
+          <SeriesChart points={points("attributedConversions")} kind="columns" format={countFmt} integer />
         </ChartCard>
         <ChartCard title="Clicks" subtitle={`per ${series?.current?.granularity ?? "period"}`} legend={legend}>
-          <SeriesChart points={points("clicks")} kind="columns" format={countFmt} />
+          <SeriesChart points={points("clicks")} kind="columns" format={countFmt} integer />
         </ChartCard>
         <ChartCard title="Commission created" subtitle={`per ${series?.current?.granularity ?? "period"}`} legend={legend}>
           <SeriesChart points={points("commissionMinor")} kind="line" format={moneyFmt} />
