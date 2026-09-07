@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { analytics, conversions, commissions, affiliates, payouts, exportsSvc, validation, campaigns } from "@referly/core";
+import { analytics, conversions, commissions, affiliates, payouts, exportsSvc, validation, campaigns, reporting } from "@referly/core";
 import { requireMerchantPrincipal, type AppEnv } from "../lib/auth";
 
 function period(c: { req: { query: (k: string) => string | undefined } }, now: Date) {
@@ -18,6 +18,19 @@ export function analyticsRoutes() {
   r.get("/affiliates", async (c) => c.json({ rows: await analytics.byAffiliate(c.get("deps").db, c.get("ctx"), period(c, c.get("now")())) }));
   r.get("/offers", async (c) => c.json({ rows: await analytics.byOffer(c.get("deps").db, c.get("ctx"), period(c, c.get("now")())) }));
   r.get("/programs", async (c) => c.json({ rows: await analytics.byProgram(c.get("deps").db, c.get("ctx"), period(c, c.get("now")())) }));
+  /** Phase 2 richer analytics: trends, comparison, funnel, groups. */
+  r.get("/timeseries", async (c) => {
+    const p = period(c, c.get("now")());
+    const g = c.req.query("granularity") as reporting.Granularity | undefined;
+    const granularity = g && ["day", "week", "month"].includes(g) ? g : reporting.autoGranularity(p);
+    const current = await reporting.timeseries(c.get("deps").db, c.get("ctx"), p, granularity);
+    const previous = c.req.query("compare") === "1" ? await reporting.timeseries(c.get("deps").db, c.get("ctx"), reporting.previousPeriod(p), granularity) : null;
+    return c.json({ current, previous });
+  });
+  r.get("/compare", async (c) => c.json(await reporting.compare(c.get("deps").db, c.get("ctx"), period(c, c.get("now")()))));
+  r.get("/funnel", async (c) => c.json(await reporting.funnel(c.get("deps").db, c.get("ctx"), period(c, c.get("now")()))));
+  r.get("/groups", async (c) => c.json(await reporting.byGroup(c.get("deps").db, c.get("ctx"), period(c, c.get("now")()))));
+
   /** AN-05: campaign-period performance. */
   r.get("/campaigns", async (c) => c.json({ rows: await campaigns.listCampaigns(c.get("deps").db, c.get("ctx")) }));
   r.get("/sources", async (c) => c.json({ rows: await analytics.bySource(c.get("deps").db, c.get("ctx"), period(c, c.get("now")())) }));

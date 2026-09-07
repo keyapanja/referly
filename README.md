@@ -78,6 +78,7 @@ Docker images for the API and web app, a `docker-compose.yml` with Postgres, and
 | Campaigns | `GET/POST /v1/campaigns`, `GET/PATCH /:id`, `POST /:id/status`, `POST /:id/participants`, `DELETE /:id/participants/:affiliateId`, `PUT /:id/assets`; portal `GET /portal/campaigns`, `POST /portal/campaigns/:id/join`; `GET /v1/analytics/campaigns` |
 | Billing | `GET /v1/tenant/billing` (plan, usage, limits, warnings) |
 | Platform admin | `GET /admin/overview`, `GET /admin/tenants`, `GET/PATCH /admin/tenants/:id` (plan, custom limits, status), `GET /admin/jobs`, `POST /admin/jobs/:id/retry` |
+| Reporting | `GET /v1/analytics/timeseries?from&to&granularity=day|week|month&compare=1`, `/compare`, `/funnel`, `/groups` (all accept `from`/`to`) |
 | Exports | `POST /v1/analytics/exports` (async CSV: affiliates, conversions, commissions, payouts, ledger, clicks), `GET /v1/analytics/exports`, `GET /:id`, `GET /:id/download` |
 | Payouts | `GET/POST /v1/payouts`, `GET /payable/:affiliateId`, `POST /batch-all`, `POST /external`, `POST /:id/processing|paid|failed|cancel` |
 | Public | `GET /r/:token` (click redirect), `GET/POST /join/:token[/apply]`, `GET/POST /invite/:token[/accept]` |

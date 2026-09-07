@@ -853,6 +853,132 @@ li {
   background: var(--danger);
 }
 
+/* Charts ---------------------------------------------------------------- */
+.viz {
+  --series-1: #2a78d6;
+  --series-prev: #b8b8c2;
+  --viz-grid: #ececf0;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .viz {
+    --series-1: #3987e5;
+    --series-prev: #5b5b66;
+    --viz-grid: #2a2a30;
+  }
+}
+:root[data-theme="dark"] .viz {
+  --series-1: #3987e5;
+  --series-prev: #5b5b66;
+  --viz-grid: #2a2a30;
+}
+.viz-grid {
+  stroke: var(--viz-grid);
+  stroke-width: 1;
+}
+.viz-tick {
+  font-size: 10.5px;
+  fill: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.viz-line {
+  fill: none;
+  stroke: var(--series-1);
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+.viz-line-prev {
+  fill: none;
+  stroke: var(--series-prev);
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+.viz-area {
+  fill: var(--series-1);
+  opacity: 0.1;
+}
+.viz-dot {
+  fill: var(--series-1);
+  stroke: var(--surface);
+  stroke-width: 2;
+}
+.viz-crosshair {
+  stroke: var(--border-strong);
+  stroke-width: 1;
+}
+.viz-col {
+  fill: var(--series-1);
+  transition: opacity 0.1s ease;
+}
+.viz-col.hover {
+  opacity: 0.8;
+}
+.viz-prev-mark {
+  fill: var(--series-prev);
+}
+.viz-tip {
+  position: absolute;
+  top: 8px;
+  transform: translateX(-50%);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  padding: 6px 10px;
+  font-size: 12.5px;
+  pointer-events: none;
+  white-space: nowrap;
+  z-index: 2;
+}
+.viz-tip-label {
+  color: var(--muted);
+  margin-bottom: 2px;
+}
+.viz-swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  background: var(--series-1);
+  vertical-align: -1px;
+}
+.viz-swatch.prev {
+  background: var(--series-prev);
+}
+.viz-legend {
+  display: flex;
+  gap: 14px;
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.viz-legend .viz-swatch {
+  background: var(--series-1);
+}
+.viz-legend .viz-swatch.prev {
+  background: var(--series-prev);
+}
+.delta {
+  font-weight: 500;
+  color: var(--muted);
+}
+.delta.good {
+  color: var(--success);
+}
+.delta.bad {
+  color: var(--danger);
+}
+.funnel-row {
+  margin: 10px 0;
+}
+.funnel-label {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+  margin-bottom: 4px;
+}
+
 /* Auth and public pages --------------------------------------------- */
 .center {
   min-height: 100vh;

@@ -598,6 +598,24 @@ describe("MVP acceptance over HTTP", () => {
     expect((await call("/v1/webhooks", { token: affiliateToken })).status).toBe(403);
   });
 
+  it("Reporting: time series, comparison, funnel and groups respond for the merchant only", async () => {
+    const q = "?from=2026-01-01T00:00:00Z&to=2026-12-31T23:59:59Z";
+    const ts = await call(`/v1/analytics/timeseries${q}&granularity=month&compare=1`, { token: ownerToken });
+    expect(ts.status).toBe(200);
+    expect(ts.body.current.granularity).toBe("month");
+    expect(ts.body.current.buckets).toHaveLength(12);
+    expect(ts.body.previous.buckets).toHaveLength(12);
+    expect(ts.body.current.buckets.reduce((s: number, b: any) => s + b.conversions, 0)).toBeGreaterThan(0);
+    const cmp = await call(`/v1/analytics/compare${q}`, { token: ownerToken });
+    expect(cmp.body.current.conversions).toBeGreaterThan(0);
+    expect(cmp.body.deltas.conversions).toHaveProperty("abs");
+    const funnel = await call(`/v1/analytics/funnel${q}`, { token: ownerToken });
+    expect(funnel.body.stages.map((s: any) => s.key)).toEqual(["clicks", "attributed", "approved"]);
+    const groups = await call(`/v1/analytics/groups${q}`, { token: ownerToken });
+    expect(groups.body.rows[0]).toMatchObject({ name: "Alumni" });
+    expect((await call(`/v1/analytics/timeseries${q}`, { token: affiliateToken })).status).toBe(403);
+  });
+
   it("Validation and permissions errors are JSON with codes", async () => {
     const bad = await call("/v1/offers", { method: "POST", token: ownerToken, json: { name: "" } });
     expect(bad.status).toBe(400);
