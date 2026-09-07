@@ -27,6 +27,7 @@ if (process.env.PLATFORM_ADMIN_EMAIL && process.env.PLATFORM_ADMIN_PASSWORD) {
   console.log(`platform admin ready: ${admin.email}`);
 }
 const worker = startWorker({ db, email, storage, webUrl });
+// webhook deliveries use the global fetch
 
 const server = serve({ fetch: app.fetch, port }, (info) => {
   console.log(`API listening on http://localhost:${info.port} (db: ${process.env.DATABASE_URL ? "postgres" : "pglite"})`);

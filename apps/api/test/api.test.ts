@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { createDb, messaging, platform, withRlsBypass, payoutProviders, type DbHandle } from "@referly/core";
+import { createDb, messaging, platform, withRlsBypass, payoutProviders, webhooks, type DbHandle } from "@referly/core";
 import { createApp, type App } from "../src/app";
 import { runOnce } from "../src/worker";
 import { resetRateLimits } from "../src/lib/ratelimit";
@@ -22,12 +22,19 @@ const now = () => new Date(clock);
 const email = new messaging.MemoryEmailProvider();
 const memoryPayoutProvider = new payoutProviders.MemoryPayoutProvider("stripe_connect");
 const memoryPayouts = { factory: () => memoryPayoutProvider };
+const webhookCalls: { url: string; headers: Record<string, string>; body: string }[] = [];
+const webhookFetch = (async (url: string | URL | Request, init?: RequestInit) => {
+  const headers: Record<string, string> = {};
+  for (const [k, v] of Object.entries((init?.headers as Record<string, string>) ?? {})) headers[k.toLowerCase()] = v;
+  webhookCalls.push({ url: String(url), headers, body: String(init?.body ?? "") });
+  return new Response("ok", { status: 200 });
+}) as unknown as typeof fetch;
 const BASE = "http://api.test";
 
 beforeAll(async () => {
   handle = await createDb();
   storage = new LocalStorage(await mkdtemp(path.join(tmpdir(), "referly-files-")), BASE);
-  app = createApp({ db: handle.db, email, storage, payoutProviders: memoryPayouts, config: { baseUrl: BASE, webUrl: "http://web.test", cookieSecure: false, now } });
+  app = createApp({ db: handle.db, email, storage, payoutProviders: memoryPayouts, webhookFetch, config: { baseUrl: BASE, webUrl: "http://web.test", cookieSecure: false, now } });
 });
 afterAll(() => handle.close());
 beforeAll(() => resetRateLimits());
@@ -564,6 +571,31 @@ describe("MVP acceptance over HTTP", () => {
     expect((await call(`/v1/conversions/${conv.id}`, { token: ownerToken })).body.conversion.status).not.toBe("disputed");
     expect((await call("/portal/disputes", { token: affiliateToken })).body.disputes[0]).toMatchObject({ id: disputeId, status: "resolved" });
     expect((await call(`/v1/disputes/${disputeId}`, { token: affiliateToken })).status).toBe(403);
+  });
+
+  it("Webhooks: a subscription receives a signed delivery from the worker and the log shows it", async () => {
+    const created = await call("/v1/webhooks", { method: "POST", token: ownerToken, json: { url: "https://hooks.example.test/catch", events: ["conversion.created"], description: "Zapier" } });
+    expect(created.status).toBe(201);
+    expect(created.body.secret).toMatch(/^whsec_/);
+    expect(created.body.subscription.secretEnc).toBeUndefined();
+    const subId = created.body.subscription.id;
+    const ping = await call(`/v1/webhooks/${subId}/test`, { method: "POST", token: ownerToken });
+    expect(ping.body).toMatchObject({ ok: true, status: 200 });
+
+    webhookCalls.length = 0;
+    const sale = await call("/v1/conversions", { method: "POST", token: ownerToken, json: { source: "manual", externalOrderId: "ORDER-HOOK-1", offerId, amountMinor: 9_900, affiliateId, programId, reason: "phone order" } });
+    expect(sale.status).toBe(201);
+    await runOnce({ db: handle.db, email, storage, webUrl: "http://web.test", now, payoutProviders: memoryPayouts, webhookFetch });
+    await runOnce({ db: handle.db, email, storage, webUrl: "http://web.test", now, payoutProviders: memoryPayouts, webhookFetch });
+    const hit = webhookCalls.find((c) => c.headers["x-referly-event"] === "conversion.created");
+    expect(hit).toBeTruthy();
+    const body = JSON.parse(hit!.body);
+    expect(body.data.conversion).toMatchObject({ externalOrderId: "ORDER-HOOK-1", amountMinor: 9_900 });
+    expect(webhooks.verifySignature(created.body.secret, hit!.headers["x-referly-timestamp"]!, hit!.body, hit!.headers["x-referly-signature"]!, 300, now().getTime())).toBe(true);
+    const log = await call(`/v1/webhooks/${subId}/deliveries`, { token: ownerToken });
+    expect(log.body.deliveries.some((d: any) => d.eventType === "conversion.created" && d.status === "delivered" && d.responseStatus === 200)).toBe(true);
+    expect((await call("/v1/webhooks", { token: ownerToken })).body.subscriptions[0].stats.delivered).toBeGreaterThanOrEqual(2);
+    expect((await call("/v1/webhooks", { token: affiliateToken })).status).toBe(403);
   });
 
   it("Validation and permissions errors are JSON with codes", async () => {

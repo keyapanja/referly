@@ -33,5 +33,6 @@ export * as groups from "./services/groups";
 export * as tiers from "./services/tiers";
 export * as integrations from "./services/integrations";
 export * as disputes from "./services/disputes";
+export * as webhooks from "./services/webhooks";
 export * as payoutProviders from "./services/payoutProviders";
 export { encryptJson, decryptJson } from "./crypto";

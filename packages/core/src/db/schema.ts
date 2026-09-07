@@ -652,6 +652,48 @@ export const automationRuns = pgTable(
   (t) => [index("automation_runs_rule_idx").on(t.ruleId, t.createdAt), index("automation_runs_entity_idx").on(t.ruleId, t.entityType, t.entityId)],
 );
 
+/** Outbound webhooks (Zapier/Make): subscriptions and their signed deliveries. */
+export const webhookSubscriptions = pgTable(
+  "webhook_subscriptions",
+  {
+    id: id(),
+    tenantId: tenantRef(),
+    url: text("url").notNull(),
+    secretEnc: text("secret_enc").notNull(),
+    secretHint: text("secret_hint").notNull(),
+    events: jsonb("events").$type<string[]>().notNull().default([]),
+    description: text("description"),
+    status: text("status").notNull().default("active"), // active | paused | disabled
+    consecutiveFailures: integer("consecutive_failures").notNull().default(0),
+    lastDeliveryAt: ts("last_delivery_at"),
+    lastStatus: text("last_status"),
+    createdByUserId: text("created_by_user_id"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index("webhook_subscriptions_tenant_idx").on(t.tenantId, t.status)],
+);
+
+export const webhookOutboundDeliveries = pgTable(
+  "webhook_outbound_deliveries",
+  {
+    id: id(),
+    tenantId: tenantRef(),
+    subscriptionId: text("subscription_id").notNull().references(() => webhookSubscriptions.id),
+    eventType: text("event_type").notNull(),
+    payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
+    attempts: integer("attempts").notNull().default(0),
+    status: text("status").notNull().default("pending"), // pending | delivered | failed | dead
+    responseStatus: integer("response_status"),
+    responseBody: text("response_body"),
+    error: text("error"),
+    deliveredAt: ts("delivered_at"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index("webhook_outbound_deliveries_sub_idx").on(t.subscriptionId, t.createdAt)],
+);
+
 /** Disputes (Phase 2): contested sales and attribution claims. */
 export const disputes = pgTable(
   "disputes",
@@ -888,6 +930,8 @@ export const schema = {
   tenantIntegrations,
   disputes,
   disputeComments,
+  webhookSubscriptions,
+  webhookOutboundDeliveries,
   auditLogs,
   jobs,
   exports,
@@ -919,6 +963,8 @@ export type Task = typeof tasks.$inferSelect;
 export type AffiliateGroup = typeof affiliateGroups.$inferSelect;
 export type TenantIntegration = typeof tenantIntegrations.$inferSelect;
 export type Dispute = typeof disputes.$inferSelect;
+export type WebhookSubscription = typeof webhookSubscriptions.$inferSelect;
+export type WebhookOutboundDelivery = typeof webhookOutboundDeliveries.$inferSelect;
 export type DisputeComment = typeof disputeComments.$inferSelect;
 export type ProgramRateTier = typeof programRateTiers.$inferSelect;
 export type AutomationRun = typeof automationRuns.$inferSelect;

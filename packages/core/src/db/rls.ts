@@ -78,6 +78,8 @@ export const RLS_TABLES = [
   "tenant_integrations",
   "disputes",
   "dispute_comments",
+  "webhook_subscriptions",
+  "webhook_outbound_deliveries",
   "audit_logs",
   "webhook_deliveries",
   "exports",

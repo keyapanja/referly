@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
 import { schema, type Db, type DbLike, type Job, type TenantContext } from "@referly/core";
-import { jobs, messaging, commissions, systemContext, events as eventsMod, tenants as tenantsSvc, exportsSvc, withTenantScope, withRlsBypass, campaigns as campaignsSvc, automation, integrations } from "@referly/core";
+import { jobs, messaging, commissions, systemContext, events as eventsMod, tenants as tenantsSvc, exportsSvc, withTenantScope, withRlsBypass, campaigns as campaignsSvc, automation, integrations, webhooks } from "@referly/core";
 import { PRIVATE_PREFIX, type FileStorage } from "./storage";
 
 const { affiliates: affiliatesTable, offers: offersTable, programs: programsTable, tenants: tenantsTable } = schema;
@@ -18,6 +18,7 @@ export interface WorkerDeps {
   webUrl: string;
   now?: () => Date;
   payoutProviders?: integrations.IntegrationDeps;
+  webhookFetch?: typeof fetch;
 }
 
 /** Event → template mapping. Kept as data so it is inspectable (PRD "explainable automation"). */
@@ -90,7 +91,14 @@ export function createHandlers(deps: WorkerDeps): Record<string, jobs.JobHandler
         // Built-in notification first, then the tenant's own rules (AUTO-01..05).
         await sendBuiltInNotification(db, ctx, event);
         await automation.runRulesForEvent(db, ctx, event, { email: deps.email, webUrl: deps.webUrl });
+        await webhooks.fanOut(db, ctx, event);
       });
+    },
+
+    /** Outbound webhook delivery; throws on failure so the job retries with backoff. */
+    deliver_webhook: async (job: Job) => {
+      const { deliveryId, tenantId } = job.payload as { deliveryId: string; tenantId: string };
+      await withTenantScope(deps.db, tenantId, (db) => webhooks.deliver(db, systemContext(tenantId, now), deliveryId, { fetchImpl: deps.webhookFetch, attempt: job.attempts, maxAttempts: job.maxAttempts }));
     },
 
     /** AN-07: build a CSV page by page and store it privately; the API streams it back to authorised users. */

@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { api, API_URL } from "@/lib/api";
 import { useAction, useApi } from "@/lib/hooks";
@@ -165,7 +166,7 @@ export default function SettingsPage() {
         <div>
           <div className="card">
             <h2>Integrations</h2>
-            <p className="muted">Your checkout posts orders to the conversions endpoint with an API key. Repeated posts with the same order id are ignored.</p>
+            <p className="muted">Your checkout posts orders to the conversions endpoint with an API key. Repeated posts with the same order id are ignored. To push events out to Zapier, Make or your own systems, see <Link href="/app/webhooks">Webhooks</Link>.</p>
             <CopyBox value={`POST ${API_URL}/v1/conversions`} />
             {secret ? (
               <Alert kind="success">

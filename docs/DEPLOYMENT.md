@@ -60,6 +60,29 @@ api.yourdomain.com {
 
 Migration `0004_rls.sql` enables Postgres row-level security on every tenant table (with `FORCE`, so the application's own role is subject to it). The API opens one transaction per request and sets `app.tenant_id` once the caller's tenant is known; the worker scopes each job the same way. With no scope set, tenant tables read as empty and writes are rejected, so a missing filter in application code fails closed instead of leaking. Connect the API with a normal role (not a superuser: superusers ignore RLS).
 
+## Outbound webhooks (Zapier, Make, custom)
+
+Merchants add endpoints under Webhooks. Every stored event of a subscribed type becomes a signed POST from the worker:
+
+```
+POST <endpoint>
+content-type: application/json
+x-referly-event: conversion.created
+x-referly-delivery: whd_...        (unique; deduplicate on it)
+x-referly-timestamp: 1725000000     (unix seconds)
+x-referly-signature: v1=<hex HMAC-SHA256(secret, timestamp + "." + raw body)>
+```
+
+Node verification:
+
+```js
+const crypto = require("crypto");
+const expected = crypto.createHmac("sha256", SECRET).update(`${ts}.${rawBody}`).digest("hex");
+const ok = crypto.timingSafeEqual(Buffer.from(expected, "hex"), Buffer.from(sig.slice(3), "hex"));
+```
+
+Respond 2xx within 10 s. Failures retry 8 times with exponential backoff (30 s doubling, capped at 1 h); after 5 exhausted deliveries in a row the endpoint is auto-paused and a task is created. Deliveries and responses are visible in the endpoint's log, with one-click redelivery. Zapier: "Webhooks by Zapier → Catch Hook". Make: "Custom webhook". Neither verifies signatures by default; the headers are there when you want to.
+
 ## Migrations
 
 `packages/core/drizzle/*.sql` run automatically when the API starts (Drizzle migrator, tracked in `__drizzle_migrations`). To add one: change `packages/core/src/db/schema.ts`, then:

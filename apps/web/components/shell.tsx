@@ -43,6 +43,7 @@ const MERCHANT_NAV: { section: string; items: NavItem[] }[] = [
     items: [
       ["/app/messages", "Messages", "mail"],
       ["/app/automation", "Automation", "sliders"],
+      ["/app/webhooks", "Webhooks", "link"],
       ["/app/settings", "Settings", "sliders"],
     ],
   },

@@ -38,6 +38,7 @@ export const ID_PREFIXES = {
   campaignParticipant: "cpp",
   campaignAsset: "cpa",
   task: "tsk",
+  webhookSubscription: "whs",
   disputeComment: "dsc",
   dispute: "dsp",
   integration: "int",

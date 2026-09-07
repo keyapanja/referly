@@ -25,6 +25,7 @@ import { campaignRoutes } from "./routes/campaigns";
 import { automationRoutes } from "./routes/automation";
 import { groupRoutes } from "./routes/groups";
 import { disputeRoutes } from "./routes/disputes";
+import { webhookRoutes } from "./routes/webhooks";
 import { rateLimit } from "./lib/ratelimit";
 import { PRIVATE_PREFIX, type FileStorage } from "./storage";
 
@@ -50,6 +51,8 @@ export interface AppDeps {
   config: AppConfig;
   /** Overrides for payout provider construction (tests inject an in-memory provider). */
   payoutProviders?: integrations.IntegrationDeps;
+  /** fetch used for outbound webhook deliveries and tests (tests inject a stub). */
+  webhookFetch?: typeof fetch;
 }
 
 export function createApp(deps: AppDeps & { db: Db }) {
@@ -116,6 +119,7 @@ export function createApp(deps: AppDeps & { db: Db }) {
   app.route("/v1/automation", automationRoutes());
   app.route("/v1/groups", groupRoutes());
   app.route("/v1/disputes", disputeRoutes());
+  app.route("/v1/webhooks", webhookRoutes());
   app.route("/portal", portalRoutes());
 
   return app;
