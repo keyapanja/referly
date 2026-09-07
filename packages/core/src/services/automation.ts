@@ -38,6 +38,8 @@ export const TRIGGERS = [
   { type: "commission.reversed", label: "Commission reversed" },
   { type: "payout.paid", label: "Payout paid" },
   { type: "payout.failed", label: "Payout failed" },
+  { type: "dispute.opened", label: "Dispute opened" },
+  { type: "dispute.resolved", label: "Dispute resolved" },
   { type: "campaign.started", label: "Campaign started" },
   { type: "campaign.ended", label: "Campaign ended" },
 ] as const satisfies readonly { type: DomainEventType; label: string }[];

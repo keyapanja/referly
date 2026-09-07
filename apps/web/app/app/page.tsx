@@ -20,7 +20,7 @@ export default function MerchantHome() {
     { label: "Pending applications", count: data.needsAttention.pendingApplications, href: "/app/affiliates?status=applied" },
     { label: "Draft payout batches", count: data.needsAttention.draftPayouts, href: "/app/payouts" },
     { label: "Failed payouts", count: data.needsAttention.failedPayouts, href: "/app/payouts?status=failed" },
-    { label: "Disputed conversions", count: data.needsAttention.disputes, href: "/app/conversions?status=disputed" },
+    { label: "Open disputes", count: data.needsAttention.disputes, href: "/app/disputes" },
   ].filter((a) => a.count > 0);
 
   return (

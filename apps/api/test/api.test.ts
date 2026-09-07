@@ -1,6 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createDb, messaging, platform, withRlsBypass, payoutProviders, type DbHandle } from "@referly/core";
-import { sql } from "drizzle-orm";
 import { createApp, type App } from "../src/app";
 import { runOnce } from "../src/worker";
 import { resetRateLimits } from "../src/lib/ratelimit";
@@ -538,6 +537,33 @@ describe("MVP acceptance over HTTP", () => {
     expect(paid.body.commissionCount).toBeGreaterThan(0);
     expect((await call("/portal/payouts", { token: affiliateToken })).body.payouts.some((p: any) => p.id === draft.id && p.status === "paid")).toBe(true);
     expect((await call("/v1/tenant/integrations/stripe_connect", { method: "DELETE", token: ownerToken })).status).toBe(200);
+  });
+
+  it("Disputes: an affiliate claim flows through review, linking, discussion and resolution", async () => {
+    const opened = await call("/portal/disputes", { method: "POST", token: affiliateToken, json: { kind: "attribution", orderReference: "ORDER-TIER-1", reason: "This order came through my newsletter link, please check the click log" } });
+    expect(opened.status).toBe(201);
+    const disputeId = opened.body.dispute.id;
+    expect((await call("/v1/disputes?status=open", { token: ownerToken })).body.disputes.map((d: any) => d.id)).toContain(disputeId);
+    expect((await call("/v1/automation/tasks?status=open", { token: ownerToken })).body.tasks.some((t: any) => t.entityId === disputeId)).toBe(true);
+    await runOnce({ db: handle.db, email, storage, webUrl: "http://web.test", now, payoutProviders: memoryPayouts });
+    expect(email.sent.some((m) => m.to === "sam@partner.io" && m.subject.startsWith("Update on your dispute"))).toBe(true);
+
+    expect((await call(`/v1/disputes/${disputeId}/review`, { method: "POST", token: ownerToken })).body.dispute.status).toBe("under_review");
+    const conv = (await call("/v1/conversions", { token: ownerToken })).body.conversions.find((c: any) => c.externalOrderId === "ORDER-TIER-1");
+    const linked = await call(`/v1/disputes/${disputeId}/link`, { method: "POST", token: ownerToken, json: { conversionId: conv.id } });
+    expect(linked.status).toBe(200);
+    expect((await call(`/v1/conversions/${conv.id}`, { token: ownerToken })).body.conversion.status).toBe("disputed");
+    expect((await call(`/v1/disputes/${disputeId}/comments`, { method: "POST", token: ownerToken, json: { body: "Looking into it." } })).status).toBe(201);
+    expect((await call(`/portal/disputes/${disputeId}/comments`, { method: "POST", token: affiliateToken, json: { body: "Thank you." } })).status).toBe(201);
+    const detail = await call(`/portal/disputes/${disputeId}`, { token: affiliateToken });
+    expect(detail.body.comments.map((c: any) => c.authorType)).toEqual(["merchant", "affiliate"]);
+
+    const resolved = await call(`/v1/disputes/${disputeId}/resolve`, { method: "POST", token: ownerToken, json: { resolution: "rejected", outcome: "restore", note: "The click log shows a different source." } });
+    expect(resolved.status).toBe(200);
+    expect(resolved.body.dispute).toMatchObject({ status: "resolved", resolution: "rejected", outcome: "restore" });
+    expect((await call(`/v1/conversions/${conv.id}`, { token: ownerToken })).body.conversion.status).not.toBe("disputed");
+    expect((await call("/portal/disputes", { token: affiliateToken })).body.disputes[0]).toMatchObject({ id: disputeId, status: "resolved" });
+    expect((await call(`/v1/disputes/${disputeId}`, { token: affiliateToken })).status).toBe(403);
   });
 
   it("Validation and permissions errors are JSON with codes", async () => {

@@ -41,6 +41,7 @@ export const TEMPLATE_KEYS = [
   "policy_updated",
   "verify_email",
   "password_reset",
+  "dispute_update",
 ] as const;
 export type TemplateKey = (typeof TEMPLATE_KEYS)[number];
 
@@ -76,6 +77,7 @@ export function defaultTemplates(tone: Tone): Array<{ key: TemplateKey; subject:
     { key: "campaign_launched", subject: "You're invited: {{campaign_name}}", body: `${g}\n\n{{business_name}} has invited you to the {{campaign_name}} campaign for {{program_name}}. Join it in your portal to get the campaign rate, bonus and creative: {{portal_url}}\n\n${s}` },
     { key: "policy_updated", subject: "{{program_name}} terms updated", body: `${g}\n\nThe terms for {{program_name}} have changed. Please review and accept them in your portal: {{portal_url}}\n\n${s}` },
     { key: "verify_email", subject: "Verify your email for {{business_name}}", body: `${g}\n\nConfirm your email address to finish setting up {{business_name}}: {{link}}\n\nThis link expires in 24 hours.\n\n${s}` },
+    { key: "dispute_update", subject: "Update on your dispute with {{business_name}}", body: `${g}\n\n{{reason}}\n\nYou can reply in your portal: {{portal_url}}\n\n${s}` },
     { key: "password_reset", subject: "Reset your password", body: `${g}\n\nWe received a request to reset the password for your {{business_name}} account. Choose a new password here: {{link}}\n\nIf you did not ask for this, you can ignore this email. The link expires in 1 hour.\n\n${s}` },
   ];
 }

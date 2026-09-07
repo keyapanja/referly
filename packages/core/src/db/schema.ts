@@ -652,6 +652,46 @@ export const automationRuns = pgTable(
   (t) => [index("automation_runs_rule_idx").on(t.ruleId, t.createdAt), index("automation_runs_entity_idx").on(t.ruleId, t.entityType, t.entityId)],
 );
 
+/** Disputes (Phase 2): contested sales and attribution claims. */
+export const disputes = pgTable(
+  "disputes",
+  {
+    id: id(),
+    tenantId: tenantRef(),
+    conversionId: text("conversion_id"),
+    affiliateId: text("affiliate_id"),
+    raisedBy: text("raised_by").notNull(), // merchant | affiliate
+    raisedByUserId: text("raised_by_user_id"),
+    kind: text("kind").notNull(), // attribution | amount | fraud | refund | other
+    orderReference: text("order_reference"),
+    reason: text("reason").notNull(),
+    status: text("status").notNull().default("open"), // open | under_review | resolved | withdrawn
+    resolution: text("resolution"), // upheld | rejected
+    outcome: text("outcome"), // restore | cancel | reattribute
+    resolutionNote: text("resolution_note"),
+    previousConversionStatus: text("previous_conversion_status"),
+    resolvedByUserId: text("resolved_by_user_id"),
+    resolvedAt: ts("resolved_at"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index("disputes_tenant_status_idx").on(t.tenantId, t.status), index("disputes_conversion_idx").on(t.conversionId)],
+);
+
+export const disputeComments = pgTable(
+  "dispute_comments",
+  {
+    id: id(),
+    tenantId: tenantRef(),
+    disputeId: text("dispute_id").notNull().references(() => disputes.id),
+    authorType: text("author_type").notNull(), // merchant | affiliate | system
+    authorId: text("author_id"),
+    body: text("body").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [index("dispute_comments_dispute_idx").on(t.disputeId, t.createdAt)],
+);
+
 /** Per-tenant integration credentials, encrypted at rest (PRD s13, s14). */
 export const tenantIntegrations = pgTable(
   "tenant_integrations",
@@ -846,6 +886,8 @@ export const schema = {
   affiliateGroupMembers,
   programRateTiers,
   tenantIntegrations,
+  disputes,
+  disputeComments,
   auditLogs,
   jobs,
   exports,
@@ -876,6 +918,8 @@ export type Campaign = typeof campaigns.$inferSelect;
 export type Task = typeof tasks.$inferSelect;
 export type AffiliateGroup = typeof affiliateGroups.$inferSelect;
 export type TenantIntegration = typeof tenantIntegrations.$inferSelect;
+export type Dispute = typeof disputes.$inferSelect;
+export type DisputeComment = typeof disputeComments.$inferSelect;
 export type ProgramRateTier = typeof programRateTiers.$inferSelect;
 export type AutomationRun = typeof automationRuns.$inferSelect;
 export type AutomationRule = typeof automationRules.$inferSelect;

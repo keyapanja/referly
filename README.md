@@ -70,6 +70,7 @@ Docker images for the API and web app, a `docker-compose.yml` with Postgres, and
 | Conversions | `POST /v1/conversions` (webhook/API/manual, idempotent), `GET /:id` (timeline), `POST /:id/refund|cancel|approve|dispute|reattribute` |
 | Commissions | `GET /v1/commissions`, `POST /:id/approve|reverse`, `POST /adjustments`, `POST /settle` |
 | Payout providers | `GET /v1/tenant/integrations`, `POST/DELETE /v1/tenant/integrations/:provider` (stripe_connect, paypal); `POST /v1/payouts/:id/send`, `POST /v1/payouts/send-all`; portal `POST /portal/payouts/connect/stripe` |
+| Disputes | `GET/POST /v1/disputes`, `GET /:id`, `POST /:id/comments`, `/:id/review`, `/:id/link`, `/:id/resolve`; portal `GET/POST /portal/disputes`, `GET /:id`, `POST /:id/comments`, `POST /:id/withdraw` |
 | Groups | `GET/POST /v1/groups`, `PATCH/DELETE /:id`, `GET/POST /:id/members`, `DELETE /:id/members/:affiliateId` |
 | Rate tiers | `GET/POST /v1/programs/:id/tiers`, `PATCH/DELETE /:id/tiers/:tierId` |
 | Automation | `GET /v1/automation/catalog`, `GET/POST /v1/automation/rules`, `GET/PATCH /rules/:id`, `POST /rules/:id/enabled`, `GET /rules/:id/runs`; tasks `GET /v1/automation/tasks?status=open`, `POST /tasks/:id/done` |

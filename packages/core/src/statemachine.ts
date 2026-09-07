@@ -33,7 +33,7 @@ export type ConversionStatus = "pending" | "approved" | "refunded" | "cancelled"
 export const CONVERSION_TRANSITIONS: TransitionTable<ConversionStatus> = {
   pending: ["approved", "refunded", "cancelled", "reversed", "disputed"],
   approved: ["refunded", "reversed", "disputed"],
-  disputed: ["approved", "refunded", "cancelled", "reversed"],
+  disputed: ["pending", "approved", "refunded", "cancelled", "reversed"], // pending: restored after a rejected/withdrawn dispute
   refunded: ["refunded", "reversed"], // further partial refunds stay in refunded
   cancelled: [],
   reversed: [],

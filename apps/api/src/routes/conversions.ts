@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { z } from "zod";
-import { conversions, webhookDeliveries, newId } from "@referly/core";
+import { conversions, webhookDeliveries, newId, disputes } from "@referly/core";
 import { requireMerchantPrincipal, type AppEnv } from "../lib/auth";
 
 export function conversionRoutes() {
@@ -58,7 +58,9 @@ export function conversionRoutes() {
   r.post("/:id/approve", async (c) => c.json({ conversion: await conversions.approveConversion(c.get("deps").db, c.get("ctx"), c.req.param("id")) }));
   r.post("/:id/dispute", async (c) => {
     const { reason } = z.object({ reason: z.string().min(1) }).parse(await c.req.json());
-    return c.json({ conversion: await conversions.disputeConversion(c.get("deps").db, c.get("ctx"), c.req.param("id"), reason) });
+    // Opens a proper dispute record (Phase 2); the sale is held as before.
+    const dispute = await disputes.openDispute(c.get("deps").db, c.get("ctx"), { kind: "other", conversionId: c.req.param("id"), reason });
+    return c.json({ conversion: await conversions.getConversion(c.get("deps").db, c.get("ctx"), c.req.param("id")), dispute });
   });
   r.post("/:id/reattribute", async (c) => {
     const body = await c.req.json();

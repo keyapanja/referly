@@ -242,6 +242,14 @@ async function setStatus(db: DbLike, ctx: TenantContext, before: Conversion, to:
   return after!;
 }
 
+/** Used by the disputes workflow to put a held sale back where it was. */
+export async function restoreDisputedConversion(db: DbLike, ctx: TenantContext, conversionId: string, to: "pending" | "approved", reason: string): Promise<Conversion> {
+  requirePerm(ctx, "conversions.write");
+  const before = await getConversion(db, ctx, conversionId);
+  if (before.status !== "disputed") return before;
+  return setStatus(db, ctx, before, to, reason);
+}
+
 export const reattributeSchema = z.object({
   conversionId: z.string(),
   /** null removes attribution entirely */

@@ -71,6 +71,13 @@
       "when": 1788794278587,
       "tag": "0009_payout_providers",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1788795338663,
+      "tag": "0010_disputes",
+      "breakpoints": true
     }
   ]
 }

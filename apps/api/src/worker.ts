@@ -34,6 +34,9 @@ const NOTIFICATION_RULES: Partial<Record<eventsMod.DomainEventType, messaging.Te
   "payout.paid": "payout_paid",
   "program.updated": "policy_updated",
   "campaign.invited": "campaign_launched",
+  "dispute.opened": "dispute_update",
+  "dispute.commented": "dispute_update",
+  "dispute.resolved": "dispute_update",
 };
 
 export function createHandlers(deps: WorkerDeps): Record<string, jobs.JobHandler> {

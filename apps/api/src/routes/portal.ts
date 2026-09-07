@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { z } from "zod";
-import { affiliates, commissions, conversions, offers, payouts, tenants, tracking, programs as programsSvc, assets, campaigns, tiers, integrations } from "@referly/core";
+import { affiliates, commissions, conversions, offers, payouts, tenants, tracking, programs as programsSvc, assets, campaigns, tiers, integrations, disputes } from "@referly/core";
 import { requireAffiliatePrincipal, type AppEnv } from "../lib/auth";
 import { publicTenant } from "./auth";
 
@@ -125,6 +125,23 @@ export function portalRoutes() {
   /** Campaigns the affiliate is invited to or active in (AST-05). */
   r.get("/campaigns", async (c) => c.json({ campaigns: await campaigns.listCampaignsForAffiliate(c.get("deps").db, c.get("ctx"), requireAffiliatePrincipal(c)) }));
   r.post("/campaigns/:id/join", async (c) => c.json({ participant: await campaigns.joinCampaign(c.get("deps").db, c.get("ctx"), c.req.param("id"), requireAffiliatePrincipal(c)) }));
+
+  /** Disputes raised by (or about) this affiliate. */
+  r.get("/disputes", async (c) => c.json({ disputes: await disputes.listDisputesForAffiliate(c.get("deps").db, c.get("ctx"), requireAffiliatePrincipal(c)) }));
+  r.post("/disputes", async (c) => {
+    requireAffiliatePrincipal(c);
+    return c.json({ dispute: await disputes.openDispute(c.get("deps").db, c.get("ctx"), await c.req.json()) }, 201);
+  });
+  r.get("/disputes/:id", async (c) => c.json(await disputes.getDisputeForAffiliate(c.get("deps").db, c.get("ctx"), requireAffiliatePrincipal(c), c.req.param("id"))));
+  r.post("/disputes/:id/comments", async (c) => {
+    requireAffiliatePrincipal(c);
+    const { body } = z.object({ body: z.string().min(1).max(5000) }).parse(await c.req.json());
+    return c.json({ comment: await disputes.addComment(c.get("deps").db, c.get("ctx"), c.req.param("id"), body) }, 201);
+  });
+  r.post("/disputes/:id/withdraw", async (c) => {
+    requireAffiliatePrincipal(c);
+    return c.json({ dispute: await disputes.withdrawDispute(c.get("deps").db, c.get("ctx"), c.req.param("id")) });
+  });
 
   /** AST-02: only assets permitted for this affiliate's programs. */
   r.get("/assets", async (c) => c.json({ assets: await assets.listAssetsForAffiliate(c.get("deps").db, c.get("ctx"), requireAffiliatePrincipal(c)) }));

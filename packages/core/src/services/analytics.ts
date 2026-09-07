@@ -1,7 +1,7 @@
 import { and, eq, gte, lte, sql, inArray, count } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import type { DbLike } from "../db/client";
-import { affiliates, clicks, commissions, conversions, offers, payouts, programs } from "../db/schema";
+import { affiliates, clicks, commissions, conversions, offers, payouts, programs , disputes as disputesTable } from "../db/schema";
 import { type TenantContext, require as requirePerm } from "../context";
 
 /**
@@ -54,7 +54,7 @@ export async function overview(db: DbLike, ctx: TenantContext, period: Period) {
     .groupBy(payouts.status);
   const payoutsByStatus: Record<string, { totalMinor: number; count: number }> = {};
   for (const r of payoutRows) payoutsByStatus[r.status] = { totalMinor: r.total, count: r.n };
-  const [disputes] = await db.select({ n: count() }).from(conversions).where(and(eq(conversions.tenantId, t), eq(conversions.status, "disputed")));
+  const [disputes] = await db.select({ n: count() }).from(disputesTable).where(and(eq(disputesTable.tenantId, t), inArray(disputesTable.status, ["open", "under_review"])));
 
   const attributed = conv!.attributed;
   return {
