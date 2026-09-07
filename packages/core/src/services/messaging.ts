@@ -227,6 +227,31 @@ export async function sendTemplated(db: DbLike, ctx: TenantContext, provider: Em
   }
 }
 
+/** Send a one-off (non-template) message, logged like every other send. Used by automation rules. */
+export async function sendCustom(db: DbLike, ctx: TenantContext, provider: EmailProvider, input: { to: string; subject: string; body: string; affiliateId?: string | null; related?: { type: string; id: string } }): Promise<MessageLog> {
+  const base = {
+    id: newId("messageLog"),
+    tenantId: ctx.tenantId,
+    templateKey: "custom",
+    channel: "email",
+    recipient: input.to,
+    subject: input.subject,
+    body: input.body,
+    affiliateId: input.affiliateId ?? null,
+    relatedEntityType: input.related?.type ?? null,
+    relatedEntityId: input.related?.id ?? null,
+    createdAt: ctx.now(),
+  };
+  try {
+    const result = await provider.send({ to: input.to, subject: input.subject, body: input.body });
+    const [row] = await db.insert(messageLogs).values({ ...base, status: "sent", providerMessageId: result.providerMessageId ?? null, sentAt: ctx.now() }).returning();
+    return row!;
+  } catch (err) {
+    const [row] = await db.insert(messageLogs).values({ ...base, status: "failed", error: err instanceof Error ? err.message : String(err) }).returning();
+    return row!;
+  }
+}
+
 export async function listMessageLogs(db: DbLike, ctx: TenantContext, filter: { affiliateId?: string; limit?: number } = {}): Promise<MessageLog[]> {
   requirePerm(ctx, "read");
   return db

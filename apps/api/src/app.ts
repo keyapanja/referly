@@ -22,6 +22,7 @@ import { analyticsRoutes } from "./routes/analytics";
 import { assetRoutes } from "./routes/assets";
 import { adminRoutes } from "./routes/admin";
 import { campaignRoutes } from "./routes/campaigns";
+import { automationRoutes } from "./routes/automation";
 import { rateLimit } from "./lib/ratelimit";
 import { PRIVATE_PREFIX, type FileStorage } from "./storage";
 
@@ -108,6 +109,7 @@ export function createApp(deps: AppDeps & { db: Db }) {
   app.route("/v1/analytics", analyticsRoutes());
   app.route("/v1/assets", assetRoutes());
   app.route("/v1/campaigns", campaignRoutes());
+  app.route("/v1/automation", automationRoutes());
   app.route("/portal", portalRoutes());
 
   return app;

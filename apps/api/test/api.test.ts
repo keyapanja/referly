@@ -457,6 +457,30 @@ describe("MVP acceptance over HTTP", () => {
     expect((await call("/admin/jobs", { token: adminToken })).status).toBe(200);
   });
 
+  it("Automation: a rule created through the API runs in the worker and leaves a log, a tag and a task", async () => {
+    const catalog = await call("/v1/automation/catalog", { token: ownerToken });
+    expect(catalog.body.triggers.some((t: any) => t.type === "conversion.created")).toBe(true);
+    const created = await call("/v1/automation/rules", { method: "POST", token: ownerToken, json: { name: "Tag any sale", trigger: "conversion.created", conditions: [{ field: "amountMinor", op: "gte", value: 1 }], actions: [{ type: "add_tag", tag: "seller" }, { type: "create_task", title: "Say thanks to {{affiliate_name}}" }] } });
+    expect(created.status).toBe(201);
+    const ruleId = created.body.rule.id;
+    // manual attribution: the clock has moved past the click window by this point in the suite
+    const sale = await call("/v1/conversions", { method: "POST", token: ownerToken, json: { source: "manual", externalOrderId: "ORDER-AUTO-1", offerId, amountMinor: 12_000, affiliateId, programId, reason: "phone order" } });
+    expect(sale.status).toBe(201);
+    expect(sale.body.conversion.affiliateId).toBe(affiliateId);
+    await runOnce({ db: handle.db, email, storage, webUrl: "http://web.test", now });
+    const runs = await call(`/v1/automation/rules/${ruleId}/runs`, { token: ownerToken });
+    const hit = runs.body.runs.find((r: any) => r.entityId === sale.body.conversion.id);
+    expect(hit?.error ?? null).toBeNull();
+    expect(hit).toMatchObject({ status: "success", matched: true });
+    expect((await call(`/v1/affiliates/${affiliateId}`, { token: ownerToken })).body.affiliate.tags).toContain("seller");
+    const tasks = await call("/v1/automation/tasks?status=open", { token: ownerToken });
+    expect(tasks.body.tasks.some((t: any) => t.title === "Say thanks to Sam Partner")).toBe(true);
+    const done = await call(`/v1/automation/tasks/${tasks.body.tasks[0].id}/done`, { method: "POST", token: ownerToken });
+    expect(done.body.task.status).toBe("done");
+    expect((await call(`/v1/automation/rules/${ruleId}/enabled`, { method: "POST", token: ownerToken, json: { enabled: false } })).body.rule.enabled).toBe(false);
+    expect((await call("/v1/automation/rules", { token: affiliateToken })).status).toBe(403);
+  });
+
   it("Validation and permissions errors are JSON with codes", async () => {
     const bad = await call("/v1/offers", { method: "POST", token: ownerToken, json: { name: "" } });
     expect(bad.status).toBe(400);

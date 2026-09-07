@@ -37,6 +37,7 @@ export const ID_PREFIXES = {
   export: "exp",
   campaignParticipant: "cpp",
   campaignAsset: "cpa",
+  task: "tsk",
 } as const;
 
 export type IdKind = keyof typeof ID_PREFIXES;

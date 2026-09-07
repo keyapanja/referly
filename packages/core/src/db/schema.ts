@@ -632,13 +632,35 @@ export const automationRuns = pgTable(
     ruleId: text("rule_id").notNull().references(() => automationRules.id),
     trigger: text("trigger").notNull(),
     eventPayload: jsonb("event_payload").$type<Record<string, unknown>>().notNull(),
+    entityType: text("entity_type"),
+    entityId: text("entity_id"),
+    affiliateId: text("affiliate_id"),
     matched: boolean("matched").notNull(),
     actionsTaken: jsonb("actions_taken").$type<Record<string, unknown>[]>().notNull().default([]),
     status: text("status").notNull(), // success | skipped | failed
     error: text("error"),
     createdAt: createdAt(),
   },
-  (t) => [index("automation_runs_rule_idx").on(t.ruleId, t.createdAt)],
+  (t) => [index("automation_runs_rule_idx").on(t.ruleId, t.createdAt), index("automation_runs_entity_idx").on(t.ruleId, t.entityType, t.entityId)],
+);
+
+/** Work items for the merchant team, created by automation rules (AUTO-03) or people. */
+export const tasks = pgTable(
+  "tasks",
+  {
+    id: id(),
+    tenantId: tenantRef(),
+    title: text("title").notNull(),
+    note: text("note"),
+    status: text("status").notNull().default("open"), // open | done
+    entityType: text("entity_type"),
+    entityId: text("entity_id"),
+    affiliateId: text("affiliate_id"),
+    ruleId: text("rule_id"),
+    createdAt: createdAt(),
+    doneAt: ts("done_at"),
+  },
+  (t) => [index("tasks_tenant_status_idx").on(t.tenantId, t.status)],
 );
 
 export const auditLogs = pgTable(
@@ -746,6 +768,7 @@ export const schema = {
   messageLogs,
   automationRules,
   automationRuns,
+  tasks,
   auditLogs,
   jobs,
   exports,
@@ -773,6 +796,9 @@ export type AssetPermission = typeof assetPermissions.$inferSelect;
 export type AuthToken = typeof authTokens.$inferSelect;
 export type Export = typeof exports.$inferSelect;
 export type Campaign = typeof campaigns.$inferSelect;
+export type Task = typeof tasks.$inferSelect;
+export type AutomationRun = typeof automationRuns.$inferSelect;
+export type AutomationRule = typeof automationRules.$inferSelect;
 export type CampaignParticipant = typeof campaignParticipants.$inferSelect;
 export type MessageTemplate = typeof messageTemplates.$inferSelect;
 export type MessageLog = typeof messageLogs.$inferSelect;

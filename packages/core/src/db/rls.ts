@@ -71,6 +71,7 @@ export const RLS_TABLES = [
   "message_logs",
   "automation_rules",
   "automation_runs",
+  "tasks",
   "audit_logs",
   "webhook_deliveries",
   "exports",

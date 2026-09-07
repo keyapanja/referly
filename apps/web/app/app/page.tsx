@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useApi } from "@/lib/hooks";
+import { useAction, useApi } from "@/lib/hooks";
+import { api } from "@/lib/api";
 import { money, percent } from "@/lib/format";
 import { Loading, PageHeader, Stat, Table } from "@/components/ui";
 
@@ -10,6 +11,8 @@ export default function MerchantHome() {
   const { data: me } = useApi<any>("/v1/tenant/me");
   const { data, error } = useApi<any>("/v1/analytics/overview");
   const { data: billing } = useApi<any>("/v1/tenant/billing");
+  const { data: tasks, reload: reloadTasks } = useApi<any>("/v1/automation/tasks?status=open");
+  const { run } = useAction();
   const cur = me?.tenant?.currency ?? "USD";
   if (!data) return <Loading error={error} />;
   const cs = data.commissionByStatus ?? {};
@@ -42,7 +45,20 @@ export default function MerchantHome() {
       <div className="grid cols-2">
         <div className="card">
           <h2>Needs attention</h2>
-          {attention.length === 0 ? (
+          {tasks?.tasks?.length ? (
+            <ul style={{ margin: "0 0 10px", paddingLeft: 18 }}>
+              {tasks.tasks.map((t: any) => (
+                <li key={t.id} style={{ marginBottom: 4 }}>
+                  {t.affiliateId ? <Link href={`/app/affiliates/${t.affiliateId}`}>{t.title}</Link> : t.title}
+                  {t.note ? <div className="muted">{t.note}</div> : null}{" "}
+                  <button className="sm" style={{ marginLeft: 6 }} onClick={() => run(() => api(`/v1/automation/tasks/${t.id}/done`, { method: "POST" })).then(reloadTasks)}>
+                    Done
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          {attention.length === 0 && !tasks?.tasks?.length ? (
             <div className="empty">All clear.</div>
           ) : (
             <ul style={{ margin: 0, paddingLeft: 18 }}>

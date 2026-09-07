@@ -50,6 +50,13 @@
       "when": 1788791843150,
       "tag": "0006_campaigns",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1788792810695,
+      "tag": "0007_automation_tasks",
+      "breakpoints": true
     }
   ]
 }

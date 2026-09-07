@@ -84,6 +84,7 @@ Payable balance = sum of payable commissions + approved adjustments - paid - rev
 ### Phase 2 progress
 
 - **Campaigns (AST-03..05, AN-05). Done.** Time-bound promotions per program with an optional commission override (highest precedence while live), a once-per-affiliate bonus on a conversions or revenue threshold, campaign assets, explicit participation (invite in the merchant app, join in the portal), notifications on invite, automatic ending by the scheduler, and campaign performance in Analytics. Gated to plans with the campaigns feature.
+- **Automation rule builder (AUTO-01..06). Done.** Rules = trigger event + conditions (program, offer, campaign, affiliate, tag, status, amount, source) + actions (template or custom email, approve commission/conversion, add/remove tag, balance adjustment, create task, suspend affiliate) + stop conditions (once per entity, once per affiliate, skip by affiliate status, active window). Rules run in the worker after the stored event; every evaluation writes a run record (matched, actions taken, outcome). Actions run under an automation actor whose events never re-trigger rules. Pause/resume keeps history. Tasks surface on the merchant home. Gated to plans with the automation feature.
 6. Phase 2 candidates: campaigns, affiliate groups/tiers, automation rule builder UI, Stripe/Shopify adapters, custom domains, disputes workflow.
 
 ## 6. Contradictions and clarifications found in the PRD

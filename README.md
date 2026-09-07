@@ -69,6 +69,7 @@ Docker images for the API and web app, a `docker-compose.yml` with Postgres, and
 | Affiliates | `GET/POST /v1/affiliates`, `POST /invites`, `/:id/approve|reject|suspend|reactivate`, `/:id/coupons`, `/:id/programs/:programId/override` |
 | Conversions | `POST /v1/conversions` (webhook/API/manual, idempotent), `GET /:id` (timeline), `POST /:id/refund|cancel|approve|dispute|reattribute` |
 | Commissions | `GET /v1/commissions`, `POST /:id/approve|reverse`, `POST /adjustments`, `POST /settle` |
+| Automation | `GET /v1/automation/catalog`, `GET/POST /v1/automation/rules`, `GET/PATCH /rules/:id`, `POST /rules/:id/enabled`, `GET /rules/:id/runs`; tasks `GET /v1/automation/tasks?status=open`, `POST /tasks/:id/done` |
 | Campaigns | `GET/POST /v1/campaigns`, `GET/PATCH /:id`, `POST /:id/status`, `POST /:id/participants`, `DELETE /:id/participants/:affiliateId`, `PUT /:id/assets`; portal `GET /portal/campaigns`, `POST /portal/campaigns/:id/join`; `GET /v1/analytics/campaigns` |
 | Billing | `GET /v1/tenant/billing` (plan, usage, limits, warnings) |
 | Platform admin | `GET /admin/overview`, `GET /admin/tenants`, `GET/PATCH /admin/tenants/:id` (plan, custom limits, status), `GET /admin/jobs`, `POST /admin/jobs/:id/retry` |

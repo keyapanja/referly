@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
-import { schema, type Db, type Job } from "@referly/core";
-import { jobs, messaging, commissions, systemContext, events as eventsMod, tenants as tenantsSvc, exportsSvc, withTenantScope, withRlsBypass, campaigns as campaignsSvc } from "@referly/core";
+import { schema, type Db, type DbLike, type Job, type TenantContext } from "@referly/core";
+import { jobs, messaging, commissions, systemContext, events as eventsMod, tenants as tenantsSvc, exportsSvc, withTenantScope, withRlsBypass, campaigns as campaignsSvc, automation } from "@referly/core";
 import { PRIVATE_PREFIX, type FileStorage } from "./storage";
 
 const { affiliates: affiliatesTable, offers: offersTable, programs: programsTable, tenants: tenantsTable } = schema;
@@ -37,13 +37,11 @@ const NOTIFICATION_RULES: Partial<Record<eventsMod.DomainEventType, messaging.Te
 
 export function createHandlers(deps: WorkerDeps): Record<string, jobs.JobHandler> {
   const now = deps.now ?? (() => new Date());
-  return {
-    domain_event: async (job: Job) => {
-      const event = job.payload as unknown as eventsMod.DomainEvent;
+
+  /** Hard-coded system notifications (the AUTO-01/03 subset that s17 requires). */
+  async function sendBuiltInNotification(db: DbLike, ctx: TenantContext, event: eventsMod.DomainEvent): Promise<void> {
       const templateKey = NOTIFICATION_RULES[event.type];
       if (!templateKey) return;
-      await withTenantScope(deps.db, event.tenantId, async (db) => {
-      const ctx = systemContext(event.tenantId, now);
       const tenant = await tenantsSvc.getTenant(db, ctx);
       const affiliateId = (event.data.affiliateId as string | undefined) ?? (event.entityType === "affiliate" ? event.entityId : undefined);
       const affiliate = affiliateId ? await db.query.affiliates.findFirst({ where: eq(affiliatesTable.id, affiliateId) }) : null;
@@ -78,6 +76,16 @@ export function createHandlers(deps: WorkerDeps): Record<string, jobs.JobHandler
           reason: (event.data.reason as string | undefined) ?? "",
         },
       });
+  }
+
+  return {
+    domain_event: async (job: Job) => {
+      const event = job.payload as unknown as eventsMod.DomainEvent;
+      await withTenantScope(deps.db, event.tenantId, async (db) => {
+        const ctx = systemContext(event.tenantId, now);
+        // Built-in notification first, then the tenant's own rules (AUTO-01..05).
+        await sendBuiltInNotification(db, ctx, event);
+        await automation.runRulesForEvent(db, ctx, event, { email: deps.email, webUrl: deps.webUrl });
       });
     },
 
