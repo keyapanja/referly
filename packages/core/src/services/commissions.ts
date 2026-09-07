@@ -11,6 +11,7 @@ import {
   type AffiliateProgram,
   type Campaign,
   type Commission,
+  type ProgramRateTier,
   type CommissionCalculationBasis,
   type Conversion,
   type LedgerEntry,
@@ -24,6 +25,7 @@ import { writeAudit } from "./audit";
 import { emitEvent } from "./events";
 import { COMMISSION_TRANSITIONS, assertTransition, type CommissionStatus } from "../statemachine";
 import { applyBasisPoints, assertMinorUnits, type MinorUnits } from "../money";
+import { resolveTier } from "./tiers";
 
 // ---------------------------------------------------------------------------
 // Calculation (COMM-01)
@@ -34,14 +36,18 @@ export interface RateResolution {
   rateBps?: number;
   fixedMinor?: number;
   overrideSource: CommissionCalculationBasis["overrideSource"];
+  tierId?: string;
+  tierName?: string;
 }
 
-/** Precedence: live campaign override > affiliate-specific override > program-offer override > program default. */
-export function resolveRate(program: Program, programOffer?: ProgramOffer | null, membership?: AffiliateProgram | null, campaign?: Campaign | null): RateResolution {
+/** Precedence: live campaign > affiliate-specific override > rate tier (group, then performance) > program-offer override > program default. */
+export function resolveRate(program: Program, programOffer?: ProgramOffer | null, membership?: AffiliateProgram | null, campaign?: Campaign | null, tier?: ProgramRateTier | null): RateResolution {
   if (campaign?.commissionRateBpsOverride != null) return { model: "percentage", rateBps: campaign.commissionRateBpsOverride, overrideSource: "campaign" };
   if (campaign?.commissionFixedMinorOverride != null) return { model: "fixed", fixedMinor: campaign.commissionFixedMinorOverride, overrideSource: "campaign" };
   if (membership?.customCommissionRateBps != null) return { model: "percentage", rateBps: membership.customCommissionRateBps, overrideSource: "affiliate_program" };
   if (membership?.customCommissionFixedMinor != null) return { model: "fixed", fixedMinor: membership.customCommissionFixedMinor, overrideSource: "affiliate_program" };
+  if (tier?.commissionModel === "percentage" && tier.commissionRateBps != null) return { model: "percentage", rateBps: tier.commissionRateBps, overrideSource: "tier", tierId: tier.id, tierName: tier.name };
+  if (tier?.commissionModel === "fixed" && tier.commissionFixedMinor != null) return { model: "fixed", fixedMinor: tier.commissionFixedMinor, overrideSource: "tier", tierId: tier.id, tierName: tier.name };
   if (programOffer?.commissionRateBpsOverride != null) return { model: "percentage", rateBps: programOffer.commissionRateBpsOverride, overrideSource: "program_offer" };
   if (programOffer?.commissionFixedMinorOverride != null) return { model: "fixed", fixedMinor: programOffer.commissionFixedMinorOverride, overrideSource: "program_offer" };
   if (program.commissionModel === "fixed") return { model: "fixed", fixedMinor: program.commissionFixedMinor, overrideSource: "program" };
@@ -76,6 +82,7 @@ export function computeCommission(
       rateBps: rate.rateBps,
       fixedMinor: rate.fixedMinor,
       overrideSource: rate.overrideSource,
+      ...(rate.tierId ? { tierId: rate.tierId, tierName: rate.tierName } : {}),
     },
   };
 }
@@ -133,7 +140,8 @@ export async function createCommissionForConversion(tx: Tx, ctx: TenantContext, 
       : Promise.resolve(null),
     tx.query.affiliatePrograms.findFirst({ where: and(eq(affiliatePrograms.affiliateId, args.affiliateId), eq(affiliatePrograms.programId, args.program.id)) }),
   ]);
-  const rate = resolveRate(args.program, programOffer, membership, args.campaign);
+  const tier = await resolveTier(tx, ctx, { programId: args.program.id, affiliateId: args.affiliateId, at: args.conversion.occurredAt, excludeConversionId: args.conversion.id });
+  const rate = resolveRate(args.program, programOffer, membership, args.campaign, tier);
   const { amountMinor, basis } = computeCommission(args.conversion, args.program, rate);
   const payableAt = new Date(args.conversion.occurredAt.getTime() + args.program.holdingDays * 86_400_000);
   const [row] = await tx

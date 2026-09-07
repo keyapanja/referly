@@ -26,6 +26,7 @@ import { writeAudit, snapshot } from "./audit";
 import { emitEvent } from "./events";
 import { writeLedger } from "./commissions";
 import { assertFeature } from "./plans";
+import { memberIdsOfGroups } from "./groups";
 
 /**
  * Campaigns (PRD s4 "Campaign", AST-03..05, AN-05): a time-bound promotion inside a program.
@@ -167,13 +168,15 @@ export async function endExpiredCampaigns(db: DbLike, ctx: TenantContext, now: D
 // Participation (AST-05)
 // ---------------------------------------------------------------------------
 
-export const inviteParticipantsSchema = z.object({ affiliateIds: z.array(z.string()).optional(), all: z.boolean().optional() }).refine((v) => v.all || (v.affiliateIds && v.affiliateIds.length > 0), { message: "give affiliateIds or all=true" });
+export const inviteParticipantsSchema = z.object({ affiliateIds: z.array(z.string()).optional(), groupIds: z.array(z.string()).optional(), all: z.boolean().optional() }).refine((v) => v.all || (v.affiliateIds && v.affiliateIds.length > 0) || (v.groupIds && v.groupIds.length > 0), { message: "give affiliateIds, groupIds or all=true" });
 
 export async function inviteParticipants(db: DbLike, ctx: TenantContext, campaignId: string, rawInput: z.input<typeof inviteParticipantsSchema>): Promise<CampaignParticipant[]> {
   requirePerm(ctx, "campaigns.write");
   const input = inviteParticipantsSchema.parse(rawInput);
   const campaign = await getCampaign(db, ctx, campaignId);
   if (campaign.status === "ended" || campaign.status === "cancelled") throw validation(`campaign is ${campaign.status}`);
+  const wanted = input.all ? null : [...new Set([...(input.affiliateIds ?? []), ...(await memberIdsOfGroups(db, ctx, input.groupIds ?? []))])];
+  if (wanted && !wanted.length) return [];
   // eligible = active affiliates with an active membership in the campaign's program
   const eligible = await db
     .select({ affiliateId: affiliatePrograms.affiliateId })
@@ -185,12 +188,12 @@ export async function inviteParticipants(db: DbLike, ctx: TenantContext, campaig
         eq(affiliatePrograms.programId, campaign.programId),
         eq(affiliatePrograms.status, "active"),
         eq(affiliates.status, "active"),
-        input.all ? undefined : inArray(affiliatePrograms.affiliateId, input.affiliateIds ?? []),
+        wanted ? inArray(affiliatePrograms.affiliateId, wanted) : undefined,
       ),
     );
   const ids = [...new Set(eligible.map((e) => e.affiliateId))];
   if (!input.all) {
-    const missing = (input.affiliateIds ?? []).filter((id) => !ids.includes(id));
+    const missing = (input.affiliateIds ?? []).filter((id) => !ids.includes(id)); // group members outside the program are silently skipped
     if (missing.length) throw validation("some affiliates are not active members of the campaign's program", { affiliateIds: missing });
   }
   if (!ids.length) return [];

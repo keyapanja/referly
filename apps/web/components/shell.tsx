@@ -22,6 +22,7 @@ const MERCHANT_NAV: { section: string; items: NavItem[] }[] = [
     section: "Program",
     items: [
       ["/app/affiliates", "Affiliates", "users"],
+      ["/app/groups", "Groups", "users"],
       ["/app/offers", "Offers", "tag"],
       ["/app/programs", "Programs", "layers"],
       ["/app/assets", "Assets", "image"],

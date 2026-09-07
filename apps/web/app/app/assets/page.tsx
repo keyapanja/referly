@@ -9,7 +9,7 @@ import { Alert, Badge, Field, PageHeader, Table } from "@/components/ui";
 const TYPES = ["image", "banner", "pdf", "video", "copy", "link", "guideline"];
 const TEXT_TYPES = new Set(["copy", "guideline"]);
 
-const emptyForm = { type: "image", title: "", url: "", body: "", usageInstructions: "", visibility: "all", programIds: [] as string[], affiliateIds: [] as string[] };
+const emptyForm = { type: "image", title: "", url: "", body: "", usageInstructions: "", visibility: "all", programIds: [] as string[], affiliateIds: [] as string[], groupIds: [] as string[] };
 const FILE_TYPES = new Set(["image", "banner", "pdf", "video"]);
 const ACCEPT: Record<string, string> = { image: "image/png,image/jpeg,image/gif,image/webp,image/svg+xml", banner: "image/png,image/jpeg,image/gif,image/webp,image/svg+xml", pdf: "application/pdf", video: "video/mp4,video/webm" };
 
@@ -17,6 +17,7 @@ export default function AssetsPage() {
   const { data, error, reload } = useApi<any>("/v1/assets");
   const { data: programs } = useApi<any>("/v1/programs");
   const { data: affiliates } = useApi<any>("/v1/affiliates?status=active");
+  const { data: groupsData } = useApi<any>("/v1/groups");
   const { busy, error: actionError, success, run } = useAction();
   const [show, setShow] = useState(false);
   const [form, setForm] = useState(emptyForm);
@@ -26,10 +27,22 @@ export default function AssetsPage() {
 
   const programName = (id: string) => programs?.programs?.find((p: any) => p.id === id)?.name ?? id;
   const affiliateName = (id: string) => affiliates?.affiliates?.find((a: any) => a.id === id)?.name ?? id;
+  const groupName = (id: string) => groupsData?.groups?.find((g: any) => g.id === id)?.name ?? id;
   const toggle = (list: string[], id: string, on: boolean) => (on ? [...list, id] : list.filter((x) => x !== id));
 
-  const scopePicker = (value: { programIds: string[]; affiliateIds: string[] }, onChange: (v: { programIds: string[]; affiliateIds: string[] }) => void) => (
+  const scopePicker = (value: { programIds: string[]; affiliateIds: string[]; groupIds?: string[] }, onChange: (v: { programIds: string[]; affiliateIds: string[]; groupIds?: string[] }) => void) => (
     <div className="row">
+      <Field label="Groups">
+        {groupsData?.groups?.length ? (
+          groupsData.groups.map((g: any) => (
+            <label key={g.id} className="checkbox" style={{ marginBottom: 6 }}>
+              <input type="checkbox" checked={(value.groupIds ?? []).includes(g.id)} onChange={(e) => onChange({ ...value, groupIds: toggle(value.groupIds ?? [], g.id, e.target.checked) })} /> {g.name}
+            </label>
+          ))
+        ) : (
+          <div className="help">No groups yet.</div>
+        )}
+      </Field>
       <Field label="Programs">
         {programs?.programs?.length ? (
           programs.programs.map((p: any) => (
@@ -92,6 +105,7 @@ export default function AssetsPage() {
                       visibility: form.visibility,
                       programIds: form.visibility === "restricted" ? form.programIds : [],
                       affiliateIds: form.visibility === "restricted" ? form.affiliateIds : [],
+                      groupIds: form.visibility === "restricted" ? form.groupIds : [],
                     },
                   });
                 },
@@ -167,7 +181,7 @@ export default function AssetsPage() {
           <form
             onSubmit={async (e) => {
               e.preventDefault();
-              const ok = await run(() => api(`/v1/assets/${editing.id}/permissions`, { method: "PUT", json: { programIds: editing.programIds, affiliateIds: editing.affiliateIds } }), "Access updated.");
+              const ok = await run(() => api(`/v1/assets/${editing.id}/permissions`, { method: "PUT", json: { programIds: editing.programIds, affiliateIds: editing.affiliateIds, groupIds: editing.groupIds ?? [] } }), "Access updated.");
               if (ok) {
                 setEditing(null);
                 reload();
@@ -200,7 +214,7 @@ export default function AssetsPage() {
                 a.visibility === "all" ? (
                   <span className="muted">All affiliates</span>
                 ) : (
-                  <span>{a.permissions.map((p: any) => (p.programId ? programName(p.programId) : p.affiliateId ? affiliateName(p.affiliateId) : p.offerId)).join(", ") || "nobody"}</span>
+                  <span>{a.permissions.map((p: any) => (p.programId ? programName(p.programId) : p.affiliateId ? affiliateName(p.affiliateId) : p.groupId ? `group: ${groupName(p.groupId)}` : p.offerId)).join(", ") || "nobody"}</span>
                 ),
             },
             { header: "Added", cell: (a: any) => date(a.createdAt) },
@@ -208,7 +222,7 @@ export default function AssetsPage() {
               header: "",
               cell: (a: any) => (
                 <span className="actions">
-                  <button className="sm" onClick={() => setEditing({ id: a.id, title: a.title, programIds: a.permissions.filter((p: any) => p.programId).map((p: any) => p.programId), affiliateIds: a.permissions.filter((p: any) => p.affiliateId).map((p: any) => p.affiliateId) })}>
+                  <button className="sm" onClick={() => setEditing({ id: a.id, title: a.title, programIds: a.permissions.filter((p: any) => p.programId).map((p: any) => p.programId), affiliateIds: a.permissions.filter((p: any) => p.affiliateId).map((p: any) => p.affiliateId), groupIds: a.permissions.filter((p: any) => p.groupId).map((p: any) => p.groupId) })}>
                     Access
                   </button>
                   <button className="sm danger" disabled={busy} onClick={() => run(() => api(`/v1/assets/${a.id}`, { method: "PATCH", json: { status: "archived" } })).then(reload)}>

@@ -13,6 +13,8 @@ export default function CampaignDetail() {
   const { data: me } = useApi<any>("/v1/tenant/me");
   const { data: affiliates } = useApi<any>("/v1/affiliates?status=active");
   const { data: assetsData } = useApi<any>("/v1/assets");
+  const { data: groupsData } = useApi<any>("/v1/groups");
+  const [groupPick, setGroupPick] = useState("");
   const { busy, error: actionError, success, run } = useAction();
   const cur = me?.tenant?.currency ?? "USD";
   const [pick, setPick] = useState<string[]>([]);
@@ -105,6 +107,17 @@ export default function CampaignDetail() {
             </button>
             <button className="sm" disabled={busy} onClick={() => run(() => api(`/v1/campaigns/${id}/participants`, { method: "POST", json: { all: true } }), "Every active affiliate in the program has been invited.").then(reload)}>
               Invite all in program
+            </button>
+            <select value={groupPick} onChange={(e) => setGroupPick(e.target.value)} style={{ width: 200 }}>
+              <option value="">Invite a group…</option>
+              {groupsData?.groups?.map((g: any) => (
+                <option key={g.id} value={g.id}>
+                  {g.name}
+                </option>
+              ))}
+            </select>
+            <button className="sm" disabled={busy || !groupPick} onClick={() => run(() => api(`/v1/campaigns/${id}/participants`, { method: "POST", json: { groupIds: [groupPick] } }), "Group invited.").then(() => { setGroupPick(""); reload(); })}>
+              Invite group
             </button>
           </div>
         ) : null}

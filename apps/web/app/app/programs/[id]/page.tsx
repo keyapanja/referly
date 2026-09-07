@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { useAction, useApi } from "@/lib/hooks";
 import { Alert, Badge, CopyBox, Field, Loading, PageHeader } from "@/components/ui";
+import { TiersCard } from "@/components/tiers-card";
 
 const NEXT: Record<string, string[]> = { draft: ["active", "archived"], active: ["paused", "archived"], paused: ["active", "archived"], archived: [] };
 
@@ -12,6 +13,7 @@ export default function ProgramDetail() {
   const { id } = useParams<{ id: string }>();
   const { data, error, reload } = useApi<any>(`/v1/programs/${id}`);
   const { data: offers } = useApi<any>("/v1/offers");
+  const { data: me } = useApi<any>("/v1/tenant/me");
   const { busy, error: actionError, success, run } = useAction();
   const [form, setForm] = useState<any>(null);
   const [reason, setReason] = useState("");
@@ -63,6 +65,7 @@ export default function ProgramDetail() {
           ))}
         </div>
       </div>
+      <TiersCard programId={id} currency={me?.tenant?.currency ?? "USD"} />
       <div className="card">
         <h2>Rules</h2>
         <p className="muted">Changes apply to future conversions only. Existing commissions keep the rate they were created with. Editing the terms bumps the version and affiliates must re-accept.</p>

@@ -8,6 +8,7 @@ import { notFound } from "../errors";
 import { type TenantContext, require as requirePerm, requireAffiliate } from "../context";
 import { writeAudit, snapshot } from "./audit";
 import { campaignAssetIdsForAffiliate } from "./campaigns";
+import { groupIdsForAffiliate } from "./groups";
 
 /**
  * Asset library (AST-01, AST-02). Assets are links to hosted files or inline copy. Visibility
@@ -22,6 +23,7 @@ const permissionShape = {
   programIds: z.array(z.string()).default([]),
   offerIds: z.array(z.string()).default([]),
   affiliateIds: z.array(z.string()).default([]),
+  groupIds: z.array(z.string()).default([]),
 };
 
 export const createAssetSchema = z
@@ -40,7 +42,7 @@ export const createAssetSchema = z
   })
   .superRefine((v, ctx) => {
     if (!v.url && !v.body) ctx.addIssue({ code: "custom", message: "provide a url or body", path: ["url"] });
-    if (v.visibility === "restricted" && !v.programIds.length && !v.offerIds.length && !v.affiliateIds.length)
+    if (v.visibility === "restricted" && !v.programIds.length && !v.offerIds.length && !v.affiliateIds.length && !v.groupIds.length)
       ctx.addIssue({ code: "custom", message: "restricted assets need at least one program, offer or affiliate", path: ["visibility"] });
   });
 export type CreateAssetInput = z.input<typeof createAssetSchema>;
@@ -111,12 +113,13 @@ export async function setAssetPermissions(db: DbLike, ctx: TenantContext, assetI
   });
 }
 
-async function replacePermissions(db: DbLike, ctx: TenantContext, assetId: string, input: { programIds: string[]; offerIds: string[]; affiliateIds: string[] }): Promise<AssetPermission[]> {
+async function replacePermissions(db: DbLike, ctx: TenantContext, assetId: string, input: { programIds: string[]; offerIds: string[]; affiliateIds: string[]; groupIds: string[] }): Promise<AssetPermission[]> {
   await db.delete(assetPermissions).where(and(eq(assetPermissions.assetId, assetId), eq(assetPermissions.tenantId, ctx.tenantId)));
   const values = [
     ...input.programIds.map((programId) => ({ programId })),
     ...input.offerIds.map((offerId) => ({ offerId })),
     ...input.affiliateIds.map((affiliateId) => ({ affiliateId })),
+    ...input.groupIds.map((groupId) => ({ groupId })),
   ].map((v) => ({ id: newId("assetPermission"), tenantId: ctx.tenantId, assetId, ...v }));
   if (!values.length) return [];
   return db.insert(assetPermissions).values(values).returning();
@@ -155,6 +158,7 @@ export async function listAssetsForAffiliate(db: DbLike, ctx: TenantContext, aff
     : [];
   const offerIds = new Set(offerRows.map((o) => o.offerId));
   const programSet = new Set(programIds);
+  const groupSet = new Set(await groupIdsForAffiliate(db, ctx, affiliateId));
 
   const all = await db
     .select()
@@ -166,7 +170,7 @@ export async function listAssetsForAffiliate(db: DbLike, ctx: TenantContext, aff
   const perms = restricted.length ? await db.select().from(assetPermissions).where(inArray(assetPermissions.assetId, restricted.map((a) => a.id))) : [];
   const allowed = new Set(
     perms
-      .filter((p) => (p.programId && programSet.has(p.programId)) || (p.offerId && offerIds.has(p.offerId)) || p.affiliateId === affiliateId)
+      .filter((p) => (p.programId && programSet.has(p.programId)) || (p.offerId && offerIds.has(p.offerId)) || p.affiliateId === affiliateId || (p.groupId && groupSet.has(p.groupId)))
       .map((p) => p.assetId),
   );
   // AST-04: assets attached to a live campaign the affiliate has joined.

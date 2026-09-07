@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { z } from "zod";
-import { affiliates, commissions, conversions, offers, payouts, tenants, tracking, programs as programsSvc, assets, campaigns } from "@referly/core";
+import { affiliates, commissions, conversions, offers, payouts, tenants, tracking, programs as programsSvc, assets, campaigns, tiers } from "@referly/core";
 import { requireAffiliatePrincipal, type AppEnv } from "../lib/auth";
 import { publicTenant } from "./auth";
 
@@ -62,8 +62,26 @@ export function portalRoutes() {
     const memberships = (await affiliates.listMemberships(db, ctx, affiliateId)).filter((m) => m.status === "active");
     const programIds = memberships.map((m) => m.programId);
     const [rows, programRows] = await Promise.all([offers.listOffersForPrograms(db, ctx, programIds), Promise.all(programIds.map((id) => programsSvc.getProgram(db, ctx, id)))]);
+    const programsOut = [];
+    for (const p of programRows) {
+      const membership = memberships.find((m) => m.programId === p.id) ?? null;
+      const tier = await tiers.affiliateTierStatus(db, ctx, affiliateId, p.id);
+      const rate = commissions.resolveRate(p, null, membership, null, tier.current);
+      programsOut.push({
+        id: p.id,
+        name: p.name,
+        commissionModel: p.commissionModel,
+        commissionPercent: p.commissionRateBps / 100,
+        commissionFixedMinor: p.commissionFixedMinor,
+        holdingDays: p.holdingDays,
+        termsVersion: p.termsVersion,
+        /** What this affiliate actually earns today, after overrides and tiers (campaigns are shown separately). */
+        effective: { model: rate.model, percent: rate.rateBps != null ? rate.rateBps / 100 : null, fixedMinor: rate.fixedMinor ?? null, source: rate.overrideSource, tierName: rate.tierName ?? null },
+        tier: { current: tier.current ? { id: tier.current.id, name: tier.current.name, kind: tier.current.kind } : null, next: tier.next ? { name: tier.next.tier.name, metric: tier.next.tier.metric, remaining: tier.next.remaining, windowDays: tier.next.tier.windowDays } : null, metrics: tier.metrics },
+      });
+    }
     return c.json({
-      programs: programRows.map((p) => ({ id: p.id, name: p.name, commissionModel: p.commissionModel, commissionPercent: p.commissionRateBps / 100, commissionFixedMinor: p.commissionFixedMinor, holdingDays: p.holdingDays, termsVersion: p.termsVersion })),
+      programs: programsOut,
       offers: rows.map((o) => ({ id: o.id, programId: o.programId, name: o.name, shortDescription: o.shortDescription, priceMinor: o.priceMinor, currency: o.currency, imageUrl: o.imageUrl, salesUrl: o.salesUrl })),
     });
   });

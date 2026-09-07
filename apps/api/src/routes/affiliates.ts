@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { z } from "zod";
-import { affiliates, tracking, commissions } from "@referly/core";
+import { affiliates, tracking, commissions, groups } from "@referly/core";
 import { requireMerchantPrincipal, type AppEnv } from "../lib/auth";
 
 export function affiliateRoutes() {
@@ -23,14 +23,15 @@ export function affiliateRoutes() {
     const { db } = c.get("deps");
     const ctx = c.get("ctx");
     const id = c.req.param("id");
-    const [affiliate, memberships, links, codes, balances] = await Promise.all([
+    const [affiliate, memberships, links, codes, balances, groupRows] = await Promise.all([
       affiliates.getAffiliate(db, ctx, id),
       affiliates.listMemberships(db, ctx, id),
       tracking.listTrackingLinks(db, ctx, id),
       tracking.listCouponCodes(db, ctx, id),
       commissions.getBalances(db, ctx, id),
+      groups.groupsForAffiliate(db, ctx, id),
     ]);
-    return c.json({ affiliate, memberships, links, codes, balances });
+    return c.json({ affiliate, memberships, links, codes, balances, groups: groupRows });
   });
   r.patch("/:id", async (c) => c.json({ affiliate: await affiliates.updateAffiliate(c.get("deps").db, c.get("ctx"), c.req.param("id"), await c.req.json()) }));
 

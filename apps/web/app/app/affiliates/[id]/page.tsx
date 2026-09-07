@@ -14,6 +14,8 @@ export default function AffiliateDetail() {
   const { data: conv } = useApi<any>(`/v1/conversions?affiliateId=${id}&limit=50`);
   const { data: ledger, reload: reloadLedger } = useApi<any>(`/v1/affiliates/${id}/ledger`);
   const { data: programs } = useApi<any>("/v1/programs");
+  const { data: allGroups } = useApi<any>("/v1/groups");
+  const [groupPick, setGroupPick] = useState("");
   const { busy, error: actionError, success, run } = useAction();
   const [reason, setReason] = useState("");
   const [coupon, setCoupon] = useState({ code: "", programId: "" });
@@ -123,6 +125,36 @@ export default function AffiliateDetail() {
               Save override
             </button>
           </form>
+        </div>
+        <div className="card">
+          <h2>Groups</h2>
+          {data.groups?.length ? (
+            <div className="list-inline" style={{ marginBottom: 10 }}>
+              {data.groups.map((g: any) => (
+                <span key={g.id} className="badge active" style={{ gap: 8 }}>
+                  {g.name}
+                  <button type="button" className="sm" style={{ height: 20, padding: "0 6px", fontSize: 11 }} disabled={busy} onClick={() => run(() => api(`/v1/groups/${g.id}/members/${id}`, { method: "DELETE" })).then(refresh)}>
+                    ×
+                  </button>
+                </span>
+              ))}
+            </div>
+          ) : (
+            <p className="muted">Not in any group.</p>
+          )}
+          <div className="actions">
+            <select value={groupPick} onChange={(e) => setGroupPick(e.target.value)} style={{ width: 220 }}>
+              <option value="">Add to group…</option>
+              {(allGroups?.groups ?? []).filter((g: any) => !data.groups?.some((x: any) => x.id === g.id)).map((g: any) => (
+                <option key={g.id} value={g.id}>
+                  {g.name}
+                </option>
+              ))}
+            </select>
+            <button className="sm" disabled={busy || !groupPick} onClick={() => run(() => api(`/v1/groups/${groupPick}/members`, { method: "POST", json: { affiliateIds: [id] } })).then(() => { setGroupPick(""); refresh(); })}>
+              Add
+            </button>
+          </div>
         </div>
         <div className="card">
           <h2>Links and codes</h2>

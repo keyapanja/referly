@@ -437,7 +437,9 @@ export interface CommissionCalculationBasis {
   basisAmountMinor: number;
   rateBps?: number;
   fixedMinor?: number;
-  overrideSource: "program" | "program_offer" | "affiliate_program" | "campaign";
+  overrideSource: "program" | "program_offer" | "affiliate_program" | "campaign" | "tier";
+  tierId?: string;
+  tierName?: string;
 }
 
 export const ledgerEntries = pgTable(
@@ -515,6 +517,7 @@ export const assetPermissions = pgTable(
     programId: text("program_id").references(() => programs.id),
     offerId: text("offer_id").references(() => offers.id),
     affiliateId: text("affiliate_id").references(() => affiliates.id),
+    groupId: text("group_id"),
   },
   (t) => [index("asset_permissions_asset_idx").on(t.assetId)],
 );
@@ -644,6 +647,54 @@ export const automationRuns = pgTable(
   (t) => [index("automation_runs_rule_idx").on(t.ruleId, t.createdAt), index("automation_runs_entity_idx").on(t.ruleId, t.entityType, t.entityId)],
 );
 
+/** AFF-04: affiliate groups (partner type, channel, geography, negotiated rate). */
+export const affiliateGroups = pgTable(
+  "affiliate_groups",
+  {
+    id: id(),
+    tenantId: tenantRef(),
+    name: text("name").notNull(),
+    description: text("description"),
+    kind: text("kind").notNull().default("custom"), // partner_type | channel | geography | rate | custom
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("affiliate_groups_name_uq").on(t.tenantId, t.name)],
+);
+
+export const affiliateGroupMembers = pgTable(
+  "affiliate_group_members",
+  {
+    id: id(),
+    tenantId: tenantRef(),
+    groupId: text("group_id").notNull().references(() => affiliateGroups.id),
+    affiliateId: text("affiliate_id").notNull().references(() => affiliates.id),
+    addedAt: ts("added_at").notNull(),
+  },
+  (t) => [uniqueIndex("affiliate_group_members_uq").on(t.groupId, t.affiliateId), index("affiliate_group_members_affiliate_idx").on(t.tenantId, t.affiliateId)],
+);
+
+/** PROG-11: commission tiers by group membership or by performance. */
+export const programRateTiers = pgTable(
+  "program_rate_tiers",
+  {
+    id: id(),
+    tenantId: tenantRef(),
+    programId: text("program_id").notNull().references(() => programs.id),
+    name: text("name").notNull(),
+    kind: text("kind").notNull(), // group | performance
+    groupId: text("group_id").references(() => affiliateGroups.id),
+    metric: text("metric"), // conversions | revenue
+    threshold: bigint("threshold", { mode: "number" }),
+    windowDays: integer("window_days"),
+    commissionModel: text("commission_model").notNull().default("percentage"),
+    commissionRateBps: integer("commission_rate_bps"),
+    commissionFixedMinor: money("commission_fixed_minor"),
+    priority: integer("priority").notNull().default(0),
+    createdAt: createdAt(),
+  },
+  (t) => [index("program_rate_tiers_program_idx").on(t.tenantId, t.programId)],
+);
+
 /** Work items for the merchant team, created by automation rules (AUTO-03) or people. */
 export const tasks = pgTable(
   "tasks",
@@ -769,6 +820,9 @@ export const schema = {
   automationRules,
   automationRuns,
   tasks,
+  affiliateGroups,
+  affiliateGroupMembers,
+  programRateTiers,
   auditLogs,
   jobs,
   exports,
@@ -797,6 +851,8 @@ export type AuthToken = typeof authTokens.$inferSelect;
 export type Export = typeof exports.$inferSelect;
 export type Campaign = typeof campaigns.$inferSelect;
 export type Task = typeof tasks.$inferSelect;
+export type AffiliateGroup = typeof affiliateGroups.$inferSelect;
+export type ProgramRateTier = typeof programRateTiers.$inferSelect;
 export type AutomationRun = typeof automationRuns.$inferSelect;
 export type AutomationRule = typeof automationRules.$inferSelect;
 export type CampaignParticipant = typeof campaignParticipants.$inferSelect;

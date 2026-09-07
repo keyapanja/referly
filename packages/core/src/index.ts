@@ -29,3 +29,5 @@ export * as plans from "./services/plans";
 export * as platform from "./services/platform";
 export * as campaigns from "./services/campaigns";
 export * as automation from "./services/automation";
+export * as groups from "./services/groups";
+export * as tiers from "./services/tiers";

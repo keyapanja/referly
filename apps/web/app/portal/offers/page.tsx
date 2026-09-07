@@ -30,7 +30,16 @@ export default function PortalOffers() {
                 <dt>Price</dt>
                 <dd>{money(o.priceMinor, o.currency)}</dd>
                 <dt>You earn</dt>
-                <dd>{program?.commissionModel === "percentage" ? `${program.commissionPercent}% per sale` : `${money(program?.commissionFixedMinor ?? 0, o.currency)} per sale`}</dd>
+                <dd>
+                  {program?.effective ? (program.effective.model === "percentage" ? `${program.effective.percent}% per sale` : `${money(program.effective.fixedMinor ?? 0, o.currency)} per sale`) : program?.commissionModel === "percentage" ? `${program.commissionPercent}% per sale` : `${money(program?.commissionFixedMinor ?? 0, o.currency)} per sale`}
+                  {program?.effective?.tierName ? <span className="muted"> · {program.effective.tierName} tier</span> : program?.effective?.source === "affiliate_program" ? <span className="muted"> · your negotiated rate</span> : null}
+                  {program?.tier?.next ? (
+                    <div className="help">
+                      {program.tier.next.metric === "revenue" ? money(program.tier.next.remaining, o.currency) + " more in sales" : `${program.tier.next.remaining} more sale${program.tier.next.remaining === 1 ? "" : "s"}`} to reach {program.tier.next.name}
+                      {program.tier.next.windowDays ? ` (rolling ${program.tier.next.windowDays} days)` : ""}
+                    </div>
+                  ) : null}
+                </dd>
                 <dt>Paid after</dt>
                 <dd>{program?.holdingDays} days</dd>
                 <dt>Program</dt>

@@ -481,6 +481,22 @@ describe("MVP acceptance over HTTP", () => {
     expect((await call("/v1/automation/rules", { token: affiliateToken })).status).toBe(403);
   });
 
+  it("Groups and tiers: a group tier changes the commission and the portal shows the effective rate", async () => {
+    const group = await call("/v1/groups", { method: "POST", token: ownerToken, json: { name: "Alumni", kind: "partner_type" } });
+    expect(group.status).toBe(201);
+    expect((await call(`/v1/groups/${group.body.group.id}/members`, { method: "POST", token: ownerToken, json: { affiliateIds: [affiliateId] } })).status).toBe(201);
+    const tier = await call(`/v1/programs/${programId}/tiers`, { method: "POST", token: ownerToken, json: { name: "Alumni rate", kind: "group", groupId: group.body.group.id, commissionPercent: 25 } });
+    expect(tier.status).toBe(201);
+    const sale = await call("/v1/conversions", { method: "POST", token: ownerToken, json: { source: "manual", externalOrderId: "ORDER-TIER-1", offerId, amountMinor: 100_000, affiliateId, programId, reason: "phone order" } });
+    expect(sale.body.commission).toMatchObject({ amountMinor: 25_000 });
+    expect(sale.body.commission.calculationBasis).toMatchObject({ overrideSource: "tier", tierName: "Alumni rate" });
+    const portal = await call("/portal/offers", { token: affiliateToken });
+    expect(portal.body.programs[0].effective).toMatchObject({ percent: 25, source: "tier", tierName: "Alumni rate" });
+    expect((await call(`/v1/affiliates/${affiliateId}`, { token: ownerToken })).body.groups.map((g: any) => g.name)).toEqual(["Alumni"]);
+    expect((await call(`/v1/groups/${group.body.group.id}`, { method: "DELETE", token: ownerToken })).status).toBe(409);
+    expect((await call("/v1/groups", { token: affiliateToken })).status).toBe(403);
+  });
+
   it("Validation and permissions errors are JSON with codes", async () => {
     const bad = await call("/v1/offers", { method: "POST", token: ownerToken, json: { name: "" } });
     expect(bad.status).toBe(400);

@@ -57,6 +57,13 @@
       "when": 1788792810695,
       "tag": "0007_automation_tasks",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1788793543392,
+      "tag": "0008_groups_tiers",
+      "breakpoints": true
     }
   ]
 }

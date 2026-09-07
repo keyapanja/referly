@@ -13,6 +13,7 @@ import * as affiliatesSvc from "./affiliates";
 import * as commissionsSvc from "./commissions";
 import * as conversionsSvc from "./conversions";
 import { assertFeature } from "./plans";
+import { groupIdsForAffiliate } from "./groups";
 
 /**
  * Rules & automation engine (AUTO-01..06). A rule = trigger event + conditions + actions +
@@ -49,6 +50,7 @@ export const CONDITION_FIELDS = [
   { key: "campaignId", label: "Campaign", kind: "id" },
   { key: "affiliateId", label: "Affiliate", kind: "id" },
   { key: "affiliateTag", label: "Affiliate tag", kind: "string" },
+  { key: "affiliateGroup", label: "Affiliate group", kind: "id" },
   { key: "affiliateStatus", label: "Affiliate status", kind: "string" },
   { key: "amountMinor", label: "Amount (minor units)", kind: "number" },
   { key: "status", label: "Entity status", kind: "string" },
@@ -230,6 +232,7 @@ export interface Facts {
   affiliateName: string | null;
   affiliateEmail: string | null;
   affiliateTags: string[];
+  affiliateGroups: string[];
   affiliateStatus: string | null;
   programId: string | null;
   programName: string | null;
@@ -254,6 +257,7 @@ export async function buildFacts(db: DbLike, ctx: TenantContext, event: DomainEv
     affiliateName: null,
     affiliateEmail: null,
     affiliateTags: [],
+    affiliateGroups: [],
     affiliateStatus: null,
     programId: (d.programId as string | undefined) ?? null,
     programName: null,
@@ -309,6 +313,7 @@ export async function buildFacts(db: DbLike, ctx: TenantContext, event: DomainEv
       f.affiliateName = a.name;
       f.affiliateEmail = a.email;
       f.affiliateTags = a.tags ?? [];
+      f.affiliateGroups = await groupIdsForAffiliate(db, ctx, a.id);
       f.affiliateStatus = a.status;
       if (event.entityType === "affiliate") f.status ??= a.status;
     }
@@ -323,6 +328,8 @@ function factValue(facts: Facts, field: ConditionField): unknown {
   switch (field) {
     case "affiliateTag":
       return facts.affiliateTags;
+    case "affiliateGroup":
+      return facts.affiliateGroups;
     default:
       return facts[field];
   }
@@ -332,7 +339,7 @@ export function conditionMatches(c: Condition, facts: Facts): boolean {
   const actual = factValue(facts, c.field);
   const list = Array.isArray(c.value) ? c.value : [c.value];
   const norm = (v: unknown) => (typeof v === "string" ? v.trim().toLowerCase() : v);
-  if (c.field === "affiliateTag") {
+  if (c.field === "affiliateTag" || c.field === "affiliateGroup") {
     const tags = (actual as string[]).map((t) => t.toLowerCase());
     const has = list.some((v) => tags.includes(String(norm(v))));
     return c.op === "neq" || c.op === "not_in" ? !has : has;
