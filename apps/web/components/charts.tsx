@@ -15,17 +15,21 @@ export interface Point {
   prev?: number | null;
 }
 
-function niceMax(max: number): number {
-  if (max <= 0) return 1;
-  const pow = 10 ** Math.floor(Math.log10(max));
-  const n = max / pow;
-  const step = n <= 1 ? 1 : n <= 2 ? 2 : n <= 5 ? 5 : 10;
-  return step * pow;
+/** Axis ticks on a 1-2-5 step so counts stay whole numbers and money lands on round values. */
+function ticks(max: number): number[] {
+  if (max <= 0) return [0, 1];
+  const rough = max / 4;
+  const pow = 10 ** Math.floor(Math.log10(rough));
+  const n = rough / pow;
+  const step = (n <= 1 ? 1 : n <= 2 ? 2 : n <= 5 ? 5 : 10) * pow;
+  const out: number[] = [];
+  for (let v = 0; v < max + step - 1e-9 && out.length < 8; v += step) out.push(Number(v.toFixed(6)));
+  return out;
 }
 
-function ticks(max: number, count = 4): number[] {
-  const top = niceMax(max);
-  return Array.from({ length: count + 1 }, (_, i) => (top / count) * i);
+function niceMax(max: number): number {
+  const t = ticks(max);
+  return t[t.length - 1] || 1;
 }
 
 export function compact(n: number, money?: { currency: string }): string {
