@@ -36,4 +36,5 @@ export * as disputes from "./services/disputes";
 export * as webhooks from "./services/webhooks";
 export * as reporting from "./services/reporting";
 export * as payoutProviders from "./services/payoutProviders";
+export * as textProviders from "./services/textProviders";
 export { encryptJson, decryptJson } from "./crypto";

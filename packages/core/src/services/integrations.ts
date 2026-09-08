@@ -11,6 +11,7 @@ import { enqueueJob } from "./jobs";
 import { getAffiliate, setPayoutProfile } from "./affiliates";
 import { getPayout, markPayoutFailed, markPayoutPaid, listPayouts } from "./payouts";
 import { PAYOUT_PROVIDER_IDS, PROVIDER_FOR_METHOD, createPayoutProvider, type PayoutProvider, type PayoutProviderFactory, type PayoutProviderId, type ProviderCredentials, type ProviderOptions } from "./payoutProviders";
+import { TEXT_PROVIDER_IDS, createTextProvider, E164_RE, type TextCredentials, type TextProvider, type TextProviderFactory, type TextProviderId, type TextProviderOptions } from "./textProviders";
 
 /**
  * Tenant integrations: per-merchant payout provider credentials, stored encrypted, and the
@@ -21,14 +22,36 @@ import { PAYOUT_PROVIDER_IDS, PROVIDER_FOR_METHOD, createPayoutProvider, type Pa
 export const credentialsSchema = {
   stripe_connect: z.object({ secretKey: z.string().regex(/^(sk|rk)_(live|test)_[A-Za-z0-9]+$/, "expected a Stripe secret key") }),
   paypal: z.object({ clientId: z.string().min(10), clientSecret: z.string().min(10), sandbox: z.boolean().default(false) }),
+  twilio: z
+    .object({
+      accountSid: z.string().regex(/^AC[0-9a-fA-F]{32}$/, "expected a Twilio account SID (AC…)"),
+      authToken: z.string().min(16),
+      fromSms: z.string().regex(/^(\+[1-9]\d{6,14}|MG[0-9a-fA-F]{32})$/, "expected an E.164 number or a Messaging Service SID").optional(),
+      fromWhatsApp: z.string().regex(E164_RE, "expected an E.164 number").optional(),
+    })
+    .refine((c) => c.fromSms || c.fromWhatsApp, { message: "add an SMS sender, a WhatsApp sender, or both" }),
 } as const;
+
+export type IntegrationProviderId = PayoutProviderId | TextProviderId;
 
 export interface IntegrationDeps {
   factory?: PayoutProviderFactory;
   providerOptions?: ProviderOptions;
 }
 
-function hint(provider: PayoutProviderId, creds: ProviderCredentials): string {
+/** Text (SMS/WhatsApp) provider construction; the API sets a console fallback in development. */
+export interface TextDeps {
+  factory?: TextProviderFactory;
+  providerOptions?: TextProviderOptions;
+  /** Used when the tenant has no provider of its own (dev console, or a platform-wide account). */
+  fallback?: TextProvider | null;
+}
+
+function hint(provider: IntegrationProviderId, creds: ProviderCredentials | TextCredentials): string {
+  if (provider === "twilio") {
+    const t = creds as TextCredentials;
+    return `${t.accountSid.slice(0, 6)}… · ${[t.fromSms && `SMS ${t.fromSms}`, t.fromWhatsApp && `WhatsApp ${t.fromWhatsApp}`].filter(Boolean).join(", ")}`;
+  }
   if (provider === "stripe_connect") {
     const k = (creds as { secretKey: string }).secretKey;
     return `${k.slice(0, 8)}…${k.slice(-4)}`;
@@ -38,7 +61,7 @@ function hint(provider: PayoutProviderId, creds: ProviderCredentials): string {
 }
 
 export function publicIntegration(row: TenantIntegration) {
-  return { provider: row.provider as PayoutProviderId, status: row.status, hint: row.hint, connectedAt: row.createdAt, lastVerifiedAt: row.lastVerifiedAt };
+  return { provider: row.provider as IntegrationProviderId, status: row.status, hint: row.hint, connectedAt: row.createdAt, lastVerifiedAt: row.lastVerifiedAt };
 }
 
 export async function connectPayoutProvider(db: DbLike, ctx: TenantContext, provider: PayoutProviderId, rawCredentials: unknown, deps: IntegrationDeps = {}): Promise<TenantIntegration> {
@@ -73,10 +96,51 @@ export async function listIntegrations(db: DbLike, ctx: TenantContext) {
   return rows.map(publicIntegration);
 }
 
-/** Connected provider ids, for both merchant and affiliate views. */
+/** Connected payout provider ids, for both merchant and affiliate views. */
 export async function connectedProviders(db: DbLike, ctx: TenantContext): Promise<PayoutProviderId[]> {
   const rows = await db.select({ provider: tenantIntegrations.provider }).from(tenantIntegrations).where(and(eq(tenantIntegrations.tenantId, ctx.tenantId), eq(tenantIntegrations.status, "connected")));
-  return rows.map((r) => r.provider as PayoutProviderId);
+  return rows.map((r) => r.provider as PayoutProviderId).filter((p) => PAYOUT_PROVIDER_IDS.includes(p));
+}
+
+// ---------------------------------------------------------------------------
+// Text providers (SMS / WhatsApp)
+// ---------------------------------------------------------------------------
+
+export async function connectTextProvider(db: DbLike, ctx: TenantContext, provider: TextProviderId, rawCredentials: unknown, deps: TextDeps = {}): Promise<TenantIntegration> {
+  requirePerm(ctx, "integrations.manage");
+  if (!TEXT_PROVIDER_IDS.includes(provider)) throw validation(`unknown provider ${provider}`);
+  const creds = credentialsSchema[provider].parse(rawCredentials) as TextCredentials;
+  const adapter = (deps.factory ?? createTextProvider)(provider, creds, deps.providerOptions);
+  const check = await adapter.verifyCredentials();
+  if (!check.ok) throw validation(`could not verify ${adapter.label} credentials: ${check.detail ?? "unknown error"}`);
+  const values = { tenantId: ctx.tenantId, provider, credentialsEnc: encryptJson(creds), hint: hint(provider, creds), status: "connected", lastVerifiedAt: ctx.now(), updatedAt: ctx.now() };
+  const existing = await db.query.tenantIntegrations.findFirst({ where: and(eq(tenantIntegrations.tenantId, ctx.tenantId), eq(tenantIntegrations.provider, provider)) });
+  const [row] = existing
+    ? await db.update(tenantIntegrations).set(values).where(eq(tenantIntegrations.id, existing.id)).returning()
+    : await db.insert(tenantIntegrations).values({ id: newId("integration"), ...values, createdAt: ctx.now() }).returning();
+  await writeAudit(db, ctx, { entityType: "integration", entityId: row!.id, action: existing ? "reconnected" : "connected", after: { provider, hint: row!.hint } });
+  return row!;
+}
+
+export async function disconnectTextProvider(db: DbLike, ctx: TenantContext, provider: TextProviderId): Promise<void> {
+  requirePerm(ctx, "integrations.manage");
+  const existing = await db.query.tenantIntegrations.findFirst({ where: and(eq(tenantIntegrations.tenantId, ctx.tenantId), eq(tenantIntegrations.provider, provider)) });
+  if (!existing) throw notFound("integration", provider);
+  await db.delete(tenantIntegrations).where(eq(tenantIntegrations.id, existing.id));
+  await writeAudit(db, ctx, { entityType: "integration", entityId: existing.id, action: "disconnected", before: { provider } });
+}
+
+/** The tenant's text provider, or the platform fallback. Credentials are decrypted only here. */
+export async function textProviderFor(db: DbLike, ctx: TenantContext, deps: TextDeps = {}): Promise<TextProvider | null> {
+  const row = await db.query.tenantIntegrations.findFirst({ where: and(eq(tenantIntegrations.tenantId, ctx.tenantId), eq(tenantIntegrations.provider, "twilio"), eq(tenantIntegrations.status, "connected")) });
+  if (!row) return deps.fallback ?? null;
+  return (deps.factory ?? createTextProvider)("twilio", decryptJson<TextCredentials>(row.credentialsEnc), deps.providerOptions);
+}
+
+/** Raw Twilio auth token for webhook signature checks; null when Twilio is not connected. */
+export async function twilioAuthToken(db: DbLike, ctx: TenantContext): Promise<string | null> {
+  const row = await db.query.tenantIntegrations.findFirst({ where: and(eq(tenantIntegrations.tenantId, ctx.tenantId), eq(tenantIntegrations.provider, "twilio"), eq(tenantIntegrations.status, "connected")) });
+  return row ? decryptJson<TextCredentials>(row.credentialsEnc).authToken : null;
 }
 
 /** Builds the tenant's adapter for a provider. Credentials are decrypted only here. */

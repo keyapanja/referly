@@ -10,10 +10,14 @@ export default function PortalProfile() {
   const { busy, error: actionError, success, run } = useAction();
   const [form, setForm] = useState<any>(null);
   const [payout, setPayout] = useState({ method: "bank_transfer", profileRef: "", masked: "" });
+  const [texts, setTexts] = useState<{ channel: string; consent: boolean } | null>(null);
 
   useEffect(() => {
     if (data && !form) setForm({ name: data.affiliate.name, phone: data.affiliate.phone ?? "", company: data.affiliate.company ?? "", website: data.affiliate.channels?.website ?? "", social: data.affiliate.channels?.social ?? "" });
-  }, [data, form]);
+    if (data && !texts) setTexts({ channel: data.affiliate.textChannel ?? "", consent: false });
+  }, [data, form, texts]);
+  const optedOut = !!data?.affiliate?.textOptOutAt && (!data?.affiliate?.textConsentAt || data.affiliate.textOptOutAt >= data.affiliate.textConsentAt);
+  const textsOn = !!data?.affiliate?.textChannel && !!data?.affiliate?.textConsentAt && !optedOut;
   if (!data || !form) return <Loading error={error} />;
 
   return (
@@ -87,6 +91,52 @@ export default function PortalProfile() {
               Save payout details
             </button>
           </form>
+        </div>
+      </div>
+      <div className="grid cols-2">
+        <div className="card">
+          <h2>Text notifications</h2>
+          <p className="muted">
+            {textsOn
+              ? `You get ${data.affiliate.textChannel === "whatsapp" ? "WhatsApp" : "SMS"} messages at ${data.affiliate.phone} for approvals, sales, commissions and payouts, as well as email.`
+              : optedOut
+                ? "You opted out of text messages. You can opt back in below."
+                : "Email is always sent. Optionally get a short SMS or WhatsApp message too."}
+          </p>
+          {texts ? (
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                const json: Record<string, unknown> = texts.channel ? { phone: form.phone || null, textChannel: texts.channel, textConsent: true } : { textChannel: null };
+                const ok = await run(() => api("/portal/profile", { method: "PATCH", json }), texts.channel ? "Text notifications on." : "Text notifications off.");
+                if (ok) {
+                  setTexts(null);
+                  reload();
+                }
+              }}
+            >
+              <div className="row">
+                <Field label="Channel">
+                  <select value={texts.channel} onChange={(e) => setTexts({ ...texts, channel: e.target.value, consent: false })}>
+                    <option value="">Email only</option>
+                    <option value="sms">SMS</option>
+                    <option value="whatsapp">WhatsApp</option>
+                  </select>
+                </Field>
+                <Field label="Phone (international format)" help="e.g. +1 415 555 0100">
+                  <input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} placeholder="+…" disabled={!texts.channel} />
+                </Field>
+              </div>
+              {texts.channel ? (
+                <label className="checkbox" style={{ marginBottom: 12 }}>
+                  <input type="checkbox" checked={texts.consent} onChange={(e) => setTexts({ ...texts, consent: e.target.checked })} required /> I agree to receive {texts.channel === "whatsapp" ? "WhatsApp" : "SMS"} messages from {data.tenant?.name ?? "this business"} about my affiliate account. Reply STOP at any time to opt out.
+                </label>
+              ) : null}
+              <button className="primary" disabled={busy || (!!texts.channel && !texts.consent)}>
+                {texts.channel ? "Turn on text notifications" : "Save"}
+              </button>
+            </form>
+          ) : null}
         </div>
       </div>
       <div className="card">

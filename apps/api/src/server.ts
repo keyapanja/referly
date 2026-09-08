@@ -4,6 +4,7 @@ import { createApp } from "./app";
 import { startWorker } from "./worker";
 import { createEmailProvider } from "./email";
 import { createFileStorage } from "./storage";
+import { createTextDeps } from "./text";
 
 // Local development: load apps/api/.env if present (never committed). Hosted setups use real env vars.
 try {
@@ -19,14 +20,15 @@ const webUrl = process.env.WEB_URL ?? "http://localhost:3000";
 const { db, close } = await createDb({ dataDir: process.env.DATABASE_URL ? undefined : (process.env.PGLITE_DIR ?? ".pglite") });
 const email = createEmailProvider();
 const storage = createFileStorage(process.env, baseUrl);
-const app = createApp({ db, email, storage, config: { baseUrl, webUrl, cookieSecure: baseUrl.startsWith("https"), supportEmail: process.env.PLATFORM_SUPPORT_EMAIL } });
+const text = createTextDeps();
+const app = createApp({ db, email, storage, text, config: { baseUrl, webUrl, cookieSecure: baseUrl.startsWith("https"), supportEmail: process.env.PLATFORM_SUPPORT_EMAIL } });
 
 // Idempotent platform-admin bootstrap (PRD s15 platform_admin role).
 if (process.env.PLATFORM_ADMIN_EMAIL && process.env.PLATFORM_ADMIN_PASSWORD) {
   const admin = await withRlsBypass(db, (tx) => platform.ensurePlatformAdmin(tx, { email: process.env.PLATFORM_ADMIN_EMAIL!, password: process.env.PLATFORM_ADMIN_PASSWORD!, name: process.env.PLATFORM_ADMIN_NAME }));
   console.log(`platform admin ready: ${admin.email}`);
 }
-const worker = startWorker({ db, email, storage, webUrl });
+const worker = startWorker({ db, email, storage, webUrl, baseUrl, text });
 // webhook deliveries use the global fetch
 
 const server = serve({ fetch: app.fetch, port }, (info) => {

@@ -74,6 +74,7 @@ export type Condition = z.infer<typeof conditionSchema>;
 export const actionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("send_template"), templateKey: z.enum(messaging.TEMPLATE_KEYS) }),
   z.object({ type: z.literal("send_custom"), subject: z.string().min(1).max(200), body: z.string().min(1).max(10000) }),
+  z.object({ type: z.literal("send_text"), body: z.string().min(1).max(messaging.TEXT_BODY_MAX) }),
   z.object({ type: z.literal("approve_commission") }),
   z.object({ type: z.literal("approve_conversion") }),
   z.object({ type: z.literal("add_tag"), tag: z.string().min(1).max(40) }),
@@ -87,6 +88,7 @@ export type Action = z.infer<typeof actionSchema>;
 export const ACTIONS = [
   { type: "send_template", label: "Send a template email to the affiliate", params: [{ key: "templateKey", label: "Template", kind: "template" }] },
   { type: "send_custom", label: "Send a custom email to the affiliate", params: [{ key: "subject", label: "Subject", kind: "string" }, { key: "body", label: "Body", kind: "text" }] },
+  { type: "send_text", label: "Send an SMS/WhatsApp to the affiliate (if opted in)", params: [{ key: "body", label: "Message", kind: "text" }] },
   { type: "approve_commission", label: "Approve the commission", params: [] },
   { type: "approve_conversion", label: "Approve the conversion", params: [] },
   { type: "add_tag", label: "Add a tag to the affiliate", params: [{ key: "tag", label: "Tag", kind: "string" }] },
@@ -131,6 +133,7 @@ function validateActions(actions: Action[]) {
       messaging.validateTemplateText(a.subject);
       messaging.validateTemplateText(a.body);
     }
+    if (a.type === "send_text" || a.type === "create_task") messaging.validateTemplateText(a.type === "send_text" ? a.body : a.title);
   }
 }
 
@@ -370,6 +373,9 @@ export function ruleMatches(conditions: Condition[], facts: Facts): boolean {
 export interface RuleDeps {
   email: messaging.EmailProvider;
   webUrl: string;
+  /** Tenant's text provider, resolved by the caller; omitted means texts are skipped. */
+  text?: messaging.Transports["text"];
+  textStatusUrl?: string;
 }
 
 interface ActionResult {
@@ -400,8 +406,15 @@ async function executeAction(db: DbLike, ctx: TenantContext, rule: AutomationRul
   switch (action.type) {
     case "send_template": {
       if (!facts.affiliateEmail) throw validation("no affiliate email in this event");
-      const log = await messaging.sendTemplated(db, ctx, deps.email, { key: action.templateKey, to: facts.affiliateEmail, vars, affiliateId: facts.affiliateId, related: { type: event.entityType, id: event.entityId } });
-      return { type: action.type, ok: log.status === "sent", detail: `${action.templateKey} → ${facts.affiliateEmail} (${log.status})`, error: log.error ?? undefined };
+      const affiliate = facts.affiliateId ? await db.query.affiliates.findFirst({ where: eq(affiliates.id, facts.affiliateId) }) : null;
+      const logs = await messaging.sendNotification(db, ctx, { email: deps.email, text: deps.text, textStatusUrl: deps.textStatusUrl }, { key: action.templateKey, to: facts.affiliateEmail, vars, affiliateId: facts.affiliateId, related: { type: event.entityType, id: event.entityId }, affiliate });
+      const log = logs[0]!;
+      return { type: action.type, ok: log.status === "sent", detail: logs.map((l) => `${action.templateKey} → ${l.recipient} (${l.channel} ${l.status})`).join("; "), error: log.error ?? undefined };
+    }
+    case "send_text": {
+      const id = needAffiliate();
+      const log = await messaging.sendCustomText(db, ctx, { email: deps.email, text: deps.text, textStatusUrl: deps.textStatusUrl }, { affiliateId: id, body: messaging.renderTemplate(action.body, vars), related: { type: event.entityType, id: event.entityId } });
+      return { type: action.type, ok: log.status === "sent", detail: `${log.channel} → ${log.recipient || "no phone"} (${log.status})`, error: log.error ?? undefined };
     }
     case "send_custom": {
       if (!facts.affiliateEmail) throw validation("no affiliate email in this event");

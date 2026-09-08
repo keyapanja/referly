@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { createDb, messaging, platform, withRlsBypass, payoutProviders, webhooks, type DbHandle } from "@referly/core";
+import { createDb, messaging, platform, withRlsBypass, payoutProviders, webhooks, textProviders, type DbHandle } from "@referly/core";
 import { createApp, type App } from "../src/app";
 import { runOnce } from "../src/worker";
 import { resetRateLimits } from "../src/lib/ratelimit";
@@ -21,6 +21,13 @@ let clock = new Date("2026-03-01T10:00:00Z");
 const now = () => new Date(clock);
 const email = new messaging.MemoryEmailProvider();
 const memoryPayoutProvider = new payoutProviders.MemoryPayoutProvider("stripe_connect");
+/** Twilio stub: verifies any account, accepts any send, records the form bodies. */
+const twilioCalls: { url: string; form: URLSearchParams }[] = [];
+const twilioFetch = (async (url: string | URL | Request, init?: RequestInit) => {
+  twilioCalls.push({ url: String(url), form: new URLSearchParams(String(init?.body ?? "")) });
+  return new Response(JSON.stringify(init?.method === "POST" ? { sid: `SM${twilioCalls.length}` } : { status: "active" }), { status: init?.method === "POST" ? 201 : 200, headers: { "content-type": "application/json" } });
+}) as unknown as typeof fetch;
+const textDeps = { providerOptions: { fetchImpl: twilioFetch }, fallback: null };
 const memoryPayouts = { factory: () => memoryPayoutProvider };
 const webhookCalls: { url: string; headers: Record<string, string>; body: string }[] = [];
 const webhookFetch = (async (url: string | URL | Request, init?: RequestInit) => {
@@ -34,7 +41,7 @@ const BASE = "http://api.test";
 beforeAll(async () => {
   handle = await createDb();
   storage = new LocalStorage(await mkdtemp(path.join(tmpdir(), "referly-files-")), BASE);
-  app = createApp({ db: handle.db, email, storage, payoutProviders: memoryPayouts, webhookFetch, config: { baseUrl: BASE, webUrl: "http://web.test", cookieSecure: false, now } });
+  app = createApp({ db: handle.db, email, storage, payoutProviders: memoryPayouts, webhookFetch, text: textDeps, config: { baseUrl: BASE, webUrl: "http://web.test", cookieSecure: false, now } });
 });
 afterAll(() => handle.close());
 beforeAll(() => resetRateLimits());
@@ -614,6 +621,77 @@ describe("MVP acceptance over HTTP", () => {
     const groups = await call(`/v1/analytics/groups${q}`, { token: ownerToken });
     expect(groups.body.rows[0]).toMatchObject({ name: "Alumni" });
     expect((await call(`/v1/analytics/timeseries${q}`, { token: affiliateToken })).status).toBe(403);
+  });
+
+  it("Text messaging: Twilio connects per workspace, the affiliate opts in, the worker texts alongside email, and Twilio webhooks update status and opt-out", async () => {
+    const tenantId = (await call("/v1/tenant", { token: ownerToken })).body.tenant.id as string;
+    const TWILIO_SID = "AC" + "d".repeat(32);
+    const TWILIO_TOKEN = "twilio_auth_token_0123456789";
+    const bad = await call("/v1/tenant/integrations/twilio", { method: "POST", token: ownerToken, json: { credentials: { accountSid: TWILIO_SID, authToken: TWILIO_TOKEN } } });
+    expect(bad.status).toBe(400);
+    const connected = await call("/v1/tenant/integrations/twilio", { method: "POST", token: ownerToken, json: { credentials: { accountSid: TWILIO_SID, authToken: TWILIO_TOKEN, fromSms: "+15005550006", fromWhatsApp: "+15005550007" } } });
+    expect(connected.status).toBe(201);
+    expect(connected.body.integration).toMatchObject({ provider: "twilio", status: "connected" });
+    const urls = await call("/v1/tenant/integrations/twilio/webhooks", { token: ownerToken });
+    expect(urls.body.statusUrl).toBe(`${BASE}/hooks/twilio/${tenantId}/status`);
+
+    // templates for both channels; text ones editable via ?channel=text
+    const templates = await call("/v1/messages/templates", { token: ownerToken });
+    expect(templates.body.channels).toEqual(["email", "text"]);
+    expect(templates.body.templates.some((t: any) => t.channel === "text" && t.key === "commission_approved")).toBe(true);
+    const edited = await call("/v1/messages/templates/commission_approved?channel=text", { method: "PATCH", token: ownerToken, json: { body: "{{affiliate_name}}: {{amount}} {{currency}} approved by {{business_name}}" } });
+    expect(edited.body.template.channel).toBe("text");
+
+    // the affiliate opts in from the portal; the merchant cannot consent for them
+    affiliateToken = (await call("/v1/auth/login", { method: "POST", json: { email: "sam@partner.io", password: "partnerpass1" } })).body.token;
+    expect((await call(`/v1/affiliates/${affiliateId}`, { method: "PATCH", token: ownerToken, json: { phone: "+14155550123", textChannel: "whatsapp", textConsent: true } })).status).toBe(400);
+    const optIn = await call("/portal/profile", { method: "PATCH", token: affiliateToken, json: { phone: "+1 415 555 0123", textChannel: "whatsapp", textConsent: true } });
+    expect(optIn.status).toBe(200);
+    expect(optIn.body.affiliate).toMatchObject({ phone: "+14155550123", textChannel: "whatsapp" });
+    expect(optIn.body.affiliate.textConsentAt).toBeTruthy();
+
+    // an approved commission notifies by email and WhatsApp
+    const sale = await call("/v1/conversions", { method: "POST", token: ownerToken, json: { source: "manual", externalOrderId: "ORDER-TEXT-1", offerId, amountMinor: 5_000, affiliateId, programId, reason: "phone order" } });
+    expect(sale.status).toBe(201);
+    const sends = twilioCalls.filter((c) => c.url.endsWith("/Messages.json")).length;
+    const emails = email.sent.length;
+    await runOnce({ db: handle.db, email, storage, webUrl: "http://web.test", baseUrl: BASE, now, payoutProviders: memoryPayouts, webhookFetch, text: textDeps });
+    await runOnce({ db: handle.db, email, storage, webUrl: "http://web.test", baseUrl: BASE, now, payoutProviders: memoryPayouts, webhookFetch, text: textDeps });
+    expect(email.sent.length).toBeGreaterThan(emails);
+    const texts = twilioCalls.filter((c) => c.url.endsWith("/Messages.json"));
+    expect(texts.length).toBeGreaterThan(sends);
+    const last = texts.at(-1)!.form;
+    expect(last.get("To")).toBe("whatsapp:+14155550123");
+    expect(last.get("From")).toBe("whatsapp:+15005550007");
+    expect(last.get("StatusCallback")).toBe(`${BASE}/hooks/twilio/${tenantId}/status`);
+    const log = await call("/v1/messages/log?channel=whatsapp", { token: ownerToken });
+    expect(log.body.messages[0]).toMatchObject({ channel: "whatsapp", status: "sent", recipient: "+14155550123" });
+    const sid = log.body.messages[0].providerMessageId;
+
+    // Twilio status callback must be signed; delivered lands on the log
+    const statusUrl = `${BASE}/hooks/twilio/${tenantId}/status`;
+    const params = { MessageSid: sid, MessageStatus: "delivered", To: "whatsapp:+14155550123" };
+    const form = new URLSearchParams(params).toString();
+    const unsigned = await call(`/hooks/twilio/${tenantId}/status`, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: form });
+    expect(unsigned.status).toBe(400);
+    const signed = await call(`/hooks/twilio/${tenantId}/status`, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded", "x-twilio-signature": textProviders.twilioSignature(TWILIO_TOKEN, statusUrl, params) }, body: form });
+    expect(signed.status).toBe(204);
+    expect((await call("/v1/messages/log?channel=whatsapp", { token: ownerToken })).body.messages[0]).toMatchObject({ status: "delivered" });
+
+    // STOP from the affiliate's number opts them out; the next notification is skipped with a reason
+    const inboundUrl = `${BASE}/hooks/twilio/${tenantId}/inbound`;
+    const stop = { From: "whatsapp:+14155550123", To: "whatsapp:+15005550007", Body: "STOP", MessageSid: "SMin1" };
+    const stopped = await call(`/hooks/twilio/${tenantId}/inbound`, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded", "x-twilio-signature": textProviders.twilioSignature(TWILIO_TOKEN, inboundUrl, stop) }, body: new URLSearchParams(stop).toString() });
+    expect(stopped.status).toBe(200);
+    expect(stopped.body).toContain("<Response>");
+    const me = await call("/portal/me", { token: affiliateToken });
+    expect(me.body.affiliate.textOptOutAt).toBeTruthy();
+    const sale2 = await call("/v1/conversions", { method: "POST", token: ownerToken, json: { source: "manual", externalOrderId: "ORDER-TEXT-2", offerId, amountMinor: 5_000, affiliateId, programId, reason: "phone order" } });
+    expect(sale2.status).toBe(201);
+    await runOnce({ db: handle.db, email, storage, webUrl: "http://web.test", baseUrl: BASE, now, payoutProviders: memoryPayouts, webhookFetch, text: textDeps });
+    const skipped = await call("/v1/messages/log?channel=whatsapp&limit=1", { token: ownerToken });
+    expect(skipped.body.messages[0]).toMatchObject({ status: "skipped", error: "affiliate opted out of text messages" });
+    expect((await call("/v1/tenant/integrations/twilio", { method: "DELETE", token: ownerToken })).status).toBe(200);
   });
 
   it("Validation and permissions errors are JSON with codes", async () => {

@@ -15,6 +15,8 @@ export default function SettingsPage() {
   const { data: integ, reload: reloadInteg } = useApi<any>("/v1/tenant/integrations");
   const [stripeKey, setStripeKey] = useState("");
   const [paypal, setPaypal] = useState({ clientId: "", clientSecret: "", sandbox: true });
+  const { data: twilioUrls } = useApi<any>("/v1/tenant/integrations/twilio/webhooks");
+  const [twilio, setTwilio] = useState({ accountSid: "", authToken: "", fromSms: "", fromWhatsApp: "" });
   const { busy, error: actionError, success, run } = useAction();
   const [form, setForm] = useState<any>(null);
   const [member, setMember] = useState({ name: "", email: "", password: "", role: "admin" });
@@ -247,6 +249,74 @@ export default function SettingsPage() {
                 </div>
               );
             })}
+          </div>
+          <div className="card">
+            <h2>SMS and WhatsApp</h2>
+            <p className="muted">Affiliates who opt in from their portal get a short text alongside each notification email. Connect your own Twilio account; WhatsApp needs a WhatsApp-enabled sender, and messages sent outside a 24-hour conversation must match a template approved by Meta.</p>
+            {(() => {
+              const row = integ?.integrations?.find((i: any) => i.provider === "twilio");
+              return (
+                <div style={{ borderTop: "1px solid var(--border)", paddingTop: 12, marginTop: 12 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                    <div>
+                      <strong>Twilio</strong> {row ? <Badge value="connected" /> : <Badge value="disabled" />}
+                      {row ? <div className="muted mono">{row.hint}</div> : <div className="muted">Sends SMS and WhatsApp through your Twilio account.</div>}
+                    </div>
+                    {row ? (
+                      <button className="sm danger" disabled={busy} onClick={() => run(() => api("/v1/tenant/integrations/twilio", { method: "DELETE" }), "Disconnected.").then(reloadInteg)}>
+                        Disconnect
+                      </button>
+                    ) : null}
+                  </div>
+                  {row ? (
+                    <div style={{ marginTop: 10 }}>
+                      <p className="muted" style={{ marginBottom: 6 }}>In the Twilio console, point your sender's messaging webhook at the inbound URL (so STOP and START are honoured) and use the status URL as the status callback.</p>
+                      <Field label="Inbound message URL">
+                        <CopyBox value={twilioUrls?.inboundUrl ?? ""} />
+                      </Field>
+                      <Field label="Status callback URL">
+                        <CopyBox value={twilioUrls?.statusUrl ?? ""} />
+                      </Field>
+                    </div>
+                  ) : (
+                    <form
+                      style={{ marginTop: 10 }}
+                      onSubmit={async (e) => {
+                        e.preventDefault();
+                        const credentials: Record<string, string> = { accountSid: twilio.accountSid.trim(), authToken: twilio.authToken.trim() };
+                        if (twilio.fromSms.trim()) credentials.fromSms = twilio.fromSms.trim();
+                        if (twilio.fromWhatsApp.trim()) credentials.fromWhatsApp = twilio.fromWhatsApp.trim();
+                        const ok = await run(() => api("/v1/tenant/integrations/twilio", { method: "POST", json: { credentials } }), "Twilio connected.");
+                        if (ok) {
+                          setTwilio({ accountSid: "", authToken: "", fromSms: "", fromWhatsApp: "" });
+                          reloadInteg();
+                        }
+                      }}
+                    >
+                      <div className="row">
+                        <Field label="Account SID">
+                          <input value={twilio.accountSid} onChange={(e) => setTwilio({ ...twilio, accountSid: e.target.value })} placeholder="AC…" required />
+                        </Field>
+                        <Field label="Auth token">
+                          <input type="password" value={twilio.authToken} onChange={(e) => setTwilio({ ...twilio, authToken: e.target.value })} required />
+                        </Field>
+                      </div>
+                      <div className="row">
+                        <Field label="SMS sender" help="An E.164 number (+14155550100) or a Messaging Service SID (MG…).">
+                          <input value={twilio.fromSms} onChange={(e) => setTwilio({ ...twilio, fromSms: e.target.value })} placeholder="+1…" />
+                        </Field>
+                        <Field label="WhatsApp sender" help="Your WhatsApp-enabled number, E.164.">
+                          <input value={twilio.fromWhatsApp} onChange={(e) => setTwilio({ ...twilio, fromWhatsApp: e.target.value })} placeholder="+1…" />
+                        </Field>
+                      </div>
+                      <button className="sm" disabled={busy}>
+                        Connect Twilio
+                      </button>
+                    </form>
+                  )}
+                </div>
+              );
+            })()}
           </div>
           <div className="card">
             <h2>Team</h2>

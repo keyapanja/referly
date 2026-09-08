@@ -53,6 +53,8 @@ export interface AppDeps {
   payoutProviders?: integrations.IntegrationDeps;
   /** fetch used for outbound webhook deliveries and tests (tests inject a stub). */
   webhookFetch?: typeof fetch;
+  /** Text (SMS/WhatsApp) provider construction and platform fallback. */
+  text?: integrations.TextDeps;
 }
 
 export function createApp(deps: AppDeps & { db: Db }) {
@@ -80,6 +82,7 @@ export function createApp(deps: AppDeps & { db: Db }) {
   app.use("/r/*", rateLimit({ name: "redirect", limit: rl.redirect, windowMs: 60_000 }));
   app.use("/join/*", rateLimit({ name: "public", limit: rl.public, windowMs: 10 * 60_000 }));
   app.use("/invite/*", rateLimit({ name: "public", limit: rl.public, windowMs: 10 * 60_000 }));
+  app.use("/hooks/*", rateLimit({ name: "redirect", limit: rl.redirect, windowMs: 60_000 }));
   app.use("/v1/auth/*", rateLimit({ name: "auth", limit: rl.auth, windowMs: 15 * 60_000 }));
 
   // Uploaded files (local storage only; S3 serves its own objects). Keys are unguessable and tenant-scoped.
@@ -94,7 +97,7 @@ export function createApp(deps: AppDeps & { db: Db }) {
   });
 
   // Every data-touching route runs in one transaction with row-level security active.
-  for (const prefix of ["/r/*", "/join/*", "/invite/*", "/v1/*", "/portal/*", "/admin/*"]) app.use(prefix, rlsTransaction(deps.db));
+  for (const prefix of ["/r/*", "/join/*", "/invite/*", "/hooks/*", "/v1/*", "/portal/*", "/admin/*"]) app.use(prefix, rlsTransaction(deps.db));
 
   // Public, unauthenticated: tracking redirect, join/apply, invites, signup/login.
   app.route("/", publicRoutes());

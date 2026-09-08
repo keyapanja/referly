@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm";
 import { schema, type Db, type DbLike, type Job, type TenantContext } from "@referly/core";
 import { jobs, messaging, commissions, systemContext, events as eventsMod, tenants as tenantsSvc, exportsSvc, withTenantScope, withRlsBypass, campaigns as campaignsSvc, automation, integrations, webhooks } from "@referly/core";
 import { PRIVATE_PREFIX, type FileStorage } from "./storage";
+import { textStatusUrl } from "./text";
 
 const { affiliates: affiliatesTable, offers: offersTable, programs: programsTable, tenants: tenantsTable } = schema;
 
@@ -19,6 +20,10 @@ export interface WorkerDeps {
   now?: () => Date;
   payoutProviders?: integrations.IntegrationDeps;
   webhookFetch?: typeof fetch;
+  /** Text (SMS/WhatsApp) provider construction; texts are skipped when absent. */
+  text?: integrations.TextDeps;
+  /** API origin, for provider status callbacks. */
+  baseUrl?: string;
 }
 
 /** Event → template mapping. Kept as data so it is inspectable (PRD "explainable automation"). */
@@ -44,7 +49,12 @@ export function createHandlers(deps: WorkerDeps): Record<string, jobs.JobHandler
   const now = deps.now ?? (() => new Date());
 
   /** Hard-coded system notifications (the AUTO-01/03 subset that s17 requires). */
-  async function sendBuiltInNotification(db: DbLike, ctx: TenantContext, event: eventsMod.DomainEvent): Promise<void> {
+  async function transportsFor(db: DbLike, ctx: TenantContext): Promise<messaging.Transports> {
+    const text = deps.text ? await integrations.textProviderFor(db, ctx, deps.text) : null;
+    return { email: deps.email, text, textStatusUrl: deps.baseUrl ? textStatusUrl(deps.baseUrl, ctx.tenantId) : undefined };
+  }
+
+  async function sendBuiltInNotification(db: DbLike, ctx: TenantContext, event: eventsMod.DomainEvent, transports: messaging.Transports): Promise<void> {
       const templateKey = NOTIFICATION_RULES[event.type];
       if (!templateKey) return;
       const tenant = await tenantsSvc.getTenant(db, ctx);
@@ -62,9 +72,10 @@ export function createHandlers(deps: WorkerDeps): Record<string, jobs.JobHandler
       const offer = offerId ? await db.query.offers.findFirst({ where: eq(offersTable.id, offerId) }) : null;
       const amountMinor = event.data.amountMinor as number | undefined;
 
-      await messaging.sendTemplated(db, ctx, deps.email, {
+      await messaging.sendNotification(db, ctx, transports, {
         key: templateKey,
         to: recipient,
+        affiliate,
         affiliateId: affiliate?.id ?? null,
         related: { type: event.entityType, id: event.entityId },
         vars: {
@@ -89,8 +100,9 @@ export function createHandlers(deps: WorkerDeps): Record<string, jobs.JobHandler
       await withTenantScope(deps.db, event.tenantId, async (db) => {
         const ctx = systemContext(event.tenantId, now);
         // Built-in notification first, then the tenant's own rules (AUTO-01..05).
-        await sendBuiltInNotification(db, ctx, event);
-        await automation.runRulesForEvent(db, ctx, event, { email: deps.email, webUrl: deps.webUrl });
+        const transports = await transportsFor(db, ctx);
+        await sendBuiltInNotification(db, ctx, event, transports);
+        await automation.runRulesForEvent(db, ctx, event, { email: deps.email, webUrl: deps.webUrl, text: transports.text, textStatusUrl: transports.textStatusUrl });
         await webhooks.fanOut(db, ctx, event);
       });
     },

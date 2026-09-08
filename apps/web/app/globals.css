@@ -853,6 +853,29 @@ li {
   background: var(--danger);
 }
 
+/* Segmented control ----------------------------------------------------- */
+.segmented {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 2px;
+  background: var(--surface-2, var(--surface));
+}
+.segmented button {
+  border: 0;
+  background: transparent;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 12.5px;
+  color: var(--muted);
+  box-shadow: none;
+}
+.segmented button.active {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow);
+}
+
 /* Charts ---------------------------------------------------------------- */
 .viz {
   --series-1: #2a78d6;

@@ -257,6 +257,8 @@ export default function AffiliateDetail() {
           <dl className="kv">
             <dt>Phone</dt>
             <dd>{a.phone ?? "—"}</dd>
+            <dt>Text messages</dt>
+            <dd>{a.textChannel ? (a.textConsentAt && !(a.textOptOutAt && a.textOptOutAt >= a.textConsentAt) ? `${a.textChannel === "whatsapp" ? "WhatsApp" : "SMS"} · consented ${a.textConsentAt.slice(0, 10)}` : `${a.textChannel === "whatsapp" ? "WhatsApp" : "SMS"} · opted out`) : "email only"}</dd>
             <dt>Company</dt>
             <dd>{a.company ?? "—"}</dd>
             <dt>Channels</dt>

@@ -51,7 +51,8 @@ api.yourdomain.com {
 | `NEXT_PUBLIC_API_URL` | web (build) | API origin the browser calls. Equal to `BASE_URL`. |
 | `PLATFORM_ADMIN_EMAIL`, `PLATFORM_ADMIN_PASSWORD`, `PLATFORM_ADMIN_NAME` | api | Creates the platform admin account on boot if it does not exist (idempotent). Sign in at `WEB_URL/login`; admins land on `/admin`. |
 | `PLATFORM_SUPPORT_EMAIL` | api | Shown to merchants on the Plan and usage card for plan changes. |
-| `INTEGRATION_SECRET` | api | Key for encrypting merchants' payout-provider credentials at rest (AES-256-GCM). Required in production; rotate by re-connecting providers. |
+| `INTEGRATION_SECRET` | api | Key for encrypting merchants' payout-provider and Twilio credentials at rest (AES-256-GCM). Required in production; rotate by re-connecting providers. |
+| `TEXT_FALLBACK` | api | What to do for workspaces with no Twilio account of their own: `console` (default outside production; prints texts to stdout), `none` (default in production; texts are skipped and logged as such) or `twilio` (a platform-wide account via `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_SMS`, `TWILIO_FROM_WHATSAPP`). |
 | `STORAGE_PROVIDER` | api | `local` (default; files under `FILES_DIR`, served at `BASE_URL/files/...`) or `s3`. |
 | `FILES_DIR` | api | Local storage directory. The Docker image uses `/app/data/files`; mount `/app/data`. |
 | `S3_BUCKET`, `S3_REGION`, `S3_ENDPOINT`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_PUBLIC_URL`, `S3_FORCE_PATH_STYLE` | api | With `s3`. Works with AWS S3, Cloudflare R2, MinIO, DigitalOcean Spaces. Objects are written public-read; `S3_PUBLIC_URL` is the origin (or CDN) they are served from. |
@@ -82,6 +83,16 @@ const ok = crypto.timingSafeEqual(Buffer.from(expected, "hex"), Buffer.from(sig.
 ```
 
 Respond 2xx within 10 s. Failures retry 8 times with exponential backoff (30 s doubling, capped at 1 h); after 5 exhausted deliveries in a row the endpoint is auto-paused and a task is created. Deliveries and responses are visible in the endpoint's log, with one-click redelivery. Zapier: "Webhooks by Zapier → Catch Hook". Make: "Custom webhook". Neither verifies signatures by default; the headers are there when you want to.
+
+## SMS and WhatsApp (Twilio)
+
+Email is always sent. Affiliates who opt in from their portal (channel, phone in E.164, explicit consent with a timestamp) also get a short text for approvals, sales, commissions, payouts, campaign invites, terms changes and dispute updates, rendered from the *SMS / WhatsApp* templates on the Messages page. Account emails (verify, password reset) never go by text.
+
+Merchants connect their own Twilio account in Settings. Credentials are verified against the Twilio account endpoint and stored encrypted. An SMS sender (E.164 number or Messaging Service SID) and/or a WhatsApp-enabled sender decide which channels are available; an affiliate on a channel the account cannot serve is logged as skipped with the reason.
+
+In the Twilio console, point the sender's messaging webhook at `BASE_URL/hooks/twilio/<tenantId>/inbound` and the status callback at `BASE_URL/hooks/twilio/<tenantId>/status` (both are shown in Settings once connected). Requests are accepted only with a valid `X-Twilio-Signature` for that workspace's auth token (or `TWILIO_AUTH_TOKEN` with the platform fallback). Inbound STOP/UNSUBSCRIBE opt the number out and START/UNSTOP opt it back in; status callbacks mark logs delivered, undelivered or failed.
+
+WhatsApp: Meta requires business-initiated messages outside a 24-hour conversation to use an approved template. Register templates with Twilio whose text matches your *SMS / WhatsApp* templates; Twilio rejects unapproved free-form sends (error 63016), which shows on the message log. Automation rules can also send a custom text with the *Send an SMS/WhatsApp* action.
 
 ## Migrations
 

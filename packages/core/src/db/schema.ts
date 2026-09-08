@@ -225,6 +225,10 @@ export const affiliates = pgTable(
     payoutMethod: text("payout_method"), // bank_transfer | paypal | stripe_connect | upi | other
     payoutProfileRef: text("payout_profile_ref"), // provider/token reference; never raw credentials
     payoutDetailsMasked: text("payout_details_masked"),
+    /** Phase 2 WhatsApp/SMS: opt-in channel and consent trail. Email is always sent. */
+    textChannel: text("text_channel"), // sms | whatsapp | null (email only)
+    textConsentAt: ts("text_consent_at"),
+    textOptOutAt: ts("text_opt_out_at"),
     applicationAnswers: jsonb("application_answers").$type<Record<string, unknown>>().notNull().default({}),
     suspendedAt: ts("suspended_at"),
     createdAt: createdAt(),
@@ -606,13 +610,14 @@ export const messageLogs = pgTable(
     relatedEntityId: text("related_entity_id"),
     subject: text("subject"),
     body: text("body"),
-    status: text("status").notNull().default("queued"), // queued | sent | failed | skipped
+    status: text("status").notNull().default("queued"), // queued | sent | delivered | undelivered | failed | skipped
     providerMessageId: text("provider_message_id"),
     error: text("error"),
     sentAt: ts("sent_at"),
+    deliveredAt: ts("delivered_at"),
     createdAt: createdAt(),
   },
-  (t) => [index("message_logs_tenant_idx").on(t.tenantId, t.createdAt)],
+  (t) => [index("message_logs_tenant_idx").on(t.tenantId, t.createdAt), index("message_logs_provider_msg_idx").on(t.tenantId, t.providerMessageId)],
 );
 
 export const automationRules = pgTable(
@@ -740,7 +745,7 @@ export const tenantIntegrations = pgTable(
   {
     id: id(),
     tenantId: tenantRef(),
-    provider: text("provider").notNull(), // stripe_connect | paypal
+    provider: text("provider").notNull(), // stripe_connect | paypal | twilio
     credentialsEnc: text("credentials_enc").notNull(),
     hint: text("hint").notNull(),
     status: text("status").notNull().default("connected"), // connected | disabled

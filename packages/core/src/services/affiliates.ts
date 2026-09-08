@@ -13,6 +13,7 @@ import { AFFILIATE_TRANSITIONS, assertTransition, type AffiliateStatus } from ".
 import { hashPassword } from "./auth";
 import { getProgram } from "./programs";
 import { percentToBps } from "../money";
+import { normalizePhone, TEXT_CHANNELS, type TextChannel } from "./textProviders";
 
 // ---------------------------------------------------------------------------
 // Application (public, via program join token) and invites
@@ -199,6 +200,10 @@ export const updateAffiliateSchema = z.object({
   channels: z.record(z.string(), z.string().max(500)).optional(),
   tags: z.array(z.string().max(40)).optional(),
   notes: z.string().max(5000).nullable().optional(),
+  /** Text notifications: which channel, or null for email only. Requires an E.164 phone and consent. */
+  textChannel: z.enum(TEXT_CHANNELS).nullable().optional(),
+  /** Explicit consent to receive texts; recorded with a timestamp. Only the affiliate can give it. */
+  textConsent: z.boolean().optional(),
 });
 
 export async function updateAffiliate(db: DbLike, ctx: TenantContext, affiliateId: string, rawInput: z.input<typeof updateAffiliateSchema>): Promise<Affiliate> {
@@ -210,12 +215,51 @@ export async function updateAffiliate(db: DbLike, ctx: TenantContext, affiliateI
     delete (input as { notes?: unknown }).notes;
   } else requirePerm(ctx, "affiliates.write");
   const before = await getAffiliate(db, ctx, affiliateId);
+  const { textChannel, textConsent, ...fields } = input;
+  const set: Partial<typeof affiliates.$inferInsert> = { ...fields, updatedAt: ctx.now() };
+  if (textChannel !== undefined || textConsent !== undefined) {
+    const channel: TextChannel | null = textChannel === undefined ? (before.textChannel as TextChannel | null) : textChannel;
+    if (channel) {
+      const phone = normalizePhone((fields.phone === undefined ? before.phone : fields.phone) ?? "");
+      if (!phone) throw validation("a phone number in international format (+ country code) is required for text messages");
+      set.phone = phone;
+      if (ctx.actor.type === "affiliate") {
+        if (textConsent === false) {
+          set.textOptOutAt = ctx.now();
+        } else if (textConsent === true || !before.textConsentAt || (before.textOptOutAt && before.textOptOutAt >= before.textConsentAt)) {
+          if (textConsent !== true) throw validation("consent is required to receive text messages");
+          set.textConsentAt = ctx.now();
+          set.textOptOutAt = null;
+        }
+      } else if (!before.textConsentAt) {
+        throw validation("only the affiliate can opt in to text messages");
+      }
+    } else if (textChannel === null && before.textChannel && ctx.actor.type === "affiliate") {
+      set.textOptOutAt = ctx.now();
+    }
+    set.textChannel = channel;
+  }
   const [after] = await db
     .update(affiliates)
-    .set({ ...input, updatedAt: ctx.now() })
+    .set(set)
     .where(and(eq(affiliates.id, affiliateId), eq(affiliates.tenantId, ctx.tenantId)))
     .returning();
   await writeAudit(db, ctx, { entityType: "affiliate", entityId: affiliateId, action: "updated", before: snapshot(before), after: snapshot(after!) });
+  return after!;
+}
+
+/** Inbound STOP/START from the provider (keyword compliance). Matches the affiliate by phone. */
+export async function setTextOptOutByPhone(db: DbLike, ctx: TenantContext, phone: string, optedOut: boolean): Promise<Affiliate | null> {
+  const normalized = normalizePhone(phone);
+  if (!normalized) return null;
+  const affiliate = await db.query.affiliates.findFirst({ where: and(eq(affiliates.tenantId, ctx.tenantId), eq(affiliates.phone, normalized)) });
+  if (!affiliate) return null;
+  const [after] = await db
+    .update(affiliates)
+    .set(optedOut ? { textOptOutAt: ctx.now(), updatedAt: ctx.now() } : { textConsentAt: ctx.now(), textOptOutAt: null, updatedAt: ctx.now() })
+    .where(eq(affiliates.id, affiliate.id))
+    .returning();
+  await writeAudit(db, ctx, { entityType: "affiliate", entityId: affiliate.id, action: optedOut ? "text_opt_out" : "text_opt_in", after: { via: "inbound keyword" } });
   return after!;
 }
 

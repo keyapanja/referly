@@ -44,12 +44,23 @@ export function tenantRoutes() {
   r.get("/integrations", async (c) => c.json({ integrations: await integrations.listIntegrations(c.get("deps").db, c.get("ctx")), providers: integrations.PROVIDER_FOR_METHOD }));
   r.post("/integrations/:provider", async (c) => {
     const { credentials } = z.object({ credentials: z.record(z.string(), z.unknown()) }).parse(await c.req.json());
-    const row = await integrations.connectPayoutProvider(c.get("deps").db, c.get("ctx"), c.req.param("provider") as integrations.PayoutProviderId, credentials, c.get("deps").payoutProviders);
+    const provider = c.req.param("provider");
+    const row =
+      provider === "twilio"
+        ? await integrations.connectTextProvider(c.get("deps").db, c.get("ctx"), provider, credentials, c.get("deps").text)
+        : await integrations.connectPayoutProvider(c.get("deps").db, c.get("ctx"), provider as integrations.PayoutProviderId, credentials, c.get("deps").payoutProviders);
     return c.json({ integration: integrations.publicIntegration(row) }, 201);
   });
   r.delete("/integrations/:provider", async (c) => {
-    await integrations.disconnectPayoutProvider(c.get("deps").db, c.get("ctx"), c.req.param("provider") as integrations.PayoutProviderId);
+    const provider = c.req.param("provider");
+    if (provider === "twilio") await integrations.disconnectTextProvider(c.get("deps").db, c.get("ctx"), provider);
+    else await integrations.disconnectPayoutProvider(c.get("deps").db, c.get("ctx"), provider as integrations.PayoutProviderId);
     return c.json({ ok: true });
+  });
+  /** Where to point Twilio's messaging webhooks for this workspace. */
+  r.get("/integrations/twilio/webhooks", async (c) => {
+    const base = `${c.get("deps").config.baseUrl}/hooks/twilio/${c.get("ctx").tenantId}`;
+    return c.json({ inboundUrl: `${base}/inbound`, statusUrl: `${base}/status` });
   });
 
   r.get("/team", async (c) => c.json({ users: (await tenants.listTeam(c.get("deps").db, c.get("ctx"))).map(publicUser) }));
