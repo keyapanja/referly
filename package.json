@@ -9,6 +9,7 @@
   "scripts": {
     "build": "npm run build --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
+    "test:postgres": "node scripts/test-postgres.mjs",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "dev:api": "npm run dev -w @referly/api",
     "dev:web": "npm run dev -w @referly/web"
@@ -18,6 +19,7 @@
   },
   "devDependencies": {
     "@types/node": "^26.4.1",
+    "embedded-postgres": "^18.4.0-beta.17",
     "tsx": "^4.23.13",
     "typescript": "^7.0.2",
     "vitest": "^5.0.0"

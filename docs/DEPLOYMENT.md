@@ -59,7 +59,20 @@ api.yourdomain.com {
 
 ## Database security
 
-Migration `0004_rls.sql` enables Postgres row-level security on every tenant table (with `FORCE`, so the application's own role is subject to it). The API opens one transaction per request and sets `app.tenant_id` once the caller's tenant is known; the worker scopes each job the same way. With no scope set, tenant tables read as empty and writes are rejected, so a missing filter in application code fails closed instead of leaking. Connect the API with a normal role (not a superuser: superusers ignore RLS).
+Migration `0004_rls.sql` enables Postgres row-level security on every tenant table (with `FORCE`, so the application's own role is subject to it). The API opens one transaction per request and sets `app.tenant_id` once the caller's tenant is known; the worker scopes each job the same way. With no scope set, tenant tables read as empty and writes are rejected, so a missing filter in application code fails closed instead of leaking.
+
+Superusers and `BYPASSRLS` roles ignore RLS, and the `postgres` Docker image makes `POSTGRES_USER` a superuser. The API handles this itself: migrations run as the connecting user, then if that user would bypass RLS the API creates a plain `referly_app` role, grants it the tables, and every pooled connection runs `SET ROLE referly_app`. If the connecting user is already a plain role (Neon, RDS, Supabase) it is used as is; `FORCE` makes the policies apply to table owners too. On boot the API checks the effective role and refuses to start if it would still bypass RLS.
+
+## Testing against real Postgres
+
+The default test run uses embedded PGlite. To run the same suites against a real server, where every test file gets its own database created and migrated from zero and dropped afterwards:
+
+```bash
+npm run test:postgres                                 # starts an embedded Postgres for the run
+TEST_DATABASE_URL=postgres://user:pass@host/postgres npm run test:postgres   # or use your own server
+```
+
+The embedded server comes from the `embedded-postgres` dev dependency (real Postgres binaries). On Windows those binaries need the Microsoft Visual C++ 2015-2022 runtime installed. CI runs the suites and an API boot smoke against a `postgres:16` service on every push.
 
 ## Outbound webhooks (Zapier, Make, custom)
 

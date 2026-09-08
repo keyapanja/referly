@@ -1,5 +1,5 @@
 export * from "./db/schema";
-export { createDb, withTx, type Db, type Tx, type DbLike, type DbHandle } from "./db/client";
+export { createDb, createTestDb, withTx, type Db, type Tx, type DbLike, type DbHandle } from "./db/client";
 export { setTenantScope, setRlsBypass, setSessionBypass, withTenantScope, withRlsBypass, RLS_TABLES } from "./db/rls";
 export * from "./ids";
 export * from "./money";

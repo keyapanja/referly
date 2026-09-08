@@ -41,7 +41,8 @@ Set `DATABASE_URL=postgres://...` to run against a real Postgres. Migrations in 
 Public endpoints are rate limited per client IP (click redirect 300/min; join and invite 30 per 10 min; auth 30 per 15 min). Limits are in-process; use one API instance or put a shared store behind `lib/ratelimit.ts`.
 
 ```bash
-npm test                 # core unit/integration tests + API end-to-end tests
+npm test                 # core unit/integration tests + API end-to-end tests (embedded PGlite)
+npm run test:postgres    # the same suites against a real Postgres (embedded server, or TEST_DATABASE_URL)
 npm run typecheck
 ```
 

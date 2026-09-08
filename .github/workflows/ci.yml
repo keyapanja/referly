@@ -7,6 +7,7 @@ on:
 
 jobs:
   test:
+    name: Typecheck, tests (PGlite), web build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -22,3 +23,71 @@ jobs:
       - run: npm run build -w @referly/web
         env:
           NEXT_TELEMETRY_DISABLED: 1
+
+  test-postgres:
+    name: Tests and API boot on real Postgres
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      PG_URL: postgres://postgres:postgres@localhost:5432/postgres
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      # Every test file gets its own database on the service, migrated from zero and dropped after.
+      - name: Test suites against Postgres
+        run: npm test
+        env:
+          NODE_ENV: test
+          TEST_DATABASE_URL: ${{ env.PG_URL }}
+      # Boot the real server process the way docker compose does (superuser connection, migrations on
+      # start, platform-admin bootstrap, worker) and drive a signup through HTTP.
+      - name: API boot smoke on Postgres
+        run: |
+          set -euo pipefail
+          psql "$PG_URL" -c 'create database referly_smoke'
+          export DATABASE_URL="postgres://postgres:postgres@localhost:5432/referly_smoke"
+          export BASE_URL=http://localhost:4000 WEB_URL=http://localhost:3000 PORT=4000
+          export PLATFORM_ADMIN_EMAIL=admin@ci.test PLATFORM_ADMIN_PASSWORD=adminpass123
+          export INTEGRATION_SECRET=ci-secret-ci-secret-ci-secret-1234 TEXT_FALLBACK=none EMAIL_PROVIDER=console
+          npm start -w @referly/api > api.log 2>&1 &
+          API_PID=$!
+          for i in $(seq 1 60); do
+            if curl -fsS http://localhost:4000/health | grep -q '"db":"up"'; then break; fi
+            if ! kill -0 $API_PID 2>/dev/null; then echo "API exited early"; cat api.log; exit 1; fi
+            sleep 1
+          done
+          curl -fsS http://localhost:4000/health
+          SIGNUP=$(curl -fsS -X POST http://localhost:4000/v1/auth/signup -H 'content-type: application/json' \
+            -d '{"name":"CI Co","slug":"ci-co","currency":"USD","owner":{"name":"CI","email":"owner@ci.test","password":"supersecret1"}}')
+          echo "$SIGNUP" | grep -q '"token"'
+          TOKEN=$(echo "$SIGNUP" | sed -E 's/.*"token":"([^"]+)".*/\1/')
+          curl -fsS http://localhost:4000/v1/tenant -H "authorization: Bearer $TOKEN" | grep -q '"slug":"ci-co"'
+          # the running app must not be a superuser, or RLS would be bypassed
+          psql "$DATABASE_URL" -tAc "select count(*) from pg_roles where rolname = 'referly_app' and not rolsuper and not rolbypassrls" | grep -q '^1$'
+          # RLS: with no tenant scope and no bypass, tenant rows are invisible even to the app role
+          psql "$DATABASE_URL" -tAc "set role referly_app; select count(*) from users" | grep -q '^0$'
+          # migrations recorded
+          psql "$DATABASE_URL" -tAc "select count(*) from drizzle.__drizzle_migrations" | grep -Eq '^[0-9]+$'
+          kill $API_PID
+          wait $API_PID || true
+          echo "boot smoke ok"
+      - name: API log
+        if: always()
+        run: cat api.log || true

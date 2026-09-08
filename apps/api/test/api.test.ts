@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { createDb, messaging, platform, withRlsBypass, payoutProviders, webhooks, textProviders, type DbHandle } from "@referly/core";
+import { createTestDb, messaging, platform, withRlsBypass, payoutProviders, webhooks, textProviders, type DbHandle } from "@referly/core";
 import { createApp, type App } from "../src/app";
 import { runOnce } from "../src/worker";
 import { resetRateLimits } from "../src/lib/ratelimit";
@@ -39,7 +39,7 @@ const webhookFetch = (async (url: string | URL | Request, init?: RequestInit) =>
 const BASE = "http://api.test";
 
 beforeAll(async () => {
-  handle = await createDb();
+  handle = await createTestDb();
   storage = new LocalStorage(await mkdtemp(path.join(tmpdir(), "referly-files-")), BASE);
   app = createApp({ db: handle.db, email, storage, payoutProviders: memoryPayouts, webhookFetch, text: textDeps, config: { baseUrl: BASE, webUrl: "http://web.test", cookieSecure: false, now } });
 });
