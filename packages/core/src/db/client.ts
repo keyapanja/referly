@@ -63,11 +63,11 @@ async function assertRlsEffective(db: Db): Promise<void> {
  * `fresh: true` (tests) creates a throwaway database on the Postgres server for this handle
  * and drops it on close, so migrations run from zero every time and test files stay isolated.
  */
-export async function createDb(opts: { url?: string; dataDir?: string; migrate?: boolean; fresh?: boolean; driver?: "postgres" | "pglite" } = {}): Promise<DbHandle> {
+export async function createDb(opts: { url?: string; dataDir?: string; migrate?: boolean; fresh?: boolean; driver?: "postgres" | "pglite"; sessionBypass?: boolean } = {}): Promise<DbHandle> {
   const url = opts.driver === "pglite" ? undefined : (opts.url ?? process.env.DATABASE_URL);
   const shouldMigrate = opts.migrate ?? true;
 
-  if (url) return createPostgres(url, shouldMigrate, opts.fresh ?? false);
+  if (url) return createPostgres(url, shouldMigrate, opts.fresh ?? false, opts.sessionBypass ?? false);
 
   const client = opts.dataDir ? new PGlite(opts.dataDir) : new PGlite();
   const db = drizzlePglite(client, { schema });
@@ -76,11 +76,16 @@ export async function createDb(opts: { url?: string; dataDir?: string; migrate?:
   // plain role so dev and tests are subject to the same policies as production.
   for (const stmt of APP_ROLE_SETUP) await db.execute(stmt);
   await db.execute(sql`set role referly_app`);
+  if (opts.sessionBypass) await db.execute(sql`select set_config('app.rls_bypass', 'on', false)`);
   await assertRlsEffective(db as unknown as Db);
   return { db: db as unknown as Db, close: () => client.close(), driver: "pglite" };
 }
 
-async function createPostgres(url: string, shouldMigrate: boolean, fresh: boolean): Promise<DbHandle> {
+/**
+ * `sessionBypass` (core unit tests only) puts every pooled connection in RLS-bypass mode, the
+ * pooled equivalent of `setSessionBypass` on PGlite's single connection. Never used by the app.
+ */
+async function createPostgres(url: string, shouldMigrate: boolean, fresh: boolean, sessionBypass: boolean): Promise<DbHandle> {
   let effectiveUrl = url;
   let dropDatabase: (() => Promise<void>) | null = null;
   if (fresh) {
@@ -111,11 +116,14 @@ async function createPostgres(url: string, shouldMigrate: boolean, fresh: boolea
   }
 
   const pool = new pg.Pool({ connectionString: effectiveUrl });
-  if (appRole) {
-    // Every pooled connection switches role before its first query; pg runs queries per
-    // connection in order, so nothing can slip in ahead of the SET ROLE.
+  // Every pooled connection switches role before its first query; pg runs queries per
+  // connection in order, so nothing can slip in ahead of the SET ROLE.
+  const onConnect: string[] = [];
+  if (appRole) onConnect.push(`set role ${appRole}`);
+  if (sessionBypass) onConnect.push(`select set_config('app.rls_bypass', 'on', false)`);
+  if (onConnect.length) {
     pool.on("connect", (client) => {
-      client.query(`set role ${appRole}`).catch((err: unknown) => console.error("set role failed", err));
+      for (const q of onConnect) client.query(q).catch((err: unknown) => console.error("connection setup failed", err));
     });
   }
   const db = drizzlePg(pool, { schema }) as unknown as Db;
@@ -150,9 +158,9 @@ async function withClient<T>(url: string, fn: (c: pg.Client) => Promise<T>): Pro
  * Database for a test file: a throwaway database on `TEST_DATABASE_URL` when set (real Postgres,
  * migrations from zero, dropped on close), otherwise in-memory PGlite.
  */
-export function createTestDb(): Promise<DbHandle> {
+export function createTestDb(opts: { sessionBypass?: boolean } = {}): Promise<DbHandle> {
   const url = process.env.TEST_DATABASE_URL;
-  return url ? createDb({ url, fresh: true }) : createDb({ driver: "pglite" });
+  return url ? createDb({ url, fresh: true, sessionBypass: opts.sessionBypass }) : createDb({ driver: "pglite", sessionBypass: opts.sessionBypass });
 }
 
 /**
