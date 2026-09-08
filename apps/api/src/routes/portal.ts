@@ -1,10 +1,17 @@
 import { Hono } from "hono";
 import { z } from "zod";
-import { affiliates, commissions, conversions, offers, payouts, tenants, tracking, programs as programsSvc, assets, campaigns, tiers, integrations, disputes } from "@referly/core";
-import { requireAffiliatePrincipal, type AppEnv } from "../lib/auth";
+import { affiliates, commissions, conversions, offers, payouts, tenants, tracking, programs as programsSvc, assets, campaigns, tiers, integrations, disputes, auth, forbidden, type Affiliate } from "@referly/core";
+import { requireAffiliatePrincipal, SESSION_COOKIE, type AppEnv } from "../lib/auth";
+import { getCookie } from "hono/cookie";
 import { publicTenant } from "./auth";
 
 /** Affiliate portal (PRD s5.1, s8, s16.2). Every handler is scoped to the signed-in affiliate. */
+/** The affiliate's own record minus merchant-internal fields (notes, tags, provider references, application answers). */
+function portalAffiliate(a: Affiliate) {
+  const { notes: _n, tags: _t, payoutProfileRef: _p, applicationAnswers: _a, userId: _u, ...rest } = a;
+  return rest;
+}
+
 export function portalRoutes() {
   const r = new Hono<AppEnv>();
 
@@ -18,7 +25,7 @@ export function portalRoutes() {
       affiliates.listMemberships(db, ctx, affiliateId),
       commissions.getBalances(db, ctx, affiliateId),
     ]);
-    return c.json({ affiliate, tenant: publicTenant(tenant), memberships, balances });
+    return c.json({ affiliate: portalAffiliate(affiliate), tenant: publicTenant(tenant), memberships, balances });
   });
 
   /** Home: earnings, activity and quick actions. */
@@ -146,8 +153,18 @@ export function portalRoutes() {
   /** AST-02: only assets permitted for this affiliate's programs. */
   r.get("/assets", async (c) => c.json({ assets: await assets.listAssetsForAffiliate(c.get("deps").db, c.get("ctx"), requireAffiliatePrincipal(c)) }));
 
-  r.patch("/profile", async (c) => c.json({ affiliate: await affiliates.updateAffiliate(c.get("deps").db, c.get("ctx"), requireAffiliatePrincipal(c), await c.req.json()) }));
-  r.put("/payout-profile", async (c) => c.json({ affiliate: await affiliates.setPayoutProfile(c.get("deps").db, c.get("ctx"), requireAffiliatePrincipal(c), await c.req.json()) }));
+  r.patch("/profile", async (c) => c.json({ affiliate: portalAffiliate(await affiliates.updateAffiliate(c.get("deps").db, c.get("ctx"), requireAffiliatePrincipal(c), await c.req.json())) }));
+  r.put("/payout-profile", async (c) => c.json({ affiliate: portalAffiliate(await affiliates.setPayoutProfile(c.get("deps").db, c.get("ctx"), requireAffiliatePrincipal(c), await c.req.json())) }));
+  /** Affiliates change their own password; every other session is signed out. */
+  r.post("/password", async (c) => {
+    const p = c.get("principal");
+    if (p.kind !== "user") throw forbidden("sign in with a password to change it");
+    const body = z.object({ currentPassword: z.string(), newPassword: z.string().min(8).max(256) }).parse(await c.req.json());
+    const header = c.req.header("authorization");
+    const keep = header?.toLowerCase().startsWith("bearer ") ? header.slice(7).trim() : getCookie(c, SESSION_COOKIE);
+    await auth.changePassword(c.get("deps").db, p.userId, { ...body, keepSessionToken: keep ?? undefined }, c.get("now")());
+    return c.json({ ok: true });
+  });
   r.post("/programs/:programId/join", async (c) => {
     const { acceptTerms } = z.object({ acceptTerms: z.boolean() }).parse(await c.req.json());
     return c.json({ membership: await affiliates.joinProgram(c.get("deps").db, c.get("ctx"), requireAffiliatePrincipal(c), c.req.param("programId"), acceptTerms) });

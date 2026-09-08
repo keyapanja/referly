@@ -35,9 +35,11 @@ export function authMiddleware(): MiddlewareHandler<AppEnv> {
     if (bearer?.startsWith("rk_live_")) {
       const key = await auth.resolveApiKey(db, bearer, now);
       if (!key) throw unauthenticated("invalid API key");
-      c.set("principal", { kind: "api_key", apiKeyId: key.id, tenantId: key.tenantId, scopes: key.scopes });
-      c.set("ctx", tenantContext(key.tenantId, { type: "api_key", id: key.id }, c.get("now")));
       await scopeRequest(c, key.tenantId);
+      const tenant = await tenants.getTenant(db, tenantContext(key.tenantId, { type: "system", role: "owner" }, c.get("now")));
+      if (tenant.status !== "active") throw forbidden(`workspace is ${tenant.status}`);
+      c.set("principal", { kind: "api_key", apiKeyId: key.id, tenantId: key.tenantId, scopes: key.scopes });
+      c.set("ctx", tenantContext(key.tenantId, { type: "api_key", id: key.id, scopes: key.scopes }, c.get("now")));
       return next();
     }
 

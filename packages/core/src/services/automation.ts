@@ -222,7 +222,7 @@ export async function listTasks(db: DbLike, ctx: TenantContext, filter: { status
 }
 
 export async function completeTask(db: DbLike, ctx: TenantContext, taskId: string): Promise<Task> {
-  requirePerm(ctx, "read");
+  requirePerm(ctx, "automation.write");
   const [row] = await db.update(tasks).set({ status: "done", doneAt: ctx.now() }).where(and(eq(tasks.id, taskId), eq(tasks.tenantId, ctx.tenantId))).returning();
   if (!row) throw notFound("task", taskId);
   return row;

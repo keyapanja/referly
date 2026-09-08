@@ -25,7 +25,7 @@ export function webhookRoutes() {
     return c.json({ subscription: webhooks.publicSubscription(subscription), secret });
   });
   r.post("/:id/test", async (c) => {
-    const { delivery, ...result } = await webhooks.testSubscription(c.get("deps").db, c.get("ctx"), c.req.param("id"), { fetchImpl: c.get("deps").webhookFetch });
+    const { delivery, ...result } = await webhooks.testSubscription(c.get("deps").db, c.get("ctx"), c.req.param("id"), { fetchImpl: c.get("deps").webhookFetch, lookup: c.get("deps").webhookLookup });
     return c.json({ ...result, deliveryId: delivery.id });
   });
   r.get("/:id/deliveries", async (c) => c.json({ deliveries: await webhooks.listDeliveries(c.get("deps").db, c.get("ctx"), c.req.param("id"), Number(c.req.query("limit") ?? 50)) }));

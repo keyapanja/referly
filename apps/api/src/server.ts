@@ -1,5 +1,5 @@
 import { serve } from "@hono/node-server";
-import { createDb, platform, withRlsBypass } from "@referly/core";
+import { createDb, platform, withRlsBypass, assertIntegrationSecret } from "@referly/core";
 import { createApp } from "./app";
 import { startWorker } from "./worker";
 import { createEmailProvider } from "./email";
@@ -13,6 +13,7 @@ try {
   /* no .env file */
 }
 
+assertIntegrationSecret();
 const port = Number(process.env.PORT ?? 4000);
 const baseUrl = process.env.BASE_URL ?? `http://localhost:${port}`;
 const webUrl = process.env.WEB_URL ?? "http://localhost:3000";
@@ -21,7 +22,7 @@ const { db, close } = await createDb({ dataDir: process.env.DATABASE_URL ? undef
 const email = createEmailProvider();
 const storage = createFileStorage(process.env, baseUrl);
 const text = createTextDeps();
-const app = createApp({ db, email, storage, text, config: { baseUrl, webUrl, cookieSecure: baseUrl.startsWith("https"), supportEmail: process.env.PLATFORM_SUPPORT_EMAIL } });
+const app = createApp({ db, email, storage, text, config: { baseUrl, webUrl, cookieSecure: baseUrl.startsWith("https"), supportEmail: process.env.PLATFORM_SUPPORT_EMAIL, trustedProxyHops: Number(process.env.TRUSTED_PROXY_HOPS ?? 0) || 0 } });
 
 // Idempotent platform-admin bootstrap (PRD s15 platform_admin role).
 if (process.env.PLATFORM_ADMIN_EMAIL && process.env.PLATFORM_ADMIN_PASSWORD) {

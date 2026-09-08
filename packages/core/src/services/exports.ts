@@ -116,7 +116,9 @@ export function toCsv(rows: Record<string, unknown>[], columns?: string[]): stri
   if (!rows.length) return columns?.length ? columns.join(",") + "\n" : "";
   const cols = columns ?? Object.keys(rows[0]!);
   const esc = (v: unknown) => {
-    const s = v == null ? "" : String(v);
+    let s = v == null ? "" : String(v);
+    // Spreadsheets execute cells that start with = + - @ or a tab/CR; a leading apostrophe makes them text.
+    if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
     return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
   };
   return [cols.join(","), ...rows.map((r) => cols.map((k) => esc(r[k])).join(","))].join("\n") + "\n";

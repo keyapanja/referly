@@ -2,6 +2,7 @@ import { and, desc, eq, gte, inArray, isNull, lte, sql } from "drizzle-orm";
 import type { DbLike, Tx } from "../db/client";
 import { withTx } from "../db/client";
 import {
+  affiliates,
   affiliatePrograms,
   commissions,
   conversions,
@@ -202,6 +203,7 @@ export async function approveCommission(db: DbLike, ctx: TenantContext, commissi
  * run from the job worker.
  */
 export async function settleHoldingPeriods(db: DbLike, ctx: TenantContext, now: Date = ctx.now()): Promise<Commission[]> {
+  requirePerm(ctx, "commissions.write");
   const due = await db
     .select({ commission: commissions, conversionStatus: conversions.status })
     .from(commissions)
@@ -219,6 +221,7 @@ export async function settleHoldingPeriods(db: DbLike, ctx: TenantContext, now: 
 
 /** Full reversal of an unpaid commission. Paid commissions are clawed back through the ledger instead. */
 export async function reverseCommission(db: DbLike, ctx: TenantContext, commissionId: string, reason: string, opts: { asVoid?: boolean } = {}): Promise<Commission> {
+  requirePerm(ctx, "commissions.write");
   if (!reason?.trim()) throw validation("a reason is required to reverse a commission");
   return withTx(db, async (tx) => {
     const before = await getCommission(tx, ctx, commissionId);
@@ -273,6 +276,8 @@ export async function adjustAffiliateBalance(
 ): Promise<LedgerEntry> {
   requirePerm(ctx, "commissions.write");
   if (!input.reason?.trim()) throw validation("a reason is required for a manual adjustment");
+  const owner = await db.query.affiliates.findFirst({ where: and(eq(affiliates.id, input.affiliateId), eq(affiliates.tenantId, ctx.tenantId)) });
+  if (!owner) throw notFound("affiliate", input.affiliateId);
   if (input.amountMinor === 0) throw validation("adjustment amount cannot be zero");
   const entry = await writeLedger(db, ctx, { ...input, type: "adjustment" });
   await writeAudit(db, ctx, { entityType: "ledger_entry", entityId: entry.id, action: "manual_adjustment", after: { affiliateId: input.affiliateId, amountMinor: input.amountMinor }, reason: input.reason });

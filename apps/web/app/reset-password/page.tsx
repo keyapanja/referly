@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";
-import { api, setToken } from "@/lib/api";
+import { api, setSignedInHint } from "@/lib/api";
 import { useAction } from "@/lib/hooks";
 import { Alert, Field } from "@/components/ui";
 import { AuthBrand } from "@/components/shell";
@@ -35,7 +35,7 @@ function ResetInner() {
               if (password !== confirm) return setError("Passwords do not match.");
               const ok = await run(() => api("/v1/auth/reset-password", { method: "POST", token: null, json: { token, password } }));
               if (ok) {
-                setToken(null);
+                setSignedInHint(false);
                 setDone(true);
                 setTimeout(() => router.push("/login"), 1500);
               }

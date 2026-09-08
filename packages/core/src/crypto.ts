@@ -9,11 +9,21 @@ let warned = false;
 
 function key(): Buffer {
   const secret = process.env.INTEGRATION_SECRET;
-  if (!secret && !warned && process.env.NODE_ENV === "production") {
-    warned = true;
-    console.warn("[crypto] INTEGRATION_SECRET is not set; integration credentials are encrypted with an insecure default key");
+  if (!secret) {
+    if (process.env.NODE_ENV === "production") throw new Error("INTEGRATION_SECRET is required in production: it encrypts provider credentials and webhook secrets at rest");
+    if (!warned) {
+      warned = true;
+      console.warn("[crypto] INTEGRATION_SECRET is not set; using an insecure development key");
+    }
+  } else if (secret.length < 16) {
+    throw new Error("INTEGRATION_SECRET must be at least 16 characters");
   }
   return createHash("sha256").update(secret ?? "dev-insecure-integration-secret").digest();
+}
+
+/** Call at boot so a missing secret fails the process, not the first payout. */
+export function assertIntegrationSecret(): void {
+  key();
 }
 
 export function encryptJson(value: unknown): string {

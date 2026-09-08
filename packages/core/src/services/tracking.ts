@@ -1,5 +1,6 @@
 import { and, desc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
+import { httpUrl } from "../urls";
 import { createHash } from "node:crypto";
 import type { DbLike } from "../db/client";
 import { affiliates, clicks, couponCodes, offers, programs, trackingLinks, type Click, type CouponCode, type TrackingLink } from "../db/schema";
@@ -20,7 +21,7 @@ export const createLinkSchema = z.object({
   offerId: z.string(),
   label: z.string().max(60).optional(),
   /** Optional override; defaults to the offer's sales URL. Must stay on the same host. */
-  destinationUrl: z.string().url().optional(),
+  destinationUrl: httpUrl.optional(),
 });
 
 export async function createTrackingLink(db: DbLike, ctx: TenantContext, rawInput: z.input<typeof createLinkSchema>): Promise<TrackingLink> {
@@ -40,8 +41,8 @@ export async function createTrackingLink(db: DbLike, ctx: TenantContext, rawInpu
   if (!eligible) throw validation("offer is not part of this program");
 
   const destination = input.destinationUrl ?? offer.salesUrl;
-  if (input.destinationUrl && new URL(input.destinationUrl).host !== new URL(offer.salesUrl).host)
-    throw validation("destination must stay on the offer's sales domain");
+  if (input.destinationUrl && new URL(input.destinationUrl).origin !== new URL(offer.salesUrl).origin)
+    throw validation("destination must stay on the offer's sales domain (same scheme and host)");
 
   const existing = await db.query.trackingLinks.findFirst({
     where: and(

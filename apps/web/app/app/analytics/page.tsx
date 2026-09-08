@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { API_URL, api, getToken } from "@/lib/api";
+import { API_URL, api } from "@/lib/api";
 import { useAction, useApi } from "@/lib/hooks";
 import { date, dateTime, money, percent } from "@/lib/format";
 import { Alert, Badge, Loading, PageHeader, Table } from "@/components/ui";
@@ -55,7 +55,7 @@ export default function AnalyticsPage() {
   }, [pending, reloadExports]);
 
   async function download(exp: any) {
-    const res = await fetch(`${API_URL}/v1/analytics/exports/${exp.id}/download`, { headers: { authorization: `Bearer ${getToken()}` } });
+    const res = await fetch(`${API_URL}/v1/analytics/exports/${exp.id}/download`, { credentials: "include" });
     if (!res.ok) return;
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);

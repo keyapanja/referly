@@ -63,7 +63,7 @@ Docker images for the API and web app, a `docker-compose.yml` with Postgres, and
 | Area | Endpoints |
 |---|---|
 | Auth | `POST /v1/auth/signup`, `/login`, `/logout`, `/verify-email`, `/forgot-password`, `/reset-password` |
-| Tenant | `GET/PATCH /v1/tenant`, `/me`, `/me/resend-verification`, `/team`, `/api-keys`, `/audit` |
+| Tenant | `GET/PATCH /v1/tenant`, `/me`, `/me/resend-verification`, `POST /me/password`, `/team`, `GET /api-keys/scopes`, `POST /api-keys` (scoped), `/audit` |
 | Assets | `GET/POST /v1/assets`, `POST /v1/assets/upload` (multipart, 25 MB, images/PDF/video), `PATCH /:id`, `PUT /:id/permissions` (scope to programs, offers, affiliates) |
 | Offers | `GET/POST /v1/offers`, `PATCH /v1/offers/:id`, `POST /v1/offers/:id/status` |
 | Programs | `GET/POST /v1/programs`, `PATCH /:id`, `POST /:id/status`, `POST /:id/offers` |
@@ -84,7 +84,7 @@ Docker images for the API and web app, a `docker-compose.yml` with Postgres, and
 | Exports | `POST /v1/analytics/exports` (async CSV: affiliates, conversions, commissions, payouts, ledger, clicks), `GET /v1/analytics/exports`, `GET /:id`, `GET /:id/download` |
 | Payouts | `GET/POST /v1/payouts`, `GET /payable/:affiliateId`, `POST /batch-all`, `POST /external`, `POST /:id/processing|paid|failed|cancel` |
 | Public | `GET /r/:token` (click redirect), `GET/POST /join/:token[/apply]`, `GET/POST /invite/:token[/accept]` |
-| Portal | `GET /portal/me|home|offers|links|codes|assets|conversions|commissions|earnings|payouts`, `POST /portal/links`, `PATCH /portal/profile`, `PUT /portal/payout-profile` |
+| Portal | `GET /portal/me|home|offers|links|codes|assets|conversions|commissions|earnings|payouts`, `POST /portal/links`, `PATCH /portal/profile`, `PUT /portal/payout-profile`, `POST /portal/password` |
 
 Integrations authenticate with `Authorization: Bearer rk_live_...` (API key). Users authenticate with a session cookie or `Authorization: Bearer <session token>`.
 

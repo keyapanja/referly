@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { assets, validation } from "@referly/core";
-import { ALLOWED_UPLOAD_TYPES, MAX_UPLOAD_BYTES, assetKey } from "../storage";
+import { ALLOWED_UPLOAD_TYPES, MAX_UPLOAD_BYTES, assetKey, sniffMatches } from "../storage";
+import { require as requirePerm } from "@referly/core";
 import { requireMerchantPrincipal, type AppEnv } from "../lib/auth";
 
 export function assetRoutes() {
@@ -20,10 +21,13 @@ export function assetRoutes() {
     const body = await c.req.parseBody();
     const file = body.file;
     if (!(file instanceof File)) throw validation("send a multipart form with a 'file' field");
+    requirePerm(ctx, "assets.write");
     const contentType = file.type.toLowerCase();
     if (!ALLOWED_UPLOAD_TYPES[contentType]) throw validation("unsupported file type " + (contentType || "(unknown)"), { allowed: Object.keys(ALLOWED_UPLOAD_TYPES) });
     if (file.size > MAX_UPLOAD_BYTES) throw validation("file is larger than " + MAX_UPLOAD_BYTES / 1024 / 1024 + " MB");
     const data = new Uint8Array(await file.arrayBuffer());
+    // The declared type is what the browser will render it as; the bytes must agree.
+    if (!sniffMatches(contentType, data)) throw validation(`file content does not look like ${contentType}`);
     const stored = await c.get("deps").storage.put(assetKey(ctx.tenantId, contentType, data), data, contentType);
     return c.json({ file: { ...stored, name: file.name } }, 201);
   });

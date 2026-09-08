@@ -31,6 +31,36 @@ export interface FileStorage {
 /** Keys under this prefix are never served by the public /files route. */
 export const PRIVATE_PREFIX = "private/";
 
+/** Magic-byte check for every allowed type; SVG is XML text and must not contain script or event handlers. */
+export function sniffMatches(contentType: string, data: Uint8Array): boolean {
+  const starts = (...bytes: number[]) => bytes.every((b, i) => data[i] === b);
+  const ascii = (offset: number, text: string) => Array.from(text).every((ch, i) => data[offset + i] === ch.charCodeAt(0));
+  switch (contentType) {
+    case "image/png":
+      return starts(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a);
+    case "image/jpeg":
+      return starts(0xff, 0xd8, 0xff);
+    case "image/gif":
+      return ascii(0, "GIF87a") || ascii(0, "GIF89a");
+    case "image/webp":
+      return ascii(0, "RIFF") && ascii(8, "WEBP");
+    case "application/pdf":
+      return ascii(0, "%PDF");
+    case "video/mp4":
+      return ascii(4, "ftyp");
+    case "video/webm":
+      return starts(0x1a, 0x45, 0xdf, 0xa3);
+    case "image/svg+xml": {
+      const head = new TextDecoder("utf-8", { fatal: false }).decode(data.subarray(0, Math.min(data.byteLength, 512 * 1024)));
+      if (!/<svg[\s>]/i.test(head)) return false;
+      // Served download-only anyway, but refuse active content so the file is safe in <img> everywhere.
+      return !/<script|<foreignObject|\son[a-z]+\s*=|javascript:|<!ENTITY|<iframe|<embed|<object/i.test(head);
+    }
+    default:
+      return false;
+  }
+}
+
 export const ALLOWED_UPLOAD_TYPES: Record<string, string> = {
   "image/png": "png",
   "image/jpeg": "jpg",
@@ -82,6 +112,8 @@ export class LocalStorage implements FileStorage {
   }
 
   async get(key: string) {
+    // The public route refuses private keys; refuse here too, case-insensitively, because NTFS and APFS are not.
+    if (key.toLowerCase().startsWith(PRIVATE_PREFIX) && !key.startsWith(PRIVATE_PREFIX)) return null;
     let full: string;
     try {
       full = this.resolve(key);

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { api, setToken } from "@/lib/api";
+import { api, setSignedInHint } from "@/lib/api";
 import { useAction } from "@/lib/hooks";
 import { Alert, CopyBox, Field } from "@/components/ui";
 import { toMinor } from "@/lib/format";
@@ -45,7 +45,7 @@ export default function SignupPage() {
         }),
       );
       if (!res) return;
-      setToken(res.token);
+      setSignedInHint(true);
       return setStep(2);
     }
     if (step === 2) {

@@ -1,5 +1,5 @@
 import { eq } from "drizzle-orm";
-import { schema, type Db, type DbLike, type Job, type TenantContext } from "@referly/core";
+import { schema, type Db, type DbLike, type Job, type TenantContext, type Lookup } from "@referly/core";
 import { jobs, messaging, commissions, systemContext, events as eventsMod, tenants as tenantsSvc, exportsSvc, withTenantScope, withRlsBypass, campaigns as campaignsSvc, automation, integrations, webhooks } from "@referly/core";
 import { PRIVATE_PREFIX, type FileStorage } from "./storage";
 import { textStatusUrl } from "./text";
@@ -20,6 +20,7 @@ export interface WorkerDeps {
   now?: () => Date;
   payoutProviders?: integrations.IntegrationDeps;
   webhookFetch?: typeof fetch;
+  webhookLookup?: Lookup;
   /** Text (SMS/WhatsApp) provider construction; texts are skipped when absent. */
   text?: integrations.TextDeps;
   /** API origin, for provider status callbacks. */
@@ -110,7 +111,7 @@ export function createHandlers(deps: WorkerDeps): Record<string, jobs.JobHandler
     /** Outbound webhook delivery; throws on failure so the job retries with backoff. */
     deliver_webhook: async (job: Job) => {
       const { deliveryId, tenantId } = job.payload as { deliveryId: string; tenantId: string };
-      await withTenantScope(deps.db, tenantId, (db) => webhooks.deliver(db, systemContext(tenantId, now), deliveryId, { fetchImpl: deps.webhookFetch, attempt: job.attempts, maxAttempts: job.maxAttempts }));
+      await withTenantScope(deps.db, tenantId, (db) => webhooks.deliver(db, systemContext(tenantId, now), deliveryId, { fetchImpl: deps.webhookFetch, lookup: deps.webhookLookup, attempt: job.attempts, maxAttempts: job.maxAttempts }));
     },
 
     /** AN-07: build a CSV page by page and store it privately; the API streams it back to authorised users. */

@@ -8,7 +8,8 @@ import { messaging } from "@referly/core";
  * The core never sees provider details; it only calls `send`.
  */
 export function createEmailProvider(env: NodeJS.ProcessEnv = process.env): messaging.EmailProvider {
-  const kind = (env.EMAIL_PROVIDER ?? "console").toLowerCase();
+  const kind = (env.EMAIL_PROVIDER ?? (env.NODE_ENV === "production" ? "" : "console")).toLowerCase();
+  if (!kind) throw new Error("EMAIL_PROVIDER is required in production (resend or smtp); the console provider prints one-time links to stdout");
   const from = env.EMAIL_FROM ?? "no-reply@example.com";
   switch (kind) {
     case "resend":

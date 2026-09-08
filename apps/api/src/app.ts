@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { sql } from "drizzle-orm";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
-import type { Db, DbLike, integrations } from "@referly/core";
+import type { Db, DbLike, integrations, Lookup } from "@referly/core";
 import type { messaging } from "@referly/core";
 import { errorHandler } from "./lib/errors";
 import { authMiddleware, type AppEnv } from "./lib/auth";
@@ -26,8 +26,10 @@ import { automationRoutes } from "./routes/automation";
 import { groupRoutes } from "./routes/groups";
 import { disputeRoutes } from "./routes/disputes";
 import { webhookRoutes } from "./routes/webhooks";
-import { rateLimit } from "./lib/ratelimit";
-import { PRIVATE_PREFIX, type FileStorage } from "./storage";
+import { rateLimit, accountKey, setTrustedProxyHops } from "./lib/ratelimit";
+import { bodyLimit } from "hono/body-limit";
+import { secureHeaders } from "hono/secure-headers";
+import { MAX_UPLOAD_BYTES, PRIVATE_PREFIX, type FileStorage } from "./storage";
 
 export interface AppConfig {
   /** Base URL of this API, used to build tracking/join links. */
@@ -41,7 +43,12 @@ export interface AppConfig {
   supportEmail?: string;
   /** Requests per window per IP. Windows: redirect 1 min, public 10 min, auth 15 min. */
   rateLimits?: { redirect: number; public: number; auth: number };
+  /** Number of reverse proxies in front of the API whose X-Forwarded-For entries are trusted (0 = use the socket address). */
+  trustedProxyHops?: number;
 }
+
+/** JSON bodies are small; only the multipart upload route may carry a real file. */
+const JSON_BODY_LIMIT = 256 * 1024;
 
 export interface AppDeps {
   /** Root connection at construction; inside a request this is the request's transaction. */
@@ -53,6 +60,8 @@ export interface AppDeps {
   payoutProviders?: integrations.IntegrationDeps;
   /** fetch used for outbound webhook deliveries and tests (tests inject a stub). */
   webhookFetch?: typeof fetch;
+  /** DNS resolver for the outbound-webhook SSRF check (tests inject one). */
+  webhookLookup?: Lookup;
   /** Text (SMS/WhatsApp) provider construction and platform fallback. */
   text?: integrations.TextDeps;
 }
@@ -60,6 +69,12 @@ export interface AppDeps {
 export function createApp(deps: AppDeps & { db: Db }) {
   const app = new Hono<AppEnv>();
   app.onError(errorHandler);
+  if (deps.config.trustedProxyHops !== undefined) setTrustedProxyHops(deps.config.trustedProxyHops);
+  app.use("*", secureHeaders({ xFrameOptions: "DENY", referrerPolicy: "no-referrer", strictTransportSecurity: deps.config.cookieSecure ? "max-age=31536000; includeSubDomains" : false, crossOriginResourcePolicy: false, crossOriginOpenerPolicy: false, xXssProtection: false }));
+  app.use("*", async (c, next) => {
+    const max = c.req.path === "/v1/assets/upload" ? MAX_UPLOAD_BYTES + 64 * 1024 : JSON_BODY_LIMIT;
+    return bodyLimit({ maxSize: max, onError: (ctx) => ctx.json({ error: { code: "payload_too_large", message: `request body exceeds ${max} bytes` } }, 413) })(c, next);
+  });
   app.use("*", cors({ origin: deps.config.webUrl, credentials: true }));
   if (process.env.NODE_ENV !== "test") app.use("*", logger());
   app.use("*", async (c, next) => {
@@ -73,7 +88,8 @@ export function createApp(deps: AppDeps & { db: Db }) {
       await deps.db.execute(sql`select 1`);
       return c.json({ ok: true, db: "up" });
     } catch (err) {
-      return c.json({ ok: false, db: "down", error: err instanceof Error ? err.message : String(err) }, 503);
+      console.error("[health] database check failed", err instanceof Error ? err.message : err);
+      return c.json({ ok: false, db: "down" }, 503);
     }
   });
 
@@ -84,15 +100,30 @@ export function createApp(deps: AppDeps & { db: Db }) {
   app.use("/invite/*", rateLimit({ name: "public", limit: rl.public, windowMs: 10 * 60_000 }));
   app.use("/hooks/*", rateLimit({ name: "redirect", limit: rl.redirect, windowMs: 60_000 }));
   app.use("/v1/auth/*", rateLimit({ name: "auth", limit: rl.auth, windowMs: 15 * 60_000 }));
+  // A second, per-account bucket on the two endpoints an attacker aims at a specific user.
+  app.use("/v1/auth/login", rateLimit({ name: "auth-account", limit: Math.max(rl.auth, 20), windowMs: 15 * 60_000, keyOf: accountKey }));
+  app.use("/v1/auth/forgot-password", rateLimit({ name: "auth-account", limit: 5, windowMs: 15 * 60_000, keyOf: accountKey }));
+  app.use("/files/*", rateLimit({ name: "files", limit: rl.redirect * 2, windowMs: 60_000 }));
 
   // Uploaded files (local storage only; S3 serves its own objects). Keys are unguessable and tenant-scoped.
+  // Files share the API origin with the session cookie, so nothing served here may run script:
+  // a sandboxed CSP, nosniff, and download-only for the two formats that can carry markup.
   app.get("/files/*", async (c) => {
     const key = c.req.path.slice("/files/".length);
-    if (key.startsWith(PRIVATE_PREFIX)) return c.notFound();
+    if (key.toLowerCase().startsWith(PRIVATE_PREFIX)) return c.notFound();
     const file = await deps.storage.get(key);
     if (!file) return c.notFound();
+    const type = file.contentType.toLowerCase();
+    const inline = /^(image\/(png|jpeg|gif|webp)|video\/(mp4|webm))$/.test(type);
     return new Response(file.data as unknown as BodyInit, {
-      headers: { "content-type": file.contentType, "cache-control": "public, max-age=31536000, immutable", "content-length": String(file.data.byteLength) },
+      headers: {
+        "content-type": inline || type === "image/svg+xml" || type === "application/pdf" ? type : "application/octet-stream",
+        "content-disposition": inline ? "inline" : `attachment; filename="${key.split("/").pop() ?? "file"}"`,
+        "content-security-policy": "default-src 'none'; sandbox",
+        "x-content-type-options": "nosniff",
+        "cache-control": "public, max-age=31536000, immutable",
+        "content-length": String(file.data.byteLength),
+      },
     });
   });
 

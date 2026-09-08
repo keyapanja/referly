@@ -21,6 +21,9 @@ export default function SettingsPage() {
   const [form, setForm] = useState<any>(null);
   const [member, setMember] = useState({ name: "", email: "", password: "", role: "admin" });
   const [keyName, setKeyName] = useState("Checkout webhook");
+  const { data: scopeInfo } = useApi<any>("/v1/tenant/api-keys/scopes");
+  const [keyScopes, setKeyScopes] = useState<string[]>(["conversions.write", "read"]);
+  const [pw, setPw] = useState({ currentPassword: "", newPassword: "" });
   const [secret, setSecret] = useState<string | null>(null);
 
   useEffect(() => {
@@ -179,14 +182,23 @@ export default function SettingsPage() {
               style={{ marginTop: 12 }}
               onSubmit={async (e) => {
                 e.preventDefault();
-                const res = await run(() => api<any>("/v1/tenant/api-keys", { method: "POST", json: { name: keyName } }));
+                const res = await run(() => api<any>("/v1/tenant/api-keys", { method: "POST", json: { name: keyName, scopes: keyScopes } }));
                 if (res) setSecret(res.secret);
               }}
             >
               <Field label="New API key name">
                 <input value={keyName} onChange={(e) => setKeyName(e.target.value)} required />
               </Field>
-              <button disabled={busy}>Create API key</button>
+              <Field label="Scopes" help="A key can only do what it is scoped to. Checkout integrations need conversions.write; reporting tools need read.">
+                <div style={{ display: "flex", flexWrap: "wrap", gap: "6px 14px" }}>
+                  {(scopeInfo?.scopes ?? ["conversions.write", "read"]).map((s: string) => (
+                    <label key={s} className="checkbox" style={{ margin: 0 }}>
+                      <input type="checkbox" checked={keyScopes.includes(s)} onChange={(e) => setKeyScopes(e.target.checked ? [...keyScopes, s] : keyScopes.filter((x) => x !== s))} /> {s}
+                    </label>
+                  ))}
+                </div>
+              </Field>
+              <button disabled={busy || keyScopes.length === 0}>Create API key</button>
             </form>
           </div>
           <div className="card">
@@ -317,6 +329,27 @@ export default function SettingsPage() {
                 </div>
               );
             })()}
+          </div>
+          <div className="card">
+            <h2>Your password</h2>
+            <p className="muted">Changing it signs out every other session of yours.</p>
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                const ok = await run(() => api("/v1/tenant/me/password", { method: "POST", json: pw }), "Password changed.");
+                if (ok) setPw({ currentPassword: "", newPassword: "" });
+              }}
+            >
+              <div className="row">
+                <Field label="Current password">
+                  <input type="password" value={pw.currentPassword} onChange={(e) => setPw({ ...pw, currentPassword: e.target.value })} required autoComplete="current-password" />
+                </Field>
+                <Field label="New password" help="At least 8 characters.">
+                  <input type="password" value={pw.newPassword} onChange={(e) => setPw({ ...pw, newPassword: e.target.value })} required minLength={8} autoComplete="new-password" />
+                </Field>
+              </div>
+              <button disabled={busy}>Change password</button>
+            </form>
           </div>
           <div className="card">
             <h2>Team</h2>

@@ -2,20 +2,27 @@
 
 export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
-const TOKEN_KEY = "referly.token";
+/**
+ * The browser authenticates with the httpOnly session cookie the API sets on login (same-site:
+ * app.example.com → api.example.com). No session token is ever kept in script-readable storage,
+ * so an XSS cannot exfiltrate a reusable credential. `signedIn` is only a UX hint for redirects.
+ */
+const SIGNED_IN_KEY = "referly.signedIn";
+const LEGACY_TOKEN_KEY = "referly.token";
 
-export function getToken(): string | null {
-  if (typeof window === "undefined") return null;
+export function signedInHint(): boolean {
+  if (typeof window === "undefined") return false;
   try {
-    return window.localStorage.getItem(TOKEN_KEY);
+    return window.localStorage.getItem(SIGNED_IN_KEY) === "1";
   } catch {
-    return null;
+    return false;
   }
 }
-export function setToken(token: string | null) {
+export function setSignedInHint(on: boolean) {
   try {
-    if (token) window.localStorage.setItem(TOKEN_KEY, token);
-    else window.localStorage.removeItem(TOKEN_KEY);
+    window.localStorage.removeItem(LEGACY_TOKEN_KEY);
+    if (on) window.localStorage.setItem(SIGNED_IN_KEY, "1");
+    else window.localStorage.removeItem(SIGNED_IN_KEY);
   } catch {
     /* storage unavailable */
   }
@@ -35,8 +42,6 @@ export class ApiError extends Error {
 
 export async function api<T = unknown>(path: string, init: { method?: string; json?: unknown; token?: string | null } = {}): Promise<T> {
   const headers: Record<string, string> = {};
-  const token = init.token === undefined ? getToken() : init.token;
-  if (token) headers.authorization = `Bearer ${token}`;
   if (init.json !== undefined) headers["content-type"] = "application/json";
   const res = await fetch(`${API_URL}${path}`, { method: init.method ?? "GET", headers, body: init.json !== undefined ? JSON.stringify(init.json) : undefined, credentials: "include" });
   const text = await res.text();
@@ -49,7 +54,7 @@ export async function api<T = unknown>(path: string, init: { method?: string; js
   if (!res.ok) {
     const err = body?.error ?? {};
     if (res.status === 401 && typeof window !== "undefined" && !path.startsWith("/v1/auth")) {
-      setToken(null);
+      setSignedInHint(false);
       const target = window.location.pathname.startsWith("/portal") ? "/login?portal=1" : "/login";
       if (!window.location.pathname.startsWith("/login")) window.location.href = target;
     }
@@ -62,10 +67,7 @@ export async function api<T = unknown>(path: string, init: { method?: string; js
 export async function upload<T = any>(path: string, file: File): Promise<T> {
   const form = new FormData();
   form.append("file", file, file.name);
-  const headers: Record<string, string> = {};
-  const token = getToken();
-  if (token) headers.authorization = `Bearer ${token}`;
-  const res = await fetch(`${API_URL}${path}`, { method: "POST", headers, body: form, credentials: "include" });
+  const res = await fetch(`${API_URL}${path}`, { method: "POST", body: form, credentials: "include" });
   const body = await res.json().catch(() => null);
   if (!res.ok) {
     const err = body?.error ?? {};

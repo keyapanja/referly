@@ -32,7 +32,7 @@ export function conversionRoutes() {
       id: deliveryId,
       tenantId: ctx.tenantId,
       source,
-      idempotencyKey: `${input.externalOrderId ?? "?"}:${deliveryId}`,
+      idempotencyKey: `${source}:${input.externalOrderId ?? "?"}:${deliveryId}`,
       payload: body,
       receivedAt: ctx.now(),
     });

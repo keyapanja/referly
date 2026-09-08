@@ -1,5 +1,6 @@
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
+import { httpUrl } from "../urls";
 import type { DbLike } from "../db/client";
 import { offers, programOffers, type Offer } from "../db/schema";
 import { newId } from "../ids";
@@ -16,8 +17,8 @@ export const createOfferSchema = z.object({
   type: z.enum(OFFER_TYPES).default("custom"),
   priceMinor: z.number().int().min(0).default(0),
   currency: z.string().length(3).optional(),
-  salesUrl: z.string().url(),
-  imageUrl: z.string().url().optional(),
+  salesUrl: httpUrl,
+  imageUrl: httpUrl.optional(),
   internalNotes: z.string().max(5000).optional(),
 });
 export type CreateOfferInput = z.input<typeof createOfferSchema>;

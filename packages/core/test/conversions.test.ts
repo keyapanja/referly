@@ -43,10 +43,11 @@ describe("conversion intake", () => {
     expect(results.filter((r) => !r.duplicate)).toHaveLength(1);
   });
 
-  it("same order id under a different source is a distinct conversion", async () => {
+  it("same order id under a different source is the same sale (no second commission)", async () => {
     const a = await conversions.recordConversion(db, ws.ctx, { source: "webhook", externalOrderId: "shared", amountMinor: 100 });
     const b = await conversions.recordConversion(db, ws.ctx, { source: "manual", externalOrderId: "shared", amountMinor: 100 });
-    expect(a.conversion.id).not.toBe(b.conversion.id);
+    expect(b.duplicate).toBe(true);
+    expect(a.conversion.id).toBe(b.conversion.id);
   });
 
   it("commission basis and overrides are applied with the right precedence", async () => {

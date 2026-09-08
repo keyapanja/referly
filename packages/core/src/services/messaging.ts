@@ -53,6 +53,9 @@ export type TemplateKey = (typeof TEMPLATE_KEYS)[number];
 export const TEMPLATE_CHANNELS = ["email", "text"] as const;
 export type TemplateChannel = (typeof TEMPLATE_CHANNELS)[number];
 
+/** Account emails carry one-time links; those are never written to the message log (any reader could replay them). */
+const SECRET_LINK_KEYS: TemplateKey[] = ["verify_email", "password_reset", "affiliate_invite"];
+
 /** Account emails carry links that must never go over a text channel. */
 const TEXT_TEMPLATE_KEYS: TemplateKey[] = ["affiliate_invite", "affiliate_approved", "affiliate_rejected", "conversion_recorded", "commission_approved", "commission_reversed", "payout_paid", "campaign_launched", "policy_updated", "dispute_update"];
 
@@ -268,17 +271,18 @@ export async function sendTemplated(db: DbLike, ctx: TenantContext, provider: Em
   }
   const subject = renderTemplate(template.subject, input.vars);
   const body = renderTemplate(template.body, input.vars);
+  const loggedBody = SECRET_LINK_KEYS.includes(input.key) ? renderTemplate(template.body, { ...input.vars, link: "[one-time link not stored]" }) : body;
   try {
     const result = await provider.send({ to: input.to, subject, body });
     const [row] = await db
       .insert(messageLogs)
-      .values({ ...base, subject, body, status: "sent", providerMessageId: result.providerMessageId ?? null, sentAt: ctx.now() })
+      .values({ ...base, subject, body: loggedBody, status: "sent", providerMessageId: result.providerMessageId ?? null, sentAt: ctx.now() })
       .returning();
     return row!;
   } catch (err) {
     const [row] = await db
       .insert(messageLogs)
-      .values({ ...base, subject, body, status: "failed", error: err instanceof Error ? err.message : String(err) })
+      .values({ ...base, subject, body: loggedBody, status: "failed", error: err instanceof Error ? err.message : String(err) })
       .returning();
     return row!;
   }

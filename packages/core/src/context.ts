@@ -13,6 +13,8 @@ export interface Actor {
   role?: Role;
   /** set when actor is an affiliate acting in the portal */
   affiliateId?: string;
+  /** API keys: the permissions the key was created with. Nothing else is granted. */
+  scopes?: string[];
 }
 
 /**
@@ -55,10 +57,13 @@ export const PERMISSIONS = {
 
 export type Permission = keyof typeof PERMISSIONS;
 
+/** Permissions an API key may be scoped to. Managing the workspace, billing, team, keys and provider credentials is session-only. */
+export const API_KEY_SCOPES = (Object.keys(PERMISSIONS) as Permission[]).filter((p) => !["tenant.manage", "billing.manage", "team.manage", "integrations.manage"].includes(p));
+
 export function can(ctx: TenantContext, permission: Permission): boolean {
   const { actor } = ctx;
   if (actor.type === "system") return true;
-  if (actor.type === "api_key") return permission !== "tenant.manage" && permission !== "billing.manage" && permission !== "team.manage";
+  if (actor.type === "api_key") return (API_KEY_SCOPES as string[]).includes(permission) && (actor.scopes ?? []).includes(permission);
   if (!actor.role) return false;
   if (actor.role === "platform_admin") return true;
   return (PERMISSIONS[permission] as readonly string[]).includes(actor.role);

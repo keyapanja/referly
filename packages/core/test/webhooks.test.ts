@@ -12,6 +12,8 @@ let db: Db;
 const clock = makeClock();
 let ws: Workspace;
 let alice: Affiliate;
+/** DNS stub: every host resolves to a public address, so the SSRF guard lets the fetch stub run. */
+const publicLookup = async () => [{ address: "93.184.216.34" }];
 
 type Captured = { url: string; headers: Record<string, string>; body: string };
 function stubFetch(status: number | (() => number), bodyText = "ok") {
@@ -23,7 +25,7 @@ function stubFetch(status: number | (() => number), bodyText = "ok") {
     const s = typeof status === "function" ? status() : status;
     return new Response(bodyText, { status: s });
   }) as unknown as typeof fetch;
-  return { fetchImpl, calls };
+  return { lookup: publicLookup, fetchImpl, calls };
 }
 
 async function lastEvent(type: string): Promise<DomainEvent> {
@@ -76,9 +78,9 @@ describe("outbound webhooks", () => {
     const jobs = await db.select().from(jobsTable).where(eq(jobsTable.type, "deliver_webhook"));
     expect(jobs.length).toBeGreaterThanOrEqual(2);
 
-    const { fetchImpl, calls } = stubFetch(200);
+    const { lookup: publicLookup, fetchImpl, calls } = stubFetch(200);
     const d = deliveries.find((x) => x.subscriptionId === salesHook)!;
-    const done = await webhooks.deliver(db, ws.ctx, d.id, { fetchImpl, attempt: 1, maxAttempts: 8 });
+    const done = await webhooks.deliver(db, ws.ctx, d.id, { lookup: publicLookup, fetchImpl, attempt: 1, maxAttempts: 8 });
     expect(done).toMatchObject({ status: "delivered", attempts: 1, responseStatus: 200 });
     const call = calls[0]!;
     expect(call.url).toBe("https://hooks.example.com/sales");
@@ -93,7 +95,7 @@ describe("outbound webhooks", () => {
     expect(webhooks.verifySignature(secret, call.headers["x-referly-timestamp"]!, call.body, call.headers["x-referly-signature"]!, 300, clock.now().getTime())).toBe(true);
     expect(webhooks.verifySignature("whsec_wrong", call.headers["x-referly-timestamp"]!, call.body, call.headers["x-referly-signature"]!, 300, clock.now().getTime())).toBe(false);
     // idempotent: delivering again does nothing
-    expect((await webhooks.deliver(db, ws.ctx, d.id, { fetchImpl })).status).toBe("delivered");
+    expect((await webhooks.deliver(db, ws.ctx, d.id, { lookup: publicLookup, fetchImpl })).status).toBe("delivered");
     expect(calls).toHaveLength(1);
     expect((await webhooks.listSubscriptions(db, ws.ctx)).find((s) => s.id === salesHook)).toMatchObject({ lastStatus: "delivered", consecutiveFailures: 0, stats: { delivered: 1, dead: 0 } });
   });
@@ -103,18 +105,18 @@ describe("outbound webhooks", () => {
     const failing = stubFetch(503, "busy");
     // first attempt of a fresh delivery: throws so the job retries
     let [d] = await webhooks.fanOut(db, ws.ctx, { ...event, occurredAt: new Date().toISOString() });
-    await expect(webhooks.deliver(db, ws.ctx, d!.id, { fetchImpl: failing.fetchImpl, attempt: 1, maxAttempts: 8 })).rejects.toThrow(/503/);
+    await expect(webhooks.deliver(db, ws.ctx, d!.id, { lookup: publicLookup, fetchImpl: failing.fetchImpl, attempt: 1, maxAttempts: 8 })).rejects.toThrow(/503/);
     let row = (await webhooks.listDeliveries(db, ws.ctx, salesHook)).find((x) => x.id === d!.id)!;
     expect(row).toMatchObject({ status: "failed", attempts: 1, responseStatus: 503, responseBody: "busy" });
     // final attempt: dead, streak 1
-    row = await webhooks.deliver(db, ws.ctx, d!.id, { fetchImpl: failing.fetchImpl, attempt: 8, maxAttempts: 8 });
+    row = await webhooks.deliver(db, ws.ctx, d!.id, { lookup: publicLookup, fetchImpl: failing.fetchImpl, attempt: 8, maxAttempts: 8 });
     expect(row.status).toBe("dead");
     expect((await webhooks.getSubscription(db, ws.ctx, salesHook)).consecutiveFailures).toBe(1);
 
     // four more dead deliveries → auto-disabled with a task
     for (let i = 0; i < 4; i++) {
       const [x] = await webhooks.fanOut(db, ws.ctx, { ...event, occurredAt: new Date(Date.now() + i).toISOString() });
-      await webhooks.deliver(db, ws.ctx, x!.id, { fetchImpl: failing.fetchImpl, attempt: 8, maxAttempts: 8 });
+      await webhooks.deliver(db, ws.ctx, x!.id, { lookup: publicLookup, fetchImpl: failing.fetchImpl, attempt: 8, maxAttempts: 8 });
     }
     const sub = await webhooks.getSubscription(db, ws.ctx, salesHook);
     expect(sub).toMatchObject({ status: "disabled", consecutiveFailures: 5 });
@@ -128,17 +130,17 @@ describe("outbound webhooks", () => {
     const ok = stubFetch(200);
     const again = await webhooks.redeliver(db, ws.ctx, d!.id);
     expect(again.status).toBe("pending");
-    expect((await webhooks.deliver(db, ws.ctx, again.id, { fetchImpl: ok.fetchImpl, attempt: 1 })).status).toBe("delivered");
+    expect((await webhooks.deliver(db, ws.ctx, again.id, { lookup: publicLookup, fetchImpl: ok.fetchImpl, attempt: 1 })).status).toBe("delivered");
     expect((JSON.parse(ok.calls[0]!.body) as { redeliveryOf?: string }).redeliveryOf).toBe(d!.id);
 
     // ping
-    const ping = await webhooks.testSubscription(db, ws.ctx, salesHook, { fetchImpl: ok.fetchImpl });
+    const ping = await webhooks.testSubscription(db, ws.ctx, salesHook, { lookup: publicLookup, fetchImpl: ok.fetchImpl });
     expect(ping.ok).toBe(true);
     expect(JSON.parse(ok.calls[1]!.body).type).toBe("ping");
     const timeout = stubFetch(() => {
       throw Object.assign(new Error("aborted"), { name: "AbortError" });
     });
-    const failedPing = await webhooks.testSubscription(db, ws.ctx, salesHook, { fetchImpl: timeout.fetchImpl });
+    const failedPing = await webhooks.testSubscription(db, ws.ctx, salesHook, { lookup: publicLookup, fetchImpl: timeout.fetchImpl });
     expect(failedPing).toMatchObject({ ok: false, error: "timed out" });
 
     // rotate + delete

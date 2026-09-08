@@ -1,6 +1,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { and, count, desc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
+import { assertPublicUrl, urlLooksPublic, type Lookup } from "../urls";
 import type { DbLike } from "../db/client";
 import { affiliates, commissions, conversions, payouts, webhookOutboundDeliveries, webhookSubscriptions, type WebhookOutboundDelivery, type WebhookSubscription } from "../db/schema";
 import { newId, newSecret } from "../ids";
@@ -45,8 +46,9 @@ const EVENT_TYPES = WEBHOOK_EVENTS.map((e) => e.type) as [WebhookEventType, ...W
 export const subscriptionSchema = z.object({
   url: z
     .string()
+    .max(2048)
     .url()
-    .refine((u) => /^https?:\/\//.test(u), "url must be http(s)"),
+    .refine((u) => urlLooksPublic(u).ok, "url must be a public http(s) endpoint (no private, loopback or link-local addresses)"),
   /** Event types, or ["*"] for everything. */
   events: z.array(z.union([z.enum(EVENT_TYPES), z.literal("*")])).min(1),
   description: z.string().max(200).nullable().optional(),
@@ -221,6 +223,29 @@ export interface DeliverOptions {
   /** From the job: current attempt number (1-based) and the cap, to know when to give up. */
   attempt?: number;
   maxAttempts?: number;
+  /** DNS resolver used by the SSRF check (tests inject one). */
+  lookup?: Lookup;
+}
+
+/** Most an endpoint's response body is read; the rest is discarded so a hostile endpoint cannot exhaust the worker. */
+const MAX_RESPONSE_BYTES = 64 * 1024;
+
+async function readCapped(res: Response): Promise<string> {
+  if (!res.body) return "";
+  const reader = res.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (total < MAX_RESPONSE_BYTES) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      total += value.byteLength;
+    }
+  } finally {
+    await reader.cancel().catch(() => {});
+  }
+  return new TextDecoder().decode(Buffer.concat(chunks.map((c) => Buffer.from(c))).subarray(0, MAX_RESPONSE_BYTES));
 }
 
 async function post(sub: WebhookSubscription, payload: WebhookPayload, opts: DeliverOptions, now: Date): Promise<{ ok: boolean; status: number | null; body: string; error?: string }> {
@@ -230,6 +255,8 @@ async function post(sub: WebhookSubscription, payload: WebhookPayload, opts: Del
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? 10_000);
   try {
+    // SSRF guard at send time: the name is resolved now, so a record changed after save is caught too.
+    await assertPublicUrl(sub.url, opts.lookup);
     const res = await (opts.fetchImpl ?? fetch)(sub.url, {
       method: "POST",
       headers: {
@@ -242,8 +269,10 @@ async function post(sub: WebhookSubscription, payload: WebhookPayload, opts: Del
       },
       body,
       signal: controller.signal,
+      redirect: "manual",
     });
-    const text = (await res.text().catch(() => "")).slice(0, 500);
+    const text = (await readCapped(res).catch(() => "")).slice(0, 500);
+    if (res.status >= 300 && res.status < 400) return { ok: false, status: res.status, body: text, error: `endpoint redirected (${res.status}); webhooks must respond directly` };
     return { ok: res.ok, status: res.status, body: text, error: res.ok ? undefined : `endpoint responded ${res.status}` };
   } catch (err) {
     return { ok: false, status: null, body: "", error: err instanceof Error ? (err.name === "AbortError" ? "timed out" : err.message) : String(err) };

@@ -1,6 +1,5 @@
-import { and, eq, gt, isNull } from "drizzle-orm";
+import { and, eq, gt, isNull, ne } from "drizzle-orm";
 import { createHash, randomBytes, scrypt as scryptCb, timingSafeEqual } from "node:crypto";
-import { promisify } from "node:util";
 import type { DbLike } from "../db/client";
 import { apiKeys, sessions, tenants, users, type User } from "../db/schema";
 import { newId, newSecret } from "../ids";
@@ -8,26 +7,55 @@ import { unauthenticated, validation } from "../errors";
 import type { Role, TenantContext } from "../context";
 import * as ctxMod from "../context";
 
-const scrypt = promisify(scryptCb);
+const scrypt = (password: string, salt: Buffer, keylen: number, options: { N: number; r: number; p: number; maxmem: number }) =>
+  new Promise<Buffer>((resolve, reject) => scryptCb(password, salt, keylen, options, (err, key) => (err ? reject(err) : resolve(key))));
 
 // ---------------------------------------------------------------------------
 // Passwords
 // ---------------------------------------------------------------------------
 
+/** OWASP guidance: scrypt N=2^17, r=8, p=1. Hashes record their cost so it can be raised later. */
+const SCRYPT_N = 131072;
+const SCRYPT_OPTS = { N: SCRYPT_N, r: 8, p: 1, maxmem: 256 * 1024 * 1024 };
+const LEGACY_N = 16384;
+
 export async function hashPassword(password: string): Promise<string> {
   if (password.length < 8) throw validation("password must be at least 8 characters");
+  if (password.length > 256) throw validation("password is too long");
   const salt = randomBytes(16);
-  const key = (await scrypt(password, salt, 64)) as Buffer;
-  return `scrypt$${salt.toString("base64")}$${key.toString("base64")}`;
+  const key = (await scrypt(password, salt, 64, SCRYPT_OPTS)) as Buffer;
+  return `scrypt$${SCRYPT_N}$${salt.toString("base64")}$${key.toString("base64")}`;
+}
+
+/** A stored hash to compare against when the account does not exist, so a miss costs the same as a wrong password. */
+let dummyHash: Promise<string> | null = null;
+function dummy(): Promise<string> {
+  return (dummyHash ??= hashPassword(randomBytes(24).toString("base64")));
 }
 
 export async function verifyPassword(password: string, stored: string | null | undefined): Promise<boolean> {
-  if (!stored) return false;
-  const [alg, saltB64, keyB64] = stored.split("$");
-  if (alg !== "scrypt" || !saltB64 || !keyB64) return false;
-  const key = (await scrypt(password, Buffer.from(saltB64, "base64"), 64)) as Buffer;
+  if (!stored) {
+    await verifyPassword(password, await dummy());
+    return false;
+  }
+  if (password.length > 256) return false;
+  const parts = stored.split("$");
+  let n = LEGACY_N;
+  let saltB64: string | undefined;
+  let keyB64: string | undefined;
+  if (parts.length === 4) [, , saltB64, keyB64] = parts, (n = Number(parts[1]));
+  else [, saltB64, keyB64] = parts;
+  if (parts[0] !== "scrypt" || !saltB64 || !keyB64 || !Number.isInteger(n) || n < 1024) return false;
+  const key = (await scrypt(password, Buffer.from(saltB64, "base64"), 64, { ...SCRYPT_OPTS, N: n })) as Buffer;
   const expected = Buffer.from(keyB64, "base64");
   return key.length === expected.length && timingSafeEqual(key, expected);
+}
+
+/** True when the stored hash was made with a lower cost than today's setting. */
+export function passwordNeedsRehash(stored: string | null | undefined): boolean {
+  if (!stored) return false;
+  const parts = stored.split("$");
+  return parts.length !== 4 || Number(parts[1]) < SCRYPT_N;
 }
 
 export function sha256(value: string): string {
@@ -57,10 +85,14 @@ export async function loginWithPassword(db: DbLike, input: { tenantSlug?: string
   for (const row of rows) {
     if (await verifyPassword(input.password, row.user.passwordHash)) {
       const session = await createSession(db, row.user, now);
-      await db.update(users).set({ lastLoginAt: now }).where(eq(users.id, row.user.id));
+      // Transparent upgrade of hashes made with an older cost.
+      const rehash = passwordNeedsRehash(row.user.passwordHash) ? await hashPassword(input.password) : null;
+      await db.update(users).set({ lastLoginAt: now, ...(rehash ? { passwordHash: rehash } : {}) }).where(eq(users.id, row.user.id));
       return { ...session, user: row.user, tenant: row.tenant };
     }
   }
+  // Unknown email: burn the same time as a real comparison so the response does not reveal it.
+  if (!rows.length) await verifyPassword(input.password, null);
   throw unauthenticated("invalid email or password");
 }
 
@@ -101,8 +133,13 @@ export async function revokeSession(db: DbLike, token: string): Promise<void> {
 // API keys (used by integrations to post conversions)
 // ---------------------------------------------------------------------------
 
+export const DEFAULT_API_KEY_SCOPES = ["conversions.write", "read"];
+
 export async function createApiKey(db: DbLike, ctx: TenantContext, input: { name: string; scopes?: string[] }) {
   ctxMod.require(ctx, "integrations.manage");
+  const scopes = [...new Set(input.scopes?.length ? input.scopes : DEFAULT_API_KEY_SCOPES)];
+  const bad = scopes.filter((s) => !(ctxMod.API_KEY_SCOPES as string[]).includes(s));
+  if (bad.length) throw validation(`unknown or disallowed API key scopes: ${bad.join(", ")}`, { allowed: ctxMod.API_KEY_SCOPES });
   const secret = `rk_live_${newSecret()}`;
   const [row] = await db
     .insert(apiKeys)
@@ -112,7 +149,7 @@ export async function createApiKey(db: DbLike, ctx: TenantContext, input: { name
       name: input.name,
       keyHash: sha256(secret),
       prefix: secret.slice(0, 12),
-      scopes: input.scopes ?? ["conversions.write", "read"],
+      scopes,
       createdByUserId: ctx.actor.type === "user" ? (ctx.actor.id ?? null) : null,
       createdAt: ctx.now(),
     })
@@ -133,4 +170,15 @@ export async function revokeApiKey(db: DbLike, ctx: TenantContext, apiKeyId: str
     .update(apiKeys)
     .set({ revokedAt: ctx.now() })
     .where(and(eq(apiKeys.id, apiKeyId), eq(apiKeys.tenantId, ctx.tenantId)));
+}
+
+/** Authenticated password change: verifies the current password and signs out every other session. */
+export async function changePassword(db: DbLike, userId: string, input: { currentPassword: string; newPassword: string; keepSessionToken?: string }, now = new Date()): Promise<void> {
+  const user = await db.query.users.findFirst({ where: eq(users.id, userId) });
+  if (!user || !(await verifyPassword(input.currentPassword, user.passwordHash))) throw unauthenticated("current password is incorrect");
+  if (input.newPassword === input.currentPassword) throw validation("choose a different password");
+  const passwordHash = await hashPassword(input.newPassword);
+  await db.update(users).set({ passwordHash, updatedAt: now }).where(eq(users.id, userId));
+  const keep = input.keepSessionToken ? sha256(input.keepSessionToken) : null;
+  await db.delete(sessions).where(keep ? and(eq(sessions.userId, userId), ne(sessions.tokenHash, keep)) : eq(sessions.userId, userId));
 }

@@ -3,6 +3,7 @@ import type { DbLike } from "../db/client";
 import { auditLogs } from "../db/schema";
 import { newId } from "../ids";
 import type { TenantContext } from "../context";
+import { require as requirePerm } from "../context";
 
 export interface AuditInput {
   entityType: string;
@@ -30,6 +31,7 @@ export async function writeAudit(db: DbLike, ctx: TenantContext, input: AuditInp
 }
 
 export async function listAudit(db: DbLike, ctx: TenantContext, filter: { entityType?: string; entityId?: string; limit?: number } = {}) {
+  requirePerm(ctx, "read");
   const conds = [eq(auditLogs.tenantId, ctx.tenantId)];
   if (filter.entityType) conds.push(eq(auditLogs.entityType, filter.entityType));
   if (filter.entityId) conds.push(eq(auditLogs.entityId, filter.entityId));

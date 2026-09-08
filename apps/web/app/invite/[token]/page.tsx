@@ -2,7 +2,7 @@
 
 import { useParams, useRouter } from "next/navigation";
 import { useState } from "react";
-import { api, setToken } from "@/lib/api";
+import { api, setSignedInHint } from "@/lib/api";
 import { useAction, useApi } from "@/lib/hooks";
 import { money } from "@/lib/format";
 import { Alert, Field, Loading } from "@/components/ui";
@@ -36,8 +36,12 @@ export default function InvitePage() {
               e.preventDefault();
               const res = await run(() => api<any>(`/invite/${token}/accept`, { method: "POST", token: null, json: { name: form.name || data.invite.name || "", password: form.password, acceptTerms: form.acceptTerms } }));
               if (!res) return;
-              setToken(res.token);
-              router.push("/portal");
+              if (res.token) {
+                setSignedInHint(true);
+                router.push("/portal");
+              } else {
+                router.push("/login?portal=1");
+              }
             }}
           >
             <Alert kind="error">{actionError}</Alert>

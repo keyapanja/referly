@@ -1,6 +1,6 @@
 import { Hono, type Context } from "hono";
 import { getCookie, setCookie } from "hono/cookie";
-import { tracking, programs, affiliates, auth, tenants, systemContext, notFound, validation, offers, integrations, messaging, textProviders } from "@referly/core";
+import { tracking, programs, affiliates, auth, tenants, systemContext, notFound, validation, offers, integrations, messaging, textProviders, webhookDeliveries, newId } from "@referly/core";
 import { setSessionCookie, type AppEnv } from "../lib/auth";
 import { scopeRequest } from "../lib/rls";
 import { publicTenant } from "./auth";
@@ -19,26 +19,40 @@ export function publicRoutes() {
    * Twilio messaging webhooks. The tenant is in the path; the request is trusted only if it
    * carries a valid X-Twilio-Signature for that tenant's auth token (or the platform account).
    */
-  async function twilioParams(c: Context<AppEnv, "/hooks/twilio/:tenantId/status" | "/hooks/twilio/:tenantId/inbound">): Promise<{ tenantId: string; params: Record<string, string> }> {
+  async function twilioParams(c: Context<AppEnv, "/hooks/twilio/:tenantId/status" | "/hooks/twilio/:tenantId/inbound">): Promise<{ tenantId: string; params: Record<string, string>; firstSeen: boolean }> {
     const tenantId = c.req.param("tenantId");
-    const tenant = await tenants.getTenant(c.get("deps").db, systemContext(tenantId, c.get("now")));
-    if (!tenant || tenant.status !== "active") throw notFound("tenant", tenantId);
+    // One answer for "no such tenant", "not connected" and "bad signature": nothing to enumerate.
+    const tenant = await tenants.getTenant(c.get("deps").db, systemContext(tenantId, c.get("now"))).catch(() => null);
+    if (!tenant || tenant.status !== "active") throw notFound("hook");
     await scopeRequest(c, tenantId);
     const ctx = systemContext(tenantId, c.get("now"));
     const token = (await integrations.twilioAuthToken(c.get("deps").db, ctx)) ?? process.env.TWILIO_AUTH_TOKEN ?? null;
-    if (!token) throw notFound("integration", "twilio");
+    if (!token) throw notFound("hook");
     const params: Record<string, string> = {};
-    for (const [k, v] of Object.entries(await c.req.parseBody())) if (typeof v === "string") params[k] = v;
-    const url = `${c.get("deps").config.baseUrl}${new URL(c.req.url).pathname}`;
-    if (!textProviders.verifyTwilioSignature(token, url, params, c.req.header("x-twilio-signature"))) throw validation("invalid Twilio signature");
-    return { tenantId, params };
+    for (const [k, v] of Object.entries(await c.req.parseBody())) if (typeof v === "string") params[k] = v.slice(0, 4096);
+    const url = `${c.get("deps").config.baseUrl.replace(/\/$/, "")}${new URL(c.req.url).pathname}`;
+    if (!textProviders.verifyTwilioSignature(token, url, params, c.req.header("x-twilio-signature"))) throw notFound("hook");
+    // Replay protection: a signed body can be captured and resent, so each (message, state) is processed once.
+    const sid = params.MessageSid ?? params.SmsSid ?? "";
+    let firstSeen = true;
+    if (sid) {
+      const key = `${new URL(c.req.url).pathname.split("/").pop()}:${sid}:${params.MessageStatus ?? params.Body?.trim().toUpperCase() ?? ""}`;
+      const inserted = await c
+        .get("deps")
+        .db.insert(webhookDeliveries)
+        .values({ id: newId("webhookDelivery"), tenantId, source: "twilio", idempotencyKey: key, payload: { sid }, status: "processed", processedAt: c.get("now")() })
+        .onConflictDoNothing()
+        .returning({ id: webhookDeliveries.id });
+      firstSeen = inserted.length > 0;
+    }
+    return { tenantId, params, firstSeen };
   }
 
   /** Delivery status: delivered / undelivered / failed are terminal and recorded on the log. */
   r.post("/hooks/twilio/:tenantId/status", async (c) => {
-    const { tenantId, params } = await twilioParams(c);
+    const { tenantId, params, firstSeen } = await twilioParams(c);
     const status = params.MessageStatus;
-    if (params.MessageSid && (status === "delivered" || status === "undelivered" || status === "failed")) {
+    if (firstSeen && params.MessageSid && (status === "delivered" || status === "undelivered" || status === "failed")) {
       await messaging.recordDeliveryStatus(c.get("deps").db, systemContext(tenantId, c.get("now")), params.MessageSid, status, params.ErrorCode ? `twilio error ${params.ErrorCode}` : undefined);
     }
     return c.body(null, 204);
@@ -46,9 +60,10 @@ export function publicRoutes() {
 
   /** Inbound keywords: STOP/UNSUBSCRIBE opt the sender out, START/UNSTOP/YES opt them back in. */
   r.post("/hooks/twilio/:tenantId/inbound", async (c) => {
-    const { tenantId, params } = await twilioParams(c);
+    const { tenantId, params, firstSeen } = await twilioParams(c);
     const word = (params.Body ?? "").trim().toUpperCase();
     const from = params.From ?? "";
+    if (!firstSeen) return c.text('<?xml version="1.0" encoding="UTF-8"?><Response></Response>', 200, { "content-type": "text/xml" });
     if (["STOP", "STOPALL", "UNSUBSCRIBE", "CANCEL", "END", "QUIT"].includes(word)) await affiliates.setTextOptOutByPhone(c.get("deps").db, systemContext(tenantId, c.get("now")), from, true);
     else if (["START", "UNSTOP", "YES"].includes(word)) await affiliates.setTextOptOutByPhone(c.get("deps").db, systemContext(tenantId, c.get("now")), from, false);
     return c.text('<?xml version="1.0" encoding="UTF-8"?><Response></Response>', 200, { "content-type": "text/xml" });
@@ -60,6 +75,10 @@ export function publicRoutes() {
    * are redirected even when tracking is refused.
    */
   r.get("/r/:token", async (c) => {
+    // A navigation the visitor made (or an old client that sends no Sec-Fetch headers) counts; an image,
+    // iframe or script load pointed at this URL is cookie stuffing and is redirected without tracking.
+    const dest = c.req.header("sec-fetch-dest");
+    const forced = dest !== undefined && dest !== "document" && dest !== "empty";
     const { db } = c.get("deps");
     const consent = c.req.query("consent") as "granted" | "denied" | undefined;
     const result = await tracking.recordClick(
@@ -70,7 +89,7 @@ export function publicRoutes() {
         userAgent: c.req.header("user-agent") ?? null,
         ip: c.req.header("x-forwarded-for")?.split(",")[0]?.trim() ?? c.req.header("x-real-ip") ?? null,
         country: c.req.header("cf-ipcountry") ?? c.req.header("x-country") ?? null,
-        consentState: consent ?? "unknown",
+        consentState: forced ? "denied" : consent ?? "unknown",
       },
       c.get("now")(),
     );
@@ -122,9 +141,10 @@ export function publicRoutes() {
     if (!program) throw notFound("program");
     await scopeRequest(c, program.tenantId);
     const ctx = systemContext(program.tenantId, c.get("now"));
-    const { affiliate, membership } = await affiliates.applyToProgram(db, ctx, program.id, await c.req.json());
+    const { affiliate, membership, authenticated } = await affiliates.applyToProgram(db, ctx, program.id, await c.req.json());
     // Applicants can sign in right away; the portal shows a "pending review" state until approved.
-    const user = affiliate.userId ? await auth.resolveUserById(db, affiliate.userId) : null;
+    // A session is only issued when this request proved ownership (new account, or the right password).
+    const user = authenticated && affiliate.userId ? await auth.resolveUserById(db, affiliate.userId) : null;
     let token: string | null = null;
     if (user && affiliate.status === "active") {
       const session = await auth.createSession(db, user, c.get("now")());

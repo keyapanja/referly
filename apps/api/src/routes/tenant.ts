@@ -1,7 +1,8 @@
 import { Hono } from "hono";
 import { z } from "zod";
-import { tenants, auth, audit, account, plans, integrations, MERCHANT_ROLES } from "@referly/core";
-import { requireMerchantPrincipal, type AppEnv } from "../lib/auth";
+import { tenants, auth, audit, account, plans, integrations, MERCHANT_ROLES, API_KEY_SCOPES, forbidden } from "@referly/core";
+import { getCookie } from "hono/cookie";
+import { requireMerchantPrincipal, SESSION_COOKIE, type AppEnv } from "../lib/auth";
 import { publicUser } from "./auth";
 
 export function tenantRoutes() {
@@ -70,8 +71,20 @@ export function tenantRoutes() {
     return c.json({ user: publicUser(await tenants.changeUserRole(c.get("deps").db, c.get("ctx"), c.req.param("userId"), role)) });
   });
 
+  /** Merchant users change their own password; every other session is signed out. */
+  r.post("/me/password", async (c) => {
+    const p = c.get("principal");
+    if (p.kind !== "user") throw forbidden("API keys have no password");
+    const body = z.object({ currentPassword: z.string(), newPassword: z.string().min(8).max(256) }).parse(await c.req.json());
+    const header = c.req.header("authorization");
+    const keep = header?.toLowerCase().startsWith("bearer ") ? header.slice(7).trim() : getCookie(c, SESSION_COOKIE);
+    await auth.changePassword(c.get("deps").db, p.userId, { ...body, keepSessionToken: keep ?? undefined }, c.get("now")());
+    return c.json({ ok: true });
+  });
+
+  r.get("/api-keys/scopes", (c) => c.json({ scopes: API_KEY_SCOPES, defaults: auth.DEFAULT_API_KEY_SCOPES }));
   r.post("/api-keys", async (c) => {
-    const body = z.object({ name: z.string().min(1), scopes: z.array(z.string()).optional() }).parse(await c.req.json());
+    const body = z.object({ name: z.string().min(1).max(100), scopes: z.array(z.enum(API_KEY_SCOPES as [string, ...string[]])).optional() }).parse(await c.req.json());
     const { apiKey, secret } = await auth.createApiKey(c.get("deps").db, c.get("ctx"), body);
     return c.json({ apiKey: { id: apiKey.id, name: apiKey.name, prefix: apiKey.prefix, scopes: apiKey.scopes, createdAt: apiKey.createdAt }, secret }, 201);
   });

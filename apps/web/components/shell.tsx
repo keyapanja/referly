@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
-import { api, getToken, setToken } from "@/lib/api";
+import { api, signedInHint, setSignedInHint } from "@/lib/api";
 import { useApi } from "@/lib/hooks";
 import { Icon, type IconName } from "./icons";
 import { brandStyle } from "@/lib/brand";
@@ -104,7 +104,8 @@ export function Shell({ mode, children }: { mode: "merchant" | "portal" | "platf
   const needsVerification = mode === "merchant" && data?.user && data.user.emailVerified === false;
 
   useEffect(() => {
-    if (!getToken()) router.replace(mode === "portal" ? "/login?portal=1" : "/login");
+    // Fast path for visitors who never signed in; a stale hint still lands on the 401 redirect in api().
+    if (!signedInHint()) router.replace(mode === "portal" ? "/login?portal=1" : "/login");
   }, [mode, router]);
 
   const tenantName: string = data?.tenant?.name ?? "";
@@ -154,7 +155,7 @@ export function Shell({ mode, children }: { mode: "merchant" | "portal" | "platf
               } catch {
                 /* ignore */
               }
-              setToken(null);
+              setSignedInHint(false);
               router.replace(mode === "portal" ? "/login?portal=1" : "/login");
             }}
           >

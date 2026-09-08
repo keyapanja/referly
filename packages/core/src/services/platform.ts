@@ -5,7 +5,7 @@ import { affiliates, conversions, jobs, messageLogs, tenants, users, type Job, t
 import { newId } from "../ids";
 import { notFound, validation } from "../errors";
 import { tenantContext } from "../context";
-import { hashPassword } from "./auth";
+import { hashPassword, verifyPassword } from "./auth";
 import { writeAudit } from "./audit";
 import { PLAN_IDS, getUsage, resolveLimits, getPlan } from "./plans";
 
@@ -32,7 +32,10 @@ export async function ensurePlatformAdmin(db: DbLike, input: { email: string; pa
       .returning();
   }
   const existing = await db.query.users.findFirst({ where: and(eq(users.tenantId, tenant!.id), eq(users.email, email)) });
-  if (existing) return existing;
+  if (existing) {
+    if (!(await verifyPassword(input.password, existing.passwordHash))) console.warn(`[platform] PLATFORM_ADMIN_PASSWORD does not match the existing admin ${email}; the stored password is kept. Change it from the account, or reset it.`);
+    return existing;
+  }
   const [user] = await db
     .insert(users)
     .values({

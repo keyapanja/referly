@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";
-import { api, setToken } from "@/lib/api";
+import { api, setSignedInHint } from "@/lib/api";
 import { useAction } from "@/lib/hooks";
 import { Alert, Field } from "@/components/ui";
 import { AuthBrand } from "@/components/shell";
@@ -28,7 +28,7 @@ function LoginForm() {
             e.preventDefault();
             const res = await run(() => api<any>("/v1/auth/login", { method: "POST", json: { email, password }, token: null }));
             if (!res) return;
-            setToken(res.token);
+            setSignedInHint(true);
             router.replace(res.user.role === "affiliate" ? "/portal" : res.user.role === "platform_admin" ? "/admin" : "/app");
           }}
         >

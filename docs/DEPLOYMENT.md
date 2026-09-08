@@ -44,18 +44,30 @@ api.yourdomain.com {
 | `BASE_URL` | api | Public API origin. Used for tracking links and secure-cookie detection. |
 | `WEB_URL` | api | Public web origin. Used for CORS and for join, invite, verify and reset links in emails. |
 | `PORT` | api, web | Listen port (4000 / 3000). |
-| `EMAIL_PROVIDER` | api | `console`, `resend` or `smtp`. |
+| `EMAIL_PROVIDER` | api | `resend` or `smtp`. Required in production; `console` (the development default) prints one-time links to stdout. |
 | `EMAIL_FROM` | api | Sender for resend/smtp. |
 | `RESEND_API_KEY` | api | With `resend`. |
 | `SMTP_URL` | api | With `smtp`, e.g. `smtp://user:pass@host:587`. |
 | `NEXT_PUBLIC_API_URL` | web (build) | API origin the browser calls. Equal to `BASE_URL`. |
 | `PLATFORM_ADMIN_EMAIL`, `PLATFORM_ADMIN_PASSWORD`, `PLATFORM_ADMIN_NAME` | api | Creates the platform admin account on boot if it does not exist (idempotent). Sign in at `WEB_URL/login`; admins land on `/admin`. |
 | `PLATFORM_SUPPORT_EMAIL` | api | Shown to merchants on the Plan and usage card for plan changes. |
-| `INTEGRATION_SECRET` | api | Key for encrypting merchants' payout-provider and Twilio credentials at rest (AES-256-GCM). Required in production; rotate by re-connecting providers. |
+| `INTEGRATION_SECRET` | api | Key (16+ chars) for encrypting merchants' payout-provider and Twilio credentials and webhook signing secrets at rest (AES-256-GCM). The API refuses to start in production without it; rotate by re-connecting providers. |
+| `TRUSTED_PROXY_HOPS` | api | Number of reverse proxies in front of the API (Caddy/nginx/a load balancer). Rate limits and click IP hashes use the socket address by default; set `1` (or more) so the right-most `X-Forwarded-For` entries from your proxies are used instead. Never trust a header a client can set. |
 | `TEXT_FALLBACK` | api | What to do for workspaces with no Twilio account of their own: `console` (default outside production; prints texts to stdout), `none` (default in production; texts are skipped and logged as such) or `twilio` (a platform-wide account via `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_SMS`, `TWILIO_FROM_WHATSAPP`). |
 | `STORAGE_PROVIDER` | api | `local` (default; files under `FILES_DIR`, served at `BASE_URL/files/...`) or `s3`. |
 | `FILES_DIR` | api | Local storage directory. The Docker image uses `/app/data/files`; mount `/app/data`. |
 | `S3_BUCKET`, `S3_REGION`, `S3_ENDPOINT`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_PUBLIC_URL`, `S3_FORCE_PATH_STYLE` | api | With `s3`. Works with AWS S3, Cloudflare R2, MinIO, DigitalOcean Spaces. Objects are written public-read; `S3_PUBLIC_URL` is the origin (or CDN) they are served from. |
+
+## Security model
+
+- **Browser sessions** are httpOnly, SameSite=Lax cookies set by the API; the web app never keeps a token in script-readable storage, so the app and API must be same-site (`app.example.com` and `api.example.com`). Bearer tokens remain for API clients and the test suite.
+- **API keys** carry explicit scopes chosen at creation (`conversions.write`, `read`, `payouts.write`, …). Workspace, billing, team, key and provider management are never available to a key. Keys of a suspended workspace stop working immediately.
+- **Public join links** never log an existing account in: an application with a known email must present that account's password, and a re-application never demotes an active membership.
+- **Outbound webhooks** may only target public hosts. Loopback, private, link-local (cloud metadata), unique-local and multicast addresses are refused at save time and again at send time after DNS resolution; redirects are not followed and response bodies are capped.
+- **Uploaded files** are checked against their declared type by magic bytes, SVGs with script or event handlers are refused, and everything under `/files/*` is served with `X-Content-Type-Options: nosniff` and a sandboxed CSP; SVG and PDF are download-only because they share the API origin with the session cookie.
+- **Request bodies** are capped (256 KB for JSON, the upload limit plus slack for `/v1/assets/upload`). Login and password reset are rate limited per address and per account. `X-Frame-Options`, `Referrer-Policy: no-referrer`, HSTS (when served over https) and no `X-Powered-By` are set on both apps.
+- **Passwords** use scrypt with N=2^17; older hashes are upgraded on the next login. Users change their password from Settings (merchants) or Profile (affiliates); other sessions are signed out. One-time links (verify, reset, invite) are never stored in the message log. CSV exports neutralise spreadsheet formulas.
+- Run `npm audit` before releases. The single known advisory is in `drizzle-kit`'s bundled esbuild, a development-only tool.
 
 ## Database security
 

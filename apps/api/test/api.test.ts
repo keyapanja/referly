@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createTestDb, messaging, platform, withRlsBypass, payoutProviders, webhooks, textProviders, type DbHandle } from "@referly/core";
 import { createApp, type App } from "../src/app";
 import { runOnce } from "../src/worker";
-import { resetRateLimits } from "../src/lib/ratelimit";
+import { resetRateLimits, setTrustedProxyHops } from "../src/lib/ratelimit";
 import { LocalStorage } from "../src/storage";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -28,6 +28,8 @@ const twilioFetch = (async (url: string | URL | Request, init?: RequestInit) => 
   return new Response(JSON.stringify(init?.method === "POST" ? { sid: `SM${twilioCalls.length}` } : { status: "active" }), { status: init?.method === "POST" ? 201 : 200, headers: { "content-type": "application/json" } });
 }) as unknown as typeof fetch;
 const textDeps = { providerOptions: { fetchImpl: twilioFetch }, fallback: null };
+/** DNS stub for the outbound-webhook SSRF guard: test hosts resolve to a public address. */
+const webhookLookup = async () => [{ address: "93.184.216.34" }];
 const memoryPayouts = { factory: () => memoryPayoutProvider };
 const webhookCalls: { url: string; headers: Record<string, string>; body: string }[] = [];
 const webhookFetch = (async (url: string | URL | Request, init?: RequestInit) => {
@@ -41,7 +43,7 @@ const BASE = "http://api.test";
 beforeAll(async () => {
   handle = await createTestDb();
   storage = new LocalStorage(await mkdtemp(path.join(tmpdir(), "referly-files-")), BASE);
-  app = createApp({ db: handle.db, email, storage, payoutProviders: memoryPayouts, webhookFetch, text: textDeps, config: { baseUrl: BASE, webUrl: "http://web.test", cookieSecure: false, now } });
+  app = createApp({ db: handle.db, email, storage, payoutProviders: memoryPayouts, webhookFetch, webhookLookup, text: textDeps, config: { baseUrl: BASE, webUrl: "http://web.test", cookieSecure: false, now } });
 });
 afterAll(() => handle.close());
 beforeAll(() => resetRateLimits());
@@ -367,8 +369,7 @@ describe("MVP acceptance over HTTP", () => {
     const big = new FormData();
     big.append("file", new File([new Uint8Array(26 * 1024 * 1024)], "big.png", { type: "image/png" }));
     const tooBig = await app.request(BASE + "/v1/assets/upload", { method: "POST", headers: { authorization: `Bearer ${ownerToken}` }, body: big });
-    expect(tooBig.status).toBe(400);
-    expect((await tooBig.json()).error.message).toMatch(/larger than 25 MB/);
+    expect(tooBig.status).toBe(413); // rejected by the body limit before it is buffered
 
     // affiliates cannot upload
     const asAffiliate = await app.request(BASE + "/v1/assets/upload", { method: "POST", headers: { authorization: `Bearer ${affiliateToken}` }, body: form });
@@ -399,7 +400,8 @@ describe("MVP acceptance over HTTP", () => {
   });
 
   it("Rate limiting: public endpoints return 429 after the configured number of requests", async () => {
-    const limited = createApp({ db: handle.db, email, storage, config: { baseUrl: BASE, webUrl: "http://web.test", cookieSecure: false, now, rateLimits: { redirect: 2, public: 2, auth: 2 } } });
+    // Behind one trusted proxy the client address is the last X-Forwarded-For entry; spoofed extra entries do not create new buckets.
+    const limited = createApp({ db: handle.db, email, storage, config: { baseUrl: BASE, webUrl: "http://web.test", cookieSecure: false, now, rateLimits: { redirect: 2, public: 2, auth: 2 }, trustedProxyHops: 1 } });
     const hit = async (path: string, ip: string) => (await limited.request(BASE + path, { headers: { "x-forwarded-for": ip } })).status;
     expect(await hit("/r/nope", "10.0.0.1")).toBe(404);
     expect(await hit("/r/nope", "10.0.0.1")).toBe(404);
@@ -412,6 +414,7 @@ describe("MVP acceptance over HTTP", () => {
     expect(blocked.status).toBe(429);
     expect(blocked.headers.get("retry-after")).toBeTruthy();
     expect((await blocked.json()).error.code).toBe("rate_limited");
+    setTrustedProxyHops(0);
   });
 
   it("Billing: merchants see plan and usage; hard limits return 402 plan_limit", async () => {
@@ -526,7 +529,10 @@ describe("MVP acceptance over HTTP", () => {
     const onboarding = await call("/portal/payouts/connect/stripe", { method: "POST", token: affiliateToken });
     expect(onboarding.status).toBe(200);
     expect(onboarding.body.url).toContain("onboard");
-    expect((await call("/portal/me", { token: affiliateToken })).body.affiliate).toMatchObject({ payoutMethod: "stripe_connect", payoutProfileRef: onboarding.body.accountId });
+    const me = (await call("/portal/me", { token: affiliateToken })).body.affiliate;
+    expect(me).toMatchObject({ payoutMethod: "stripe_connect" });
+    expect(me.payoutProfileRef).toBeUndefined(); // provider references and merchant notes never reach the portal
+    expect((await call(`/v1/affiliates/${affiliateId}`, { token: ownerToken })).body.affiliate.payoutProfileRef).toBe(onboarding.body.accountId);
     expect((await call("/portal/payouts", { token: affiliateToken })).body.automatedMethods).toEqual(["stripe_connect"]);
 
     // settle what is payable, batch it, send it through the provider in the worker
@@ -592,8 +598,8 @@ describe("MVP acceptance over HTTP", () => {
     webhookCalls.length = 0;
     const sale = await call("/v1/conversions", { method: "POST", token: ownerToken, json: { source: "manual", externalOrderId: "ORDER-HOOK-1", offerId, amountMinor: 9_900, affiliateId, programId, reason: "phone order" } });
     expect(sale.status).toBe(201);
-    await runOnce({ db: handle.db, email, storage, webUrl: "http://web.test", now, payoutProviders: memoryPayouts, webhookFetch });
-    await runOnce({ db: handle.db, email, storage, webUrl: "http://web.test", now, payoutProviders: memoryPayouts, webhookFetch });
+    await runOnce({ db: handle.db, email, storage, webUrl: "http://web.test", now, payoutProviders: memoryPayouts, webhookFetch, webhookLookup });
+    await runOnce({ db: handle.db, email, storage, webUrl: "http://web.test", now, payoutProviders: memoryPayouts, webhookFetch, webhookLookup });
     const hit = webhookCalls.find((c) => c.headers["x-referly-event"] === "conversion.created");
     expect(hit).toBeTruthy();
     const body = JSON.parse(hit!.body);
@@ -655,8 +661,8 @@ describe("MVP acceptance over HTTP", () => {
     expect(sale.status).toBe(201);
     const sends = twilioCalls.filter((c) => c.url.endsWith("/Messages.json")).length;
     const emails = email.sent.length;
-    await runOnce({ db: handle.db, email, storage, webUrl: "http://web.test", baseUrl: BASE, now, payoutProviders: memoryPayouts, webhookFetch, text: textDeps });
-    await runOnce({ db: handle.db, email, storage, webUrl: "http://web.test", baseUrl: BASE, now, payoutProviders: memoryPayouts, webhookFetch, text: textDeps });
+    await runOnce({ db: handle.db, email, storage, webUrl: "http://web.test", baseUrl: BASE, now, payoutProviders: memoryPayouts, webhookFetch, webhookLookup, text: textDeps });
+    await runOnce({ db: handle.db, email, storage, webUrl: "http://web.test", baseUrl: BASE, now, payoutProviders: memoryPayouts, webhookFetch, webhookLookup, text: textDeps });
     expect(email.sent.length).toBeGreaterThan(emails);
     const texts = twilioCalls.filter((c) => c.url.endsWith("/Messages.json"));
     expect(texts.length).toBeGreaterThan(sends);
@@ -673,7 +679,7 @@ describe("MVP acceptance over HTTP", () => {
     const params = { MessageSid: sid, MessageStatus: "delivered", To: "whatsapp:+14155550123" };
     const form = new URLSearchParams(params).toString();
     const unsigned = await call(`/hooks/twilio/${tenantId}/status`, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: form });
-    expect(unsigned.status).toBe(400);
+    expect(unsigned.status).toBe(404); // unsigned, unknown tenant and not-connected all look the same
     const signed = await call(`/hooks/twilio/${tenantId}/status`, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded", "x-twilio-signature": textProviders.twilioSignature(TWILIO_TOKEN, statusUrl, params) }, body: form });
     expect(signed.status).toBe(204);
     expect((await call("/v1/messages/log?channel=whatsapp", { token: ownerToken })).body.messages[0]).toMatchObject({ status: "delivered" });
@@ -688,10 +694,88 @@ describe("MVP acceptance over HTTP", () => {
     expect(me.body.affiliate.textOptOutAt).toBeTruthy();
     const sale2 = await call("/v1/conversions", { method: "POST", token: ownerToken, json: { source: "manual", externalOrderId: "ORDER-TEXT-2", offerId, amountMinor: 5_000, affiliateId, programId, reason: "phone order" } });
     expect(sale2.status).toBe(201);
-    await runOnce({ db: handle.db, email, storage, webUrl: "http://web.test", baseUrl: BASE, now, payoutProviders: memoryPayouts, webhookFetch, text: textDeps });
+    await runOnce({ db: handle.db, email, storage, webUrl: "http://web.test", baseUrl: BASE, now, payoutProviders: memoryPayouts, webhookFetch, webhookLookup, text: textDeps });
     const skipped = await call("/v1/messages/log?channel=whatsapp&limit=1", { token: ownerToken });
     expect(skipped.body.messages[0]).toMatchObject({ status: "skipped", error: "affiliate opted out of text messages" });
     expect((await call("/v1/tenant/integrations/twilio", { method: "DELETE", token: ownerToken })).status).toBe(200);
+  });
+
+  it("Security: join flow never logs in an existing account, API keys are scoped, files cannot run script, tokens stay out of logs", async () => {
+    // 1. Public apply with an email that already has an account: no session, no downgrade, one generic answer.
+    const programToken = (await call(`/v1/programs/${programId}`, { token: ownerToken })).body.program.joinToken;
+    const takeover = await call(`/join/${programToken}/apply`, { method: "POST", json: { name: "Mallory", email: "sam@partner.io", password: "not-sams-password", acceptTerms: true } });
+    expect(takeover.status).toBe(409);
+    expect(takeover.body.token).toBeUndefined();
+    const legit = await call(`/join/${programToken}/apply`, { method: "POST", json: { name: "Sam", email: "sam@partner.io", password: "partnerpass1", acceptTerms: true } });
+    expect(legit.status).toBe(201);
+    expect(legit.body.membership.status).toBe("active"); // re-applying never demotes an active membership
+    expect(typeof legit.body.token).toBe("string");
+
+    // 2. API key scopes: a read-only key cannot write, and unknown scopes are refused.
+    expect((await call("/v1/tenant/api-keys", { method: "POST", token: ownerToken, json: { name: "bad", scopes: ["team.manage"] } })).status).toBe(400);
+    const ro = await call("/v1/tenant/api-keys", { method: "POST", token: ownerToken, json: { name: "Reporting", scopes: ["read"] } });
+    expect(ro.status).toBe(201);
+    expect((await call("/v1/affiliates", { token: ro.body.secret })).status).toBe(200);
+    expect((await call("/v1/conversions", { method: "POST", token: ro.body.secret, json: { externalOrderId: "RO-1", offerId, amountMinor: 100 } })).status).toBe(403);
+    expect((await call("/v1/tenant/api-keys", { method: "POST", token: ro.body.secret, json: { name: "minted" } })).status).toBe(403);
+    expect((await call("/v1/webhooks", { method: "POST", token: ro.body.secret, json: { url: "https://hooks.example.test/x", events: ["*"] } })).status).toBe(403);
+    // the default checkout key can still post conversions but not reverse commissions
+    expect((await call("/v1/commissions/settle", { method: "POST", token: apiKey })).status).toBe(403);
+
+    // 3. Uploaded files: the declared type must match the bytes, and SVG is download-only under a sandboxed CSP.
+    const fakePng = new FormData();
+    fakePng.append("file", new File([new TextEncoder().encode("<svg onload=alert(1)></svg>")], "x.png", { type: "image/png" }));
+    const mismatch = await app.request(BASE + "/v1/assets/upload", { method: "POST", headers: { authorization: `Bearer ${ownerToken}` }, body: fakePng });
+    expect(mismatch.status).toBe(400);
+    const svg = new FormData();
+    svg.append("file", new File([new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg"><circle r="4"/></svg>')], "logo.svg", { type: "image/svg+xml" }));
+    const up = await app.request(BASE + "/v1/assets/upload", { method: "POST", headers: { authorization: `Bearer ${ownerToken}` }, body: svg });
+    expect(up.status).toBe(201);
+    const served = await app.request((await up.json()).file.url);
+    expect(served.status).toBe(200);
+    expect(served.headers.get("content-disposition")).toMatch(/^attachment/);
+    expect(served.headers.get("content-security-policy")).toContain("sandbox");
+    expect(served.headers.get("x-content-type-options")).toBe("nosniff");
+    const scripted = new FormData();
+    scripted.append("file", new File([new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>')], "evil.svg", { type: "image/svg+xml" }));
+    expect((await app.request(BASE + "/v1/assets/upload", { method: "POST", headers: { authorization: `Bearer ${ownerToken}` }, body: scripted })).status).toBe(400);
+    expect((await call("/v1/tenant", { token: ownerToken })).headers.get("x-frame-options")).toBe("DENY");
+
+    // 4. Webhook endpoints must be public hosts; JSON bodies are capped.
+    expect((await call("/v1/webhooks", { method: "POST", token: ownerToken, json: { url: "http://169.254.169.254/latest/meta-data/", events: ["*"] } })).status).toBe(400);
+    expect((await call("/v1/webhooks", { method: "POST", token: ownerToken, json: { url: "https://localhost:4000/admin", events: ["*"] } })).status).toBe(400);
+    const huge = await app.request(BASE + "/v1/offers", { method: "POST", headers: { authorization: `Bearer ${ownerToken}`, "content-type": "application/json" }, body: JSON.stringify({ name: "x".repeat(300 * 1024) }) });
+    expect(huge.status).toBe(413);
+
+    // 5. One-time links are never stored in the message log; the portal hides merchant-internal fields.
+    await call("/v1/auth/forgot-password", { method: "POST", json: { email: "priya@coach.co" } });
+    await runOnce({ db: handle.db, email, storage, webUrl: "http://web.test", now, payoutProviders: memoryPayouts, webhookFetch, webhookLookup, text: textDeps });
+    const resetMail = email.sent.filter((m) => m.subject === "Reset your password").at(-1)!;
+    const resetToken = /reset-password\?token=([A-Za-z0-9]+)/.exec(resetMail.body)![1]!;
+    const logs = await call("/v1/messages/log?limit=20", { token: ownerToken });
+    const logged = logs.body.messages.find((m: any) => m.templateKey === "password_reset");
+    expect(logged.body).toContain("[one-time link not stored]");
+    expect(JSON.stringify(logs.body)).not.toContain(resetToken);
+    await call(`/v1/affiliates/${affiliateId}`, { method: "PATCH", token: ownerToken, json: { notes: "internal: watch for self-referrals" } });
+    const portalMe = (await call("/portal/me", { token: affiliateToken })).body.affiliate;
+    expect(portalMe.notes).toBeUndefined();
+    expect(portalMe.tags).toBeUndefined();
+
+    // 6. Password change signs out other sessions and requires the current password.
+    const second = (await call("/v1/auth/login", { method: "POST", json: { email: "priya@coach.co", password: "supersecret1" } })).body.token;
+    expect((await call("/v1/tenant/me/password", { method: "POST", token: ownerToken, json: { currentPassword: "wrong", newPassword: "evenmoresecret2" } })).status).toBe(401);
+    expect((await call("/v1/tenant/me/password", { method: "POST", token: ownerToken, json: { currentPassword: "supersecret1", newPassword: "evenmoresecret2" } })).status).toBe(200);
+    expect((await call("/v1/tenant/me", { token: second })).status).toBe(401);
+    expect((await call("/v1/tenant/me", { token: ownerToken })).status).toBe(200);
+    expect((await call("/v1/tenant/me/password", { method: "POST", token: ownerToken, json: { currentPassword: "evenmoresecret2", newPassword: "supersecret1" } })).status).toBe(200);
+
+    // 7. A suspended workspace's API keys stop working.
+    const adminToken = (await call("/v1/auth/login", { method: "POST", json: { email: "root@platform.test", password: "rootpass123" } })).body.token;
+    const tenantId = (await call("/v1/tenant", { token: ownerToken })).body.tenant.id;
+    expect((await call(`/admin/tenants/${tenantId}`, { method: "PATCH", token: adminToken, json: { status: "suspended" } })).status).toBe(200);
+    expect((await call("/v1/affiliates", { token: apiKey })).status).toBe(403);
+    expect((await call(`/admin/tenants/${tenantId}`, { method: "PATCH", token: adminToken, json: { status: "active" } })).status).toBe(200);
+    expect((await call("/v1/affiliates", { token: apiKey })).status).toBe(200);
   });
 
   it("Validation and permissions errors are JSON with codes", async () => {

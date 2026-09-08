@@ -6,6 +6,7 @@ export * from "./money";
 export * from "./errors";
 export * from "./context";
 export * from "./statemachine";
+export * from "./urls";
 
 export * as audit from "./services/audit";
 export * as auth from "./services/auth";
@@ -37,4 +38,4 @@ export * as webhooks from "./services/webhooks";
 export * as reporting from "./services/reporting";
 export * as payoutProviders from "./services/payoutProviders";
 export * as textProviders from "./services/textProviders";
-export { encryptJson, decryptJson } from "./crypto";
+export { encryptJson, decryptJson, assertIntegrationSecret } from "./crypto";

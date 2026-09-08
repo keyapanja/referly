@@ -1,5 +1,6 @@
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
+import { httpUrl } from "../urls";
 import type { DbLike } from "../db/client";
 import { withTx } from "../db/client";
 import { affiliatePrograms, assetPermissions, assets, programOffers, type Asset, type AssetPermission } from "../db/schema";
@@ -30,7 +31,7 @@ export const createAssetSchema = z
   .object({
     type: z.enum(ASSET_TYPES),
     title: z.string().min(1).max(200),
-    url: z.string().url().optional(),
+    url: httpUrl.optional(),
     body: z.string().max(20000).optional(),
     usageInstructions: z.string().max(5000).optional(),
     visibility: z.enum(["all", "restricted"]).default("all"),
@@ -77,7 +78,7 @@ export async function createAsset(db: DbLike, ctx: TenantContext, rawInput: Crea
 
 export const updateAssetSchema = z.object({
   title: z.string().min(1).max(200).optional(),
-  url: z.string().url().nullable().optional(),
+  url: httpUrl.nullable().optional(),
   body: z.string().max(20000).nullable().optional(),
   usageInstructions: z.string().max(5000).nullable().optional(),
   visibility: z.enum(["all", "restricted"]).optional(),

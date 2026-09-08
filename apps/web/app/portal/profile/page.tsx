@@ -11,6 +11,7 @@ export default function PortalProfile() {
   const [form, setForm] = useState<any>(null);
   const [payout, setPayout] = useState({ method: "bank_transfer", profileRef: "", masked: "" });
   const [texts, setTexts] = useState<{ channel: string; consent: boolean } | null>(null);
+  const [pw, setPw] = useState({ currentPassword: "", newPassword: "" });
 
   useEffect(() => {
     if (data && !form) setForm({ name: data.affiliate.name, phone: data.affiliate.phone ?? "", company: data.affiliate.company ?? "", website: data.affiliate.channels?.website ?? "", social: data.affiliate.channels?.social ?? "" });
@@ -138,6 +139,27 @@ export default function PortalProfile() {
             </form>
           ) : null}
         </div>
+      </div>
+      <div className="card">
+        <h2>Your password</h2>
+        <p className="muted">Changing it signs out every other session of yours.</p>
+        <form
+          onSubmit={async (e) => {
+            e.preventDefault();
+            const ok = await run(() => api("/portal/password", { method: "POST", json: pw }), "Password changed.");
+            if (ok) setPw({ currentPassword: "", newPassword: "" });
+          }}
+        >
+          <div className="row">
+            <Field label="Current password">
+              <input type="password" value={pw.currentPassword} onChange={(e) => setPw({ ...pw, currentPassword: e.target.value })} required autoComplete="current-password" />
+            </Field>
+            <Field label="New password" help="At least 8 characters.">
+              <input type="password" value={pw.newPassword} onChange={(e) => setPw({ ...pw, newPassword: e.target.value })} required minLength={8} autoComplete="new-password" />
+            </Field>
+          </div>
+          <button disabled={busy}>Change password</button>
+        </form>
       </div>
       <div className="card">
         <h2>Programs and terms</h2>

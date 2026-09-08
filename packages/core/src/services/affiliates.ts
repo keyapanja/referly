@@ -10,7 +10,8 @@ import { writeAudit, snapshot } from "./audit";
 import { assertWithinLimit } from "./plans";
 import { emitEvent } from "./events";
 import { AFFILIATE_TRANSITIONS, assertTransition, type AffiliateStatus } from "../statemachine";
-import { hashPassword } from "./auth";
+import { hashPassword, verifyPassword } from "./auth";
+import { httpUrl } from "../urls";
 import { getProgram } from "./programs";
 import { percentToBps } from "../money";
 import { normalizePhone, TEXT_CHANNELS, type TextChannel } from "./textProviders";
@@ -36,14 +37,14 @@ export type ApplyInput = z.input<typeof applySchema>;
  * Creates the affiliate (status depends on program approvalMode), their portal user, and
  * their pending/active program membership with the accepted terms version recorded.
  */
-export async function applyToProgram(db: DbLike, ctx: TenantContext, programId: string, rawInput: ApplyInput): Promise<{ affiliate: Affiliate; membership: AffiliateProgram }> {
+export async function applyToProgram(db: DbLike, ctx: TenantContext, programId: string, rawInput: ApplyInput): Promise<{ affiliate: Affiliate; membership: AffiliateProgram; authenticated: boolean }> {
   const input = applySchema.parse(rawInput);
   const program = await getProgram(db, ctx, programId);
   if (program.status !== "active") throw validation("program is not accepting applications");
   if (program.approvalMode === "invite_only") throw validation("program is invite-only");
 
   return withTx(db, async (tx) => {
-    const affiliate = await findOrCreateAffiliate(tx, ctx, {
+    const { affiliate, authenticated } = await findOrCreateAffiliate(tx, ctx, {
       name: input.name,
       email: input.email,
       password: input.password,
@@ -56,7 +57,7 @@ export async function applyToProgram(db: DbLike, ctx: TenantContext, programId: 
     });
     const membership = await upsertMembership(tx, ctx, affiliate, program, program.approvalMode === "auto" ? "active" : "pending");
     await emitEvent(tx, ctx, affiliate.status === "active" ? "affiliate.approved" : "affiliate.applied", { type: "affiliate", id: affiliate.id }, { programId });
-    return { affiliate, membership };
+    return { affiliate, membership, authenticated };
   });
 }
 
@@ -110,7 +111,7 @@ export async function acceptInvite(db: DbLike, ctx: TenantContext, invite: Invit
   const program = await getProgram(db, ctx, invite.programId);
 
   return withTx(db, async (tx) => {
-    const affiliate = await findOrCreateAffiliate(tx, ctx, {
+    const { affiliate, authenticated } = await findOrCreateAffiliate(tx, ctx, {
       name: input.name,
       email: invite.email,
       password: input.password,
@@ -121,7 +122,7 @@ export async function acceptInvite(db: DbLike, ctx: TenantContext, invite: Invit
     const membership = await upsertMembership(tx, ctx, affiliate, program, "active");
     await tx.update(invites).set({ status: "accepted", acceptedAffiliateId: affiliate.id }).where(eq(invites.id, invite.id));
     await emitEvent(tx, ctx, "affiliate.approved", { type: "affiliate", id: affiliate.id }, { programId: program.id, via: "invite" });
-    return { affiliate: { ...affiliate, status: "active" }, membership };
+    return { affiliate: { ...affiliate, status: "active" }, membership, authenticated };
   });
 }
 
@@ -144,7 +145,7 @@ export async function createAffiliate(db: DbLike, ctx: TenantContext, rawInput: 
   requirePerm(ctx, "affiliates.write");
   const input = createAffiliateSchema.parse(rawInput);
   return withTx(db, async (tx) => {
-    const affiliate = await findOrCreateAffiliate(tx, ctx, { ...input, source: "manual", initialStatus: "active" });
+    const { affiliate } = await findOrCreateAffiliate(tx, ctx, { ...input, source: "manual", initialStatus: "active" });
     for (const programId of input.programIds) {
       const program = await getProgram(tx, ctx, programId);
       await upsertMembership(tx, ctx, affiliate, program, "active");
@@ -244,9 +245,12 @@ export async function updateAffiliate(db: DbLike, ctx: TenantContext, affiliateI
     .set(set)
     .where(and(eq(affiliates.id, affiliateId), eq(affiliates.tenantId, ctx.tenantId)))
     .returning();
-  await writeAudit(db, ctx, { entityType: "affiliate", entityId: affiliateId, action: "updated", before: snapshot(before), after: snapshot(after!) });
+  await writeAudit(db, ctx, { entityType: "affiliate", entityId: affiliateId, action: "updated", before: snapshot(before, AUDITED_AFFILIATE_FIELDS), after: snapshot(after!, AUDITED_AFFILIATE_FIELDS) });
   return after!;
 }
+
+/** Fields copied into audit rows. Payout references, phone and application answers stay out. */
+const AUDITED_AFFILIATE_FIELDS: (keyof Affiliate)[] = ["id", "name", "email", "company", "status", "tags", "notes", "textChannel", "payoutMethod", "updatedAt"];
 
 /** Inbound STOP/START from the provider (keyword compliance). Matches the affiliate by phone. */
 export async function setTextOptOutByPhone(db: DbLike, ctx: TenantContext, phone: string, optedOut: boolean): Promise<Affiliate | null> {
@@ -396,21 +400,40 @@ interface FindOrCreateInput {
   initialStatus: AffiliateStatus;
 }
 
-async function findOrCreateAffiliate(db: DbLike, ctx: TenantContext, input: FindOrCreateInput): Promise<Affiliate> {
+/**
+ * `authenticated` is true only when this call proved the caller owns the account: it created the
+ * user, or the supplied password matched an existing user. Public routes must not issue a
+ * session otherwise (an existing email must never be a login without its password).
+ */
+async function findOrCreateAffiliate(db: DbLike, ctx: TenantContext, input: FindOrCreateInput): Promise<{ affiliate: Affiliate; authenticated: boolean }> {
   const email = input.email.trim().toLowerCase();
   const existing = await db.query.affiliates.findFirst({ where: and(eq(affiliates.tenantId, ctx.tenantId), eq(affiliates.email, email)) });
   if (existing) {
     if (existing.status === "suspended") throw conflict("this affiliate account is suspended");
-    return existing;
+    if (input.source === "application") {
+      // A public application for an email we already know: only the existing password gets in.
+      const user = existing.userId ? await db.query.users.findFirst({ where: eq(users.id, existing.userId) }) : null;
+      const ok = user ? await verifyPassword(input.password ?? "", user.passwordHash) : false;
+      if (!ok) throw conflict("an account with this email already exists; sign in with its password, or use the reset link if you forgot it");
+      return { affiliate: existing, authenticated: true };
+    }
+    if (input.source === "invite" && input.password) {
+      const user = existing.userId ? await db.query.users.findFirst({ where: eq(users.id, existing.userId) }) : null;
+      if (user) return { affiliate: existing, authenticated: await verifyPassword(input.password, user.passwordHash) };
+    }
+    return { affiliate: existing, authenticated: false };
   }
   if (input.initialStatus === "active") await assertWithinLimit(db, ctx, "activeAffiliates");
 
   let userId: string | null = null;
+  let authenticated = false;
   if (input.password) {
     const existingUser = await db.query.users.findFirst({ where: and(eq(users.tenantId, ctx.tenantId), eq(users.email, email)) });
-    if (existingUser && existingUser.role !== "affiliate") throw conflict("this email belongs to a team member of this workspace");
-    if (existingUser) userId = existingUser.id;
-    else {
+    if (existingUser && existingUser.role !== "affiliate") throw conflict("an account with this email already exists in this workspace");
+    if (existingUser) {
+      userId = existingUser.id;
+      authenticated = await verifyPassword(input.password, existingUser.passwordHash);
+    } else {
       const [user] = await db
         .insert(users)
         .values({
@@ -426,6 +449,7 @@ async function findOrCreateAffiliate(db: DbLike, ctx: TenantContext, input: Find
         })
         .returning();
       userId = user!.id;
+      authenticated = true;
     }
   }
 
@@ -450,10 +474,13 @@ async function findOrCreateAffiliate(db: DbLike, ctx: TenantContext, input: Find
     })
     .returning();
   await writeAudit(db, ctx, { entityType: "affiliate", entityId: affiliate!.id, action: "created", after: snapshot(affiliate!, ["id", "email", "status", "source"]) });
-  return affiliate!;
+  return { affiliate: affiliate!, authenticated };
 }
 
-async function upsertMembership(db: DbLike, ctx: TenantContext, affiliate: Affiliate, program: typeof programs.$inferSelect, status: "pending" | "active"): Promise<AffiliateProgram> {
+async function upsertMembership(db: DbLike, ctx: TenantContext, affiliate: Affiliate, program: typeof programs.$inferSelect, requested: "pending" | "active"): Promise<AffiliateProgram> {
+  // Re-applying never demotes an active membership back to pending.
+  const current = await db.query.affiliatePrograms.findFirst({ where: and(eq(affiliatePrograms.affiliateId, affiliate.id), eq(affiliatePrograms.programId, program.id)) });
+  const status = current?.status === "active" ? "active" : requested;
   const [row] = await db
     .insert(affiliatePrograms)
     .values({

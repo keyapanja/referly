@@ -1,5 +1,6 @@
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
+import { httpUrl } from "../urls";
 import type { DbLike } from "../db/client";
 import { withTx } from "../db/client";
 import { tenants, users, type Tenant, type User } from "../db/schema";
@@ -90,10 +91,10 @@ export const updateTenantSchema = z
   .object({
     name: z.string().min(1).max(120),
     legalName: z.string().max(200).nullable(),
-    website: z.string().url().nullable(),
+    website: httpUrl.nullable(),
     supportEmail: z.string().email().nullable(),
     description: z.string().max(2000).nullable(),
-    logoUrl: z.string().url().nullable(),
+    logoUrl: httpUrl.nullable(),
     businessType: z.string().nullable(),
     currency: z.string().length(3),
     timezone: z.string(),
@@ -103,7 +104,7 @@ export const updateTenantSchema = z
       .object({
         primaryColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
         accentColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
-        faviconUrl: z.string().url().optional(),
+        faviconUrl: httpUrl.optional(),
         emailFooter: z.string().max(500).optional(),
       })
       .partial(),

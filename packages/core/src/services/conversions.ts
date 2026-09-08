@@ -311,10 +311,12 @@ export async function getConversion(db: DbLike, ctx: TenantContext, conversionId
   return row;
 }
 
-export async function findByExternalId(db: DbLike, ctx: TenantContext, source: string, externalOrderId: string): Promise<Conversion | null> {
+/** Same order id from any source is the same sale: a webhook and an API post for one order must not pay twice. */
+export async function findByExternalId(db: DbLike, ctx: TenantContext, _source: string, externalOrderId: string): Promise<Conversion | null> {
   return (
     (await db.query.conversions.findFirst({
-      where: and(eq(conversions.tenantId, ctx.tenantId), eq(conversions.source, source), eq(conversions.externalOrderId, externalOrderId)),
+      where: and(eq(conversions.tenantId, ctx.tenantId), eq(conversions.externalOrderId, externalOrderId)),
+      orderBy: (c, { asc }) => [asc(c.createdAt)],
     })) ?? null
   );
 }
