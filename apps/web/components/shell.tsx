@@ -125,18 +125,19 @@ export function Shell({ mode, children }: { mode: "merchant" | "portal" | "platf
             <small>{whoLabel}</small>
           </div>
         </div>
-        {nav.map((group) => (
-          <div key={group.section}>
-            <div className="section">{group.section}</div>
-            {group.items.map(([href, label, icon]) => (
-              <Link key={href} href={href} className={`nav ${isActive(href) ? "active" : ""}`}>
-                <Icon name={icon} />
-                {label}
-              </Link>
-            ))}
-          </div>
-        ))}
-        <div className="spacer" />
+        <nav className="nav-scroll" aria-label="Main">
+          {nav.map((group) => (
+            <div key={group.section}>
+              <div className="section">{group.section}</div>
+              {group.items.map(([href, label, icon]) => (
+                <Link key={href} href={href} className={`nav ${isActive(href) ? "active" : ""}`}>
+                  <Icon name={icon} />
+                  {label}
+                </Link>
+              ))}
+            </div>
+          ))}
+        </nav>
         <div className="user">
           <div className="avatar">{who ? initials(who) : "·"}</div>
           <div className="who">

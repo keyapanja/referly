@@ -110,11 +110,23 @@ code {
   position: sticky;
   top: 0;
   height: 100vh;
+  height: 100dvh;
   display: flex;
   flex-direction: column;
   padding: 18px 12px 12px;
   background: var(--surface);
   border-right: 1px solid var(--border);
+}
+/* Brand and user block stay pinned; the nav groups between them scroll when the viewport is short. */
+.sidebar .nav-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  margin: 0 -4px;
+  padding: 0 4px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
 }
 .sidebar .brand {
   display: flex;
@@ -193,9 +205,6 @@ code {
 }
 .sidebar a.nav.active svg {
   color: var(--accent);
-}
-.sidebar .spacer {
-  flex: 1;
 }
 .sidebar .user {
   display: flex;
@@ -298,8 +307,10 @@ code {
     width: 100%;
     padding-bottom: 8px;
   }
+  .sidebar .nav-scroll {
+    display: contents;
+  }
   .sidebar .section,
-  .sidebar .spacer,
   .sidebar .user .who {
     display: none;
   }
