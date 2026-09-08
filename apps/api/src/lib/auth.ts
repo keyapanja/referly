@@ -3,6 +3,7 @@ import { getCookie, setCookie, deleteCookie } from "hono/cookie";
 import { auth, affiliates, tenants, tenantContext, unauthenticated, forbidden, type TenantContext, type Role } from "@referly/core";
 import type { AppDeps } from "../app";
 import { scopeRequest } from "./rls";
+import type { Logger } from "./log";
 
 export const SESSION_COOKIE = "referly_session";
 
@@ -12,6 +13,9 @@ export type AppEnv = {
     now: () => Date;
     ctx: TenantContext;
     principal: Principal;
+    /** Set on every request; echoed in the x-request-id header and every log line. */
+    requestId: string;
+    log: Logger;
   };
 };
 

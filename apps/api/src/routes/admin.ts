@@ -24,6 +24,7 @@ export function adminRoutes() {
     const userId = p.kind === "user" ? p.userId : "";
     return c.json({ tenant: await platform.updateTenantByAdmin(c.get("deps").db, { userId }, c.req.param("id"), await c.req.json(), c.get("now")()) });
   });
+  r.get("/ops", async (c) => c.json(await platform.opsSummary(c.get("deps").db, c.get("now")())));
   r.get("/jobs", async (c) => c.json({ jobs: await platform.listProblemJobs(c.get("deps").db) }));
   r.post("/jobs/:id/retry", async (c) => c.json({ job: await platform.retryJob(c.get("deps").db, c.req.param("id"), c.get("now")()) }));
   return r;

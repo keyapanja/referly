@@ -52,6 +52,9 @@ api.yourdomain.com {
 | `PLATFORM_ADMIN_EMAIL`, `PLATFORM_ADMIN_PASSWORD`, `PLATFORM_ADMIN_NAME` | api | Creates the platform admin account on boot if it does not exist (idempotent). Sign in at `WEB_URL/login`; admins land on `/admin`. |
 | `PLATFORM_SUPPORT_EMAIL` | api | Shown to merchants on the Plan and usage card for plan changes. |
 | `INTEGRATION_SECRET` | api | Key (16+ chars) for encrypting merchants' payout-provider and Twilio credentials and webhook signing secrets at rest (AES-256-GCM). The API refuses to start in production without it; rotate by re-connecting providers. |
+| `LOG_LEVEL`, `LOG_FORMAT` | api | `debug`/`info`/`warn`/`error` (default `info`); `json` (default in production) or `pretty`. |
+| `METRICS_TOKEN` | api | Bearer token for `GET /metrics`. Required in production; without it the endpoint returns 404. |
+| `ERROR_REPORT_URL`, `ERROR_REPORT_TOKEN` | api | Optional sink for unhandled errors: one JSON POST per error (throttled to 30/min) with the request or job id, works with Slack incoming webhooks and most alerting services. |
 | `TRUSTED_PROXY_HOPS` | api | Number of reverse proxies in front of the API (Caddy/nginx/a load balancer). Rate limits and click IP hashes use the socket address by default; set `1` (or more) so the right-most `X-Forwarded-For` entries from your proxies are used instead. Never trust a header a client can set. |
 | `TEXT_FALLBACK` | api | What to do for workspaces with no Twilio account of their own: `console` (default outside production; prints texts to stdout), `none` (default in production; texts are skipped and logged as such) or `twilio` (a platform-wide account via `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_SMS`, `TWILIO_FROM_WHATSAPP`). |
 | `STORAGE_PROVIDER` | api | `local` (default; files under `FILES_DIR`, served at `BASE_URL/files/...`) or `s3`. |
@@ -118,6 +121,15 @@ Merchants connect their own Twilio account in Settings. Credentials are verified
 In the Twilio console, point the sender's messaging webhook at `BASE_URL/hooks/twilio/<tenantId>/inbound` and the status callback at `BASE_URL/hooks/twilio/<tenantId>/status` (both are shown in Settings once connected). Requests are accepted only with a valid `X-Twilio-Signature` for that workspace's auth token (or `TWILIO_AUTH_TOKEN` with the platform fallback). Inbound STOP/UNSUBSCRIBE opt the number out and START/UNSTOP opt it back in; status callbacks mark logs delivered, undelivered or failed.
 
 WhatsApp: Meta requires business-initiated messages outside a 24-hour conversation to use an approved template. Register templates with Twilio whose text matches your *SMS / WhatsApp* templates; Twilio rejects unapproved free-form sends (error 63016), which shows on the message log. Automation rules can also send a custom text with the *Send an SMS/WhatsApp* action.
+
+## Observability
+
+- **Request ids.** Every response carries `x-request-id` (an incoming one from your proxy is kept). Every error body includes `requestId`, and every log line for that request carries it, so a user-reported id finds the whole story.
+- **Logs** are one JSON object per line on stdout in production: `http_request` (method, route, status, ms, tenant, principal kind, ip), `job_done` / `job_failed` (job id, type, tenant, attempt, ms), `unhandled_error`, `worker_started`, `api_listening`. Credentials, tokens and signatures are redacted by field name. Ship stdout with your platform's log agent; no file rotation is needed.
+- **Metrics** at `GET /metrics` in Prometheus text format, protected by `METRICS_TOKEN`: request counts and latency histograms by route and status class, job counts and durations by type and outcome, unhandled errors by origin, and gauges read from the database on every scrape: queue depth by status and type, queue lag (age of the oldest due job), stuck jobs, dead webhook deliveries, paused endpoints, failed messages, worker heartbeat age. Alert on `referly_jobs_lag_seconds > 300`, `referly_jobs_queue{status="dead"} > 0`, `referly_jobs_stuck > 0`, and `referly_worker_heartbeat_age_seconds > 60`.
+- **Health.** `GET /health` is liveness (process up, database reachable). `GET /health/ready` also requires applied migrations and a worker poll in the last 60 s; point load balancers and the compose healthcheck at it.
+- **Operations panel.** Platform admins see the same queue and delivery numbers on the admin overview, with dead jobs one click away for retry.
+- **Errors.** Unhandled request and job errors are logged with their ids and, when `ERROR_REPORT_URL` is set, posted there. Uncaught exceptions are reported and the process exits so the supervisor restarts it.
 
 ## Migrations
 

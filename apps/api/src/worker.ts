@@ -3,6 +3,9 @@ import { schema, type Db, type DbLike, type Job, type TenantContext, type Lookup
 import { jobs, messaging, commissions, systemContext, events as eventsMod, tenants as tenantsSvc, exportsSvc, withTenantScope, withRlsBypass, campaigns as campaignsSvc, automation, integrations, webhooks } from "@referly/core";
 import { PRIVATE_PREFIX, type FileStorage } from "./storage";
 import { textStatusUrl } from "./text";
+import { log as rootLog, type Logger } from "./lib/log";
+import { jobDuration, jobsProcessed } from "./lib/metrics";
+import type { ErrorReporter } from "./lib/report";
 
 const { affiliates: affiliatesTable, offers: offersTable, programs: programsTable, tenants: tenantsTable } = schema;
 
@@ -25,6 +28,39 @@ export interface WorkerDeps {
   text?: integrations.TextDeps;
   /** API origin, for provider status callbacks. */
   baseUrl?: string;
+  reporter?: ErrorReporter;
+  log?: Logger;
+}
+
+/**
+ * Every handler is timed and logged with its job id; failures count as `retry` or `dead`
+ * (the job service decides which by attempts), and dead letters go to the error reporter.
+ */
+function instrument(handlers: Record<string, jobs.JobHandler>, deps: WorkerDeps): Record<string, jobs.JobHandler> {
+  const wlog = (deps.log ?? rootLog).child({ component: "worker" });
+  const out: Record<string, jobs.JobHandler> = {};
+  for (const [type, fn] of Object.entries(handlers)) {
+    out[type] = async (job) => {
+      const start = performance.now();
+      const jlog = wlog.child({ jobId: job.id, jobType: type, tenantId: job.tenantId ?? undefined, attempt: job.attempts, maxAttempts: job.maxAttempts });
+      try {
+        await fn(job);
+        const ms = performance.now() - start;
+        jobsProcessed.inc({ type, outcome: "ok" });
+        jobDuration.observe({ type }, ms / 1000);
+        jlog.info("job_done", { ms: Math.round(ms) });
+      } catch (err) {
+        const ms = performance.now() - start;
+        const dead = job.attempts >= job.maxAttempts;
+        jobsProcessed.inc({ type, outcome: dead ? "dead" : "retry" });
+        jobDuration.observe({ type }, ms / 1000);
+        if (dead) await deps.reporter?.report(err, { origin: "worker", jobId: job.id, jobType: type, tenantId: job.tenantId ?? undefined });
+        else jlog.warn("job_failed", { ms: Math.round(ms), err, willRetry: true });
+        throw err;
+      }
+    };
+  }
+  return out;
 }
 
 /** Event → template mapping. Kept as data so it is inspectable (PRD "explainable automation"). */
@@ -185,33 +221,42 @@ function formatMinor(minor: number): string {
 
 /** Drain everything due right now. Used by tests and the interval loop. */
 export async function runOnce(deps: WorkerDeps): Promise<number> {
-  return jobs.runDueJobs(deps.db, createHandlers(deps), (deps.now ?? (() => new Date()))());
+  return jobs.runDueJobs(deps.db, instrument(createHandlers(deps), deps), (deps.now ?? (() => new Date()))());
 }
 
 export function startWorker(deps: WorkerDeps, opts: { pollMs?: number; settleEveryMs?: number } = {}) {
   const pollMs = opts.pollMs ?? 2000;
   const settleEveryMs = opts.settleEveryMs ?? 15 * 60 * 1000;
+  const wlog = (deps.log ?? rootLog).child({ component: "worker" });
+  const handlers = instrument(createHandlers(deps), deps);
   let running = false;
+  let lastTickAt: Date | null = null;
   const poll = setInterval(async () => {
     if (running) return;
     running = true;
     try {
-      await runOnce(deps);
+      const n = await jobs.runDueJobs(deps.db, handlers, (deps.now ?? (() => new Date()))());
+      lastTickAt = new Date();
+      if (n) wlog.debug("worker_tick", { processed: n });
     } catch (err) {
-      console.error("[worker] poll failed", err);
+      await deps.reporter?.report(err, { origin: "worker" });
     } finally {
       running = false;
     }
   }, pollMs);
   const settle = setInterval(() => {
     const key = `settle:${Math.floor(Date.now() / settleEveryMs)}`;
-    jobs.enqueueJob(deps.db, { type: "settle_holding_periods", idempotencyKey: key }).catch((err) => console.error("[worker] enqueue settle failed", err));
+    jobs.enqueueJob(deps.db, { type: "settle_holding_periods", idempotencyKey: key }).catch((err) => wlog.error("enqueue_settle_failed", { err }));
   }, settleEveryMs);
   jobs.enqueueJob(deps.db, { type: "settle_holding_periods", idempotencyKey: `settle:boot:${Date.now()}` }).catch(() => {});
+  wlog.info("worker_started", { pollMs, settleEveryMs, handlers: Object.keys(handlers) });
   return {
     stop() {
       clearInterval(poll);
       clearInterval(settle);
+      wlog.info("worker_stopped");
     },
+    /** Last successful poll; readiness reports the worker stale when this stops moving. */
+    lastTickAt: () => lastTickAt,
   };
 }

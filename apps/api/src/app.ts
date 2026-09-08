@@ -1,7 +1,12 @@
 import { Hono } from "hono";
 import { sql } from "drizzle-orm";
+import { randomBytes } from "node:crypto";
 import { cors } from "hono/cors";
-import { logger } from "hono/logger";
+import { platform, withRlsBypass } from "@referly/core";
+import { log as rootLog, type Logger } from "./lib/log";
+import { httpDuration, httpRequests, renderMetrics, routeLabel } from "./lib/metrics";
+import { createErrorReporter, type ErrorReporter } from "./lib/report";
+import { clientIp } from "./lib/ratelimit";
 import type { Db, DbLike, integrations, Lookup } from "@referly/core";
 import type { messaging } from "@referly/core";
 import { errorHandler } from "./lib/errors";
@@ -45,6 +50,10 @@ export interface AppConfig {
   rateLimits?: { redirect: number; public: number; auth: number };
   /** Number of reverse proxies in front of the API whose X-Forwarded-For entries are trusted (0 = use the socket address). */
   trustedProxyHops?: number;
+  /** Bearer token for GET /metrics. Required in production; outside production the endpoint is open. */
+  metricsToken?: string;
+  /** Readiness inputs beyond the database: the worker's last poll, and how long silence is tolerated. */
+  readiness?: { workerHeartbeat?: () => Date | null; maxWorkerSilenceMs?: number };
 }
 
 /** JSON bodies are small; only the multipart upload route may carry a real file. */
@@ -64,9 +73,14 @@ export interface AppDeps {
   webhookLookup?: Lookup;
   /** Text (SMS/WhatsApp) provider construction and platform fallback. */
   text?: integrations.TextDeps;
+  /** Unhandled-error sink (logs, and posts to ERROR_REPORT_URL when configured). */
+  reporter?: ErrorReporter;
+  log?: Logger;
 }
 
-export function createApp(deps: AppDeps & { db: Db }) {
+export function createApp(rawDeps: AppDeps & { db: Db }) {
+  const deps: AppDeps & { db: Db } = { ...rawDeps, reporter: rawDeps.reporter ?? createErrorReporter(), log: rawDeps.log ?? rootLog };
+  const appLog = deps.log!;
   const app = new Hono<AppEnv>();
   app.onError(errorHandler);
   if (deps.config.trustedProxyHops !== undefined) setTrustedProxyHops(deps.config.trustedProxyHops);
@@ -75,22 +89,90 @@ export function createApp(deps: AppDeps & { db: Db }) {
     const max = c.req.path === "/v1/assets/upload" ? MAX_UPLOAD_BYTES + 64 * 1024 : JSON_BODY_LIMIT;
     return bodyLimit({ maxSize: max, onError: (ctx) => ctx.json({ error: { code: "payload_too_large", message: `request body exceeds ${max} bytes` } }, 413) })(c, next);
   });
-  app.use("*", cors({ origin: deps.config.webUrl, credentials: true }));
-  if (process.env.NODE_ENV !== "test") app.use("*", logger());
+  app.use("*", cors({ origin: deps.config.webUrl, credentials: true, exposeHeaders: ["x-request-id", "retry-after", "x-ratelimit-remaining"] }));
+  // Request id (honouring one from a trusted proxy), timing, structured access log and metrics.
   app.use("*", async (c, next) => {
+    const start = performance.now();
+    const given = c.req.header("x-request-id")?.slice(0, 64).replace(/[^A-Za-z0-9_.-]/g, "");
+    const requestId = given || randomBytes(8).toString("hex");
+    c.set("requestId", requestId);
+    c.set("log", appLog.child({ requestId }));
     c.set("deps", deps);
     c.set("now", deps.config.now ?? (() => new Date()));
-    await next();
+    try {
+      await next();
+    } finally {
+      const ms = performance.now() - start;
+      const status = c.res.status;
+      const route = routeLabel(c.req.path);
+      c.res.headers.set("x-request-id", requestId);
+      httpRequests.inc({ method: c.req.method, route, status: `${Math.floor(status / 100)}xx` });
+      httpDuration.observe({ method: c.req.method, route }, ms / 1000);
+      if (c.req.path !== "/health" && c.req.path !== "/health/ready" && c.req.path !== "/metrics") {
+        const fields = { method: c.req.method, path: c.req.path, route, status, ms: Math.round(ms * 10) / 10, ip: clientIp(c), tenantId: c.get("ctx")?.tenantId, principal: c.get("principal")?.kind, ua: c.req.header("user-agent")?.slice(0, 120) };
+        // 4xx are the client's problem and routine (401 on expired sessions, 404 probes); only 5xx are ours.
+        if (status >= 500) c.get("log").error("http_request", fields);
+        else c.get("log").info("http_request", fields);
+      }
+    }
   });
 
+  /** Liveness: the process answers and can reach the database. */
   app.get("/health", async (c) => {
     try {
       await deps.db.execute(sql`select 1`);
       return c.json({ ok: true, db: "up" });
     } catch (err) {
-      console.error("[health] database check failed", err instanceof Error ? err.message : err);
+      appLog.error("health_db_failed", { err });
       return c.json({ ok: false, db: "down" }, 503);
     }
+  });
+
+  /** Readiness: database reachable, migrations applied, and the worker has polled recently. Use this for load balancers and compose healthchecks. */
+  app.get("/health/ready", async (c) => {
+    const checks: Record<string, string> = {};
+    let ok = true;
+    try {
+      const rows = (await deps.db.execute(sql`select count(*)::int as n from drizzle.__drizzle_migrations`)) as unknown as { rows: { n: number }[] };
+      checks.db = "up";
+      checks.migrations = String(rows.rows[0]?.n ?? 0);
+    } catch (err) {
+      ok = false;
+      checks.db = "down";
+      appLog.error("ready_db_failed", { err });
+    }
+    const heartbeat = deps.config.readiness?.workerHeartbeat?.();
+    if (deps.config.readiness?.workerHeartbeat) {
+      const silence = heartbeat ? Date.now() - heartbeat.getTime() : Number.POSITIVE_INFINITY;
+      const max = deps.config.readiness.maxWorkerSilenceMs ?? 60_000;
+      checks.worker = silence <= max ? "up" : heartbeat ? "stale" : "not started";
+      if (silence > max) ok = false;
+    }
+    return c.json({ ok, ...checks }, ok ? 200 : 503);
+  });
+
+  /** Prometheus text format. Process counters plus queue gauges read from the database. */
+  app.get("/metrics", async (c) => {
+    const token = deps.config.metricsToken;
+    if (token) {
+      const header = c.req.header("authorization") ?? "";
+      if (header !== `Bearer ${token}`) return c.text("unauthorized", 401);
+    } else if (process.env.NODE_ENV === "production") {
+      return c.text("metrics disabled: set METRICS_TOKEN", 404);
+    }
+    const ops = await withRlsBypass(deps.db, (tx) => platform.opsSummary(tx, (deps.config.now ?? (() => new Date()))()));
+    const heartbeat = deps.config.readiness?.workerHeartbeat?.();
+    const body = renderMetrics([
+      { name: "referly_jobs_queue", help: "Jobs by status", values: (["queued", "running", "retrying", "dead"] as const).map((s) => ({ labels: { status: s }, value: ops.queue[s] })) },
+      { name: "referly_jobs_queue_by_type", help: "Queued, running and dead jobs by type", values: ops.queue.byType.map((r) => ({ labels: { type: r.type, status: r.status }, value: r.n })) },
+      { name: "referly_jobs_lag_seconds", help: "Age of the oldest due job still waiting", values: [{ value: ops.queue.lagSeconds }] },
+      { name: "referly_jobs_stuck", help: "Jobs locked in running for longer than the stuck threshold", values: [{ value: ops.queue.stuck }] },
+      { name: "referly_webhook_dead_deliveries_24h", help: "Outbound webhook deliveries that exhausted retries in the last day", values: [{ value: ops.webhooks.deadDeliveries24h }] },
+      { name: "referly_webhook_paused_subscriptions", help: "Webhook endpoints auto-paused after repeated failures", values: [{ value: ops.webhooks.pausedSubscriptions }] },
+      { name: "referly_messages_failed_24h", help: "Email and text sends that failed in the last day", values: [{ value: ops.messages.failed24h }] },
+      { name: "referly_worker_heartbeat_age_seconds", help: "Seconds since the worker last polled (-1 when no worker runs in this process)", values: [{ value: heartbeat ? Math.round((Date.now() - heartbeat.getTime()) / 1000) : -1 }] },
+    ]);
+    return c.text(body, 200, { "content-type": "text/plain; version=0.0.4; charset=utf-8" });
   });
 
   // Abuse protection on everything reachable without credentials (PRD s13).

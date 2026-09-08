@@ -40,6 +40,9 @@ const APP_ROLE_SETUP = [
   sql`grant usage on schema public to referly_app`,
   sql`grant all on all tables in schema public to referly_app`,
   sql`grant usage, select, update on all sequences in schema public to referly_app`,
+  // read-only view of the migration journal, for the readiness probe
+  sql`grant usage on schema drizzle to referly_app`,
+  sql`grant select on all tables in schema drizzle to referly_app`,
 ];
 
 async function connectionBypassesRls(db: Db): Promise<{ superuser: boolean; bypassrls: boolean; user: string }> {

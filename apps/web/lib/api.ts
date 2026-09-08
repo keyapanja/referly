@@ -32,11 +32,14 @@ export class ApiError extends Error {
   status: number;
   code: string;
   details: unknown;
-  constructor(status: number, code: string, message: string, details?: unknown) {
+  /** Echoed by the API on every response; quote it to support. */
+  requestId: string | null;
+  constructor(status: number, code: string, message: string, details?: unknown, requestId: string | null = null) {
     super(message);
     this.status = status;
     this.code = code;
     this.details = details;
+    this.requestId = requestId;
   }
 }
 
@@ -58,7 +61,9 @@ export async function api<T = unknown>(path: string, init: { method?: string; js
       const target = window.location.pathname.startsWith("/portal") ? "/login?portal=1" : "/login";
       if (!window.location.pathname.startsWith("/login")) window.location.href = target;
     }
-    throw new ApiError(res.status, err.code ?? "http", describe(err) || `request failed (${res.status})`, err.details);
+    const requestId = body?.requestId ?? res.headers.get("x-request-id");
+    const message = describe(err) || `request failed (${res.status})`;
+    throw new ApiError(res.status, err.code ?? "http", res.status >= 500 && requestId ? `${message} (reference ${requestId})` : message, err.details, requestId);
   }
   return body as T;
 }

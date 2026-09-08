@@ -1,7 +1,7 @@
-import { and, count, desc, eq, gte, ilike, inArray, or, sql } from "drizzle-orm";
+import { and, count, desc, eq, gte, ilike, inArray, lt, lte, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { DbLike } from "../db/client";
-import { affiliates, conversions, jobs, messageLogs, tenants, users, type Job, type Tenant, type User } from "../db/schema";
+import { affiliates, conversions, jobs, messageLogs, tenants, users, webhookOutboundDeliveries, webhookSubscriptions, type Job, type Tenant, type User } from "../db/schema";
 import { newId } from "../ids";
 import { notFound, validation } from "../errors";
 import { tenantContext } from "../context";
@@ -169,4 +169,49 @@ export async function retryJob(db: DbLike, jobId: string, now = new Date()): Pro
   if (!job) throw notFound("job", jobId);
   const [after] = await db.update(jobs).set({ status: "queued", attempts: 0, runAt: now, lockedAt: null }).where(eq(jobs.id, jobId)).returning();
   return after!;
+}
+
+/** How long a job may sit in `running` before it counts as stuck (a crashed worker never unlocks it). */
+export const STUCK_JOB_MS = 10 * 60 * 1000;
+
+/**
+ * Operational state of the whole platform: queue depth, lag, dead letters, stuck jobs, failing
+ * webhooks and mail. Read by the platform admin Operations panel and by /metrics on every scrape,
+ * so it is a handful of indexed counts and nothing heavier.
+ */
+export async function opsSummary(db: DbLike, now = new Date()) {
+  const hour = new Date(now.getTime() - 3_600_000);
+  const day = new Date(now.getTime() - 86_400_000);
+  const stuckBefore = new Date(now.getTime() - STUCK_JOB_MS);
+  const [byStatus, [retrying], [oldest], [stuck], [doneHour], [deadHour], byType, [deadDeliveries], [pausedSubs], [failedMail]] = await Promise.all([
+    db.select({ status: jobs.status, n: count() }).from(jobs).groupBy(jobs.status),
+    db.select({ n: count() }).from(jobs).where(and(eq(jobs.status, "queued"), sql`${jobs.lastError} is not null`)),
+    db.select({ runAt: sql<string | null>`min(${jobs.runAt})` }).from(jobs).where(and(eq(jobs.status, "queued"), lte(jobs.runAt, now))),
+    db.select({ n: count() }).from(jobs).where(and(eq(jobs.status, "running"), lt(jobs.lockedAt, stuckBefore))),
+    db.select({ n: count() }).from(jobs).where(and(eq(jobs.status, "done"), gte(jobs.completedAt, hour))),
+    db.select({ n: count() }).from(jobs).where(and(eq(jobs.status, "dead"), gte(jobs.runAt, hour))),
+    db.select({ type: jobs.type, status: jobs.status, n: count() }).from(jobs).where(sql`${jobs.status} in ('queued', 'running', 'dead')`).groupBy(jobs.type, jobs.status),
+    db.select({ n: count() }).from(webhookOutboundDeliveries).where(and(eq(webhookOutboundDeliveries.status, "dead"), gte(webhookOutboundDeliveries.createdAt, day))),
+    db.select({ n: count() }).from(webhookSubscriptions).where(eq(webhookSubscriptions.status, "paused")),
+    db.select({ n: count() }).from(messageLogs).where(and(eq(messageLogs.status, "failed"), gte(messageLogs.createdAt, day))),
+  ]);
+  const status = Object.fromEntries(byStatus.map((r) => [r.status, r.n])) as Record<string, number>;
+  const oldestRunAt = oldest?.runAt ? new Date(oldest.runAt) : null;
+  return {
+    at: now.toISOString(),
+    queue: {
+      queued: status.queued ?? 0,
+      running: status.running ?? 0,
+      retrying: retrying!.n,
+      dead: status.dead ?? 0,
+      doneLastHour: doneHour!.n,
+      deadLastHour: deadHour!.n,
+      /** Seconds the oldest due job has been waiting; 0 when the queue is drained. */
+      lagSeconds: oldestRunAt ? Math.max(0, Math.round((now.getTime() - oldestRunAt.getTime()) / 1000)) : 0,
+      stuck: stuck!.n,
+      byType: byType.map((r) => ({ type: r.type, status: r.status, n: r.n })),
+    },
+    webhooks: { deadDeliveries24h: deadDeliveries!.n, pausedSubscriptions: pausedSubs!.n },
+    messages: { failed24h: failedMail!.n },
+  };
 }

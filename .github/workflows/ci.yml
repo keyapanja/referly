@@ -69,7 +69,7 @@ jobs:
           npm start -w @referly/api > api.log 2>&1 &
           API_PID=$!
           for i in $(seq 1 60); do
-            if curl -fsS http://localhost:4000/health | grep -q '"db":"up"'; then break; fi
+            if curl -fsS http://localhost:4000/health/ready | grep -q "\"ok\":true"; then break; fi
             if ! kill -0 $API_PID 2>/dev/null; then echo "API exited early"; cat api.log; exit 1; fi
             sleep 1
           done

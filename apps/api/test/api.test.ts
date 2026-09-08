@@ -778,6 +778,49 @@ describe("MVP acceptance over HTTP", () => {
     expect((await call("/v1/affiliates", { token: apiKey })).status).toBe(200);
   });
 
+  it("Observability: request ids, readiness, metrics and the admin operations summary", async () => {
+    // request id generated, or kept when a proxy supplies one; present on error bodies too
+    const gen = await app.request(BASE + "/health");
+    expect(gen.headers.get("x-request-id")).toMatch(/^[a-f0-9]{16}$/);
+    const kept = await app.request(BASE + "/health", { headers: { "x-request-id": "proxy-abc-123" } });
+    expect(kept.headers.get("x-request-id")).toBe("proxy-abc-123");
+    const missing = await call("/v1/offers/off_nope", { token: ownerToken, headers: { "x-request-id": "trace-1" } });
+    expect(missing.status).toBe(404);
+    expect(missing.body.requestId).toBe("trace-1");
+
+    // readiness: db + migrations, and the worker heartbeat when one is wired
+    const ready = await call("/health/ready");
+    expect(ready.status).toBe(200);
+    expect(ready.body).toMatchObject({ ok: true, db: "up" });
+    expect(Number(ready.body.migrations)).toBeGreaterThan(0);
+    const stale = createApp({ db: handle.db, email, storage, config: { baseUrl: BASE, webUrl: "http://web.test", cookieSecure: false, now, readiness: { workerHeartbeat: () => new Date(Date.now() - 5 * 60_000) } } });
+    const notReady = await stale.request(BASE + "/health/ready");
+    expect(notReady.status).toBe(503);
+    expect((await notReady.json()).worker).toBe("stale");
+
+    // metrics: open outside production, token-protected when configured; counters and DB gauges present
+    const metrics = await app.request(BASE + "/metrics");
+    expect(metrics.status).toBe(200);
+    const text = await metrics.text();
+    expect(text).toContain("referly_http_requests_total{");
+    expect(text).toMatch(/referly_http_request_duration_seconds_bucket\{.*route="\/v1\/offers\/:id".*le="\+Inf"\}/);
+    expect(text).toMatch(/referly_jobs_processed_total\{outcome="ok",type="domain_event"\} \d+/);
+    expect(text).toMatch(/referly_jobs_queue\{status="dead"\} \d+/);
+    expect(text).toMatch(/referly_jobs_lag_seconds \d+/);
+    expect(text).toMatch(/referly_worker_heartbeat_age_seconds -1/);
+    const guarded = createApp({ db: handle.db, email, storage, config: { baseUrl: BASE, webUrl: "http://web.test", cookieSecure: false, now, metricsToken: "scrape-me" } });
+    expect((await guarded.request(BASE + "/metrics")).status).toBe(401);
+    expect((await guarded.request(BASE + "/metrics", { headers: { authorization: "Bearer scrape-me" } })).status).toBe(200);
+
+    // admin operations summary
+    const adminToken = (await call("/v1/auth/login", { method: "POST", json: { email: "root@platform.test", password: "rootpass123" } })).body.token;
+    const ops = await call("/admin/ops", { token: adminToken });
+    expect(ops.status).toBe(200);
+    expect(ops.body.queue).toMatchObject({ dead: expect.any(Number), lagSeconds: expect.any(Number), stuck: expect.any(Number) });
+    expect(ops.body.queue.doneLastHour).toBeGreaterThan(0);
+    expect((await call("/admin/ops", { token: ownerToken })).status).toBe(403);
+  });
+
   it("Validation and permissions errors are JSON with codes", async () => {
     const bad = await call("/v1/offers", { method: "POST", token: ownerToken, json: { name: "" } });
     expect(bad.status).toBe(400);
