@@ -1,5 +1,6 @@
 import { and, count, desc, eq, max, sql } from "drizzle-orm";
 import { z } from "zod";
+import { notifyTask } from "./notifications";
 import type { DbLike } from "../db/client";
 import { withTx } from "../db/client";
 import { affiliates, automationRules, automationRuns, campaigns, commissions, conversions, offers, payouts, programs, tasks, tenants, type AutomationRule, type AutomationRun, type Task } from "../db/schema";
@@ -208,6 +209,7 @@ export async function createTask(db: DbLike, ctx: TenantContext, input: { title:
     .insert(tasks)
     .values({ id: newId("task"), tenantId: ctx.tenantId, title: input.title, note: input.note ?? null, status: "open", entityType: input.entityType ?? null, entityId: input.entityId ?? null, affiliateId: input.affiliateId ?? null, ruleId: input.ruleId ?? null, createdAt: ctx.now() })
     .returning();
+  await notifyTask(db, ctx, row!);
   return row!;
 }
 

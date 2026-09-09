@@ -23,6 +23,7 @@ import { commissionRoutes } from "./routes/commissions";
 import { payoutRoutes } from "./routes/payouts";
 import { publicRoutes } from "./routes/public";
 import { portalRoutes } from "./routes/portal";
+import { notificationRoutes } from "./routes/notifications";
 import { messageRoutes } from "./routes/messages";
 import { analyticsRoutes } from "./routes/analytics";
 import { assetRoutes } from "./routes/assets";
@@ -229,6 +230,8 @@ export function createApp(rawDeps: AppDeps & { db: Db }) {
   app.use("/admin/*", authMiddleware());
   app.route("/admin", adminRoutes());
   app.route("/v1/tenant", tenantRoutes());
+  app.route("/v1/notifications", notificationRoutes("merchant"));
+  app.route("/portal/notifications", notificationRoutes("portal"));
   app.route("/v1/offers", offerRoutes());
   app.route("/v1/programs", programRoutes());
   app.route("/v1/affiliates", affiliateRoutes());

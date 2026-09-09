@@ -46,6 +46,10 @@ npm run test:postgres    # the same suites against a real Postgres (embedded ser
 npm run typecheck
 ```
 
+## Notifications
+
+Domain events reach people three ways: email (always, per the built-in rules and automation), SMS/WhatsApp (opt-in), and the in-app notification centre. The bell in the sidebar shows the unread count; the Notifications page lists them, links to the record and holds per-person category preferences. Merchant endpoints live under `/v1/notifications` (list, unread count, mark read, preferences); affiliates use `/portal/notifications`.
+
 ## Backups and data lifecycle
 
 The worker takes an encrypted logical backup every day (database plus uploaded files) and rotates them; `npm run backup` takes one now, `npm run restore -- <key> --yes` restores it, and CI rehearses the restore on every push. Nightly retention prunes clicks, message logs, audit trail, webhook deliveries and automation history per workspace under an owner-adjustable policy; closed workspaces are purged after a grace period; affiliates can request erasure and owners can export everything as JSON lines. Details in [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).

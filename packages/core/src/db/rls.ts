@@ -83,4 +83,5 @@ export const RLS_TABLES = [
   "audit_logs",
   "webhook_deliveries",
   "exports",
+  "notifications",
 ] as const;

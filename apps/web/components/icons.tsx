@@ -21,6 +21,8 @@ const PATHS: Record<string, string[]> = {
   image: ["M3 5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5z", "M9 11a2 2 0 1 0 0-4 2 2 0 0 0 0 4z", "m21 15-5-5L5 21"],
   megaphone: ["m3 11 18-5v12L3 14v-3z", "M11.6 16.8a3 3 0 1 1-5.8-1.6"],
   alert: ["M12 9v4", "M12 17h.01", "M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"],
+  bell: ["M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9", "M13.7 21a2 2 0 0 1-3.4 0"],
+  chevron: ["m9 18 6-6-6-6"],
 };
 
 export type IconName = keyof typeof PATHS;

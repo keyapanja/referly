@@ -62,12 +62,16 @@ export const tenants = pgTable("tenants", {
   updatedAt: updatedAt(),
 });
 
+/** `{ [category]: { inApp?: boolean; email?: boolean } }`; a missing key means on. */
+export type NotificationPrefs = Record<string, { inApp?: boolean; email?: boolean }>;
+
 export interface TenantRetention {
   clicksDays?: number | null;
   messageLogsDays?: number | null;
   auditLogsDays?: number | null;
   webhookDeliveriesDays?: number | null;
   automationRunsDays?: number | null;
+  notificationsDays?: number | null;
 }
 
 export interface TenantBranding {
@@ -96,6 +100,8 @@ export const users = pgTable(
     email: text("email").notNull(),
     passwordHash: text("password_hash"),
     status: text("status").notNull().default("active"), // invited | active | disabled
+    /** Per-category in-app/email switches; missing keys mean on. */
+    notificationPrefs: jsonb("notification_prefs").$type<NotificationPrefs>(),
     emailVerifiedAt: ts("email_verified_at"),
     lastLoginAt: ts("last_login_at"),
     createdAt: createdAt(),
@@ -245,6 +251,7 @@ export const affiliates = pgTable(
     suspendedAt: ts("suspended_at"),
     /** Personal data replaced with placeholders (erasure request); financial records stay. */
     erasedAt: ts("erased_at"),
+    notificationPrefs: jsonb("notification_prefs").$type<NotificationPrefs>(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -914,6 +921,30 @@ export const webhookDeliveries = pgTable(
 );
 
 /**
+ * In-app notification centre (MSG-06). One row per recipient per event; the recipient is a
+ * merchant team member (user) or an affiliate. `link` is a path in the web app.
+ */
+export const notifications = pgTable(
+  "notifications",
+  {
+    id: id(),
+    tenantId: tenantRef(),
+    recipientType: text("recipient_type").notNull(), // user | affiliate
+    recipientId: text("recipient_id").notNull(),
+    category: text("category").notNull(),
+    type: text("type").notNull(), // domain event type or "task"
+    title: text("title").notNull(),
+    body: text("body"),
+    link: text("link"),
+    entityType: text("entity_type"),
+    entityId: text("entity_id"),
+    readAt: ts("read_at"),
+    createdAt: createdAt(),
+  },
+  (t) => [index("notifications_recipient_idx").on(t.tenantId, t.recipientType, t.recipientId, t.createdAt), index("notifications_unread_idx").on(t.tenantId, t.recipientType, t.recipientId, t.readAt)],
+);
+
+/**
  * Platform-level maintenance history: backups, retention pruning, workspace purges and
  * restores. Not tenant-scoped (like jobs); the admin operations panel and /metrics read it.
  */
@@ -977,6 +1008,7 @@ export const schema = {
   exports,
   webhookDeliveries,
   maintenanceRuns,
+  notifications,
 };
 
 export type Tenant = typeof tenants.$inferSelect;
@@ -1016,3 +1048,4 @@ export type MessageLog = typeof messageLogs.$inferSelect;
 export type AuditLog = typeof auditLogs.$inferSelect;
 export type Job = typeof jobs.$inferSelect;
 export type MaintenanceRun = typeof maintenanceRuns.$inferSelect;
+export type Notification = typeof notifications.$inferSelect;

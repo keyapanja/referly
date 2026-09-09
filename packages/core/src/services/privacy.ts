@@ -9,6 +9,7 @@ import { type TenantContext, require as requirePerm, requireAffiliate } from "..
 import { writeAudit } from "./audit";
 import { getBalances } from "./commissions";
 import { RLS_TABLES } from "../db/rls";
+import { notifyTask } from "./notifications";
 
 /**
  * Data-subject requests (GDPR arts. 15, 17, 20 and their equivalents):
@@ -99,6 +100,7 @@ export async function requestErasure(db: DbLike, ctx: TenantContext, affiliateId
       createdAt: ctx.now(),
     })
     .returning();
+  await notifyTask(db, ctx, task!);
   await writeAudit(db, ctx, { entityType: "affiliate", entityId: affiliateId, action: "erasure_requested", after: { taskId: task!.id } });
   return task!;
 }

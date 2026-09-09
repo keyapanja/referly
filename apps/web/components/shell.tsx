@@ -7,6 +7,7 @@ import { api, signedInHint, setSignedInHint } from "@/lib/api";
 import { useApi } from "@/lib/hooks";
 import { Icon, type IconName } from "./icons";
 import { brandStyle } from "@/lib/brand";
+import { NotificationBell } from "./notifications";
 
 type NavItem = readonly [href: string, label: string, icon: IconName];
 
@@ -15,6 +16,7 @@ const MERCHANT_NAV: { section: string; items: NavItem[] }[] = [
     section: "Overview",
     items: [
       ["/app", "Home", "home"],
+      ["/app/notifications", "Notifications", "bell"],
       ["/app/analytics", "Analytics", "chart"],
     ],
   },
@@ -71,7 +73,10 @@ const PORTAL_NAV: { section: string; items: NavItem[] }[] = [
   },
   {
     section: "Account",
-    items: [["/portal/profile", "Profile", "user"]],
+    items: [
+      ["/portal/notifications", "Notifications", "bell"],
+      ["/portal/profile", "Profile", "user"],
+    ],
   },
 ];
 
@@ -145,6 +150,7 @@ export function Shell({ mode, children }: { mode: "merchant" | "portal" | "platf
             <strong>{who || "…"}</strong>
             <span style={{ textTransform: "capitalize" }}>{whoSub}</span>
           </div>
+          {mode !== "platform" ? <NotificationBell base={mode === "portal" ? "/portal/notifications" : "/v1/notifications"} /> : null}
           <button
             className="icon-btn"
             title="Sign out"

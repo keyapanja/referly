@@ -1,6 +1,6 @@
 import { eq, sql } from "drizzle-orm";
 import { schema, type Db, type DbLike, type Job, type TenantContext, type Lookup } from "@referly/core";
-import { jobs, messaging, commissions, systemContext, events as eventsMod, tenants as tenantsSvc, exportsSvc, withTenantScope, withRlsBypass, campaigns as campaignsSvc, automation, integrations, webhooks, retention as retentionSvc, maintenance, privacy, backup as backupSvc } from "@referly/core";
+import { jobs, messaging, commissions, systemContext, events as eventsMod, tenants as tenantsSvc, exportsSvc, withTenantScope, withRlsBypass, campaigns as campaignsSvc, automation, integrations, webhooks, retention as retentionSvc, maintenance, privacy, backup as backupSvc, notifications as notificationsSvc } from "@referly/core";
 import { runBackup, type BackupConfig } from "./backup";
 import { PRIVATE_PREFIX, type FileStorage } from "./storage";
 import { textStatusUrl } from "./text";
@@ -107,6 +107,9 @@ export function createHandlers(deps: WorkerDeps): Record<string, jobs.JobHandler
       const recipient = (event.data.email as string | undefined) ?? affiliate?.email;
       if (!recipient) return;
       if (event.type === "conversion.created" && !event.data.commissionId) return; // unattributed sale: nobody to notify
+      // Affiliates switch categories off in the portal; account and security emails have no category and always go.
+      const emailCategory = notificationsSvc.EMAIL_CATEGORY[event.type];
+      if (affiliate && emailCategory && !notificationsSvc.wants(affiliate.notificationPrefs, emailCategory, "email")) return;
 
       const programId = (event.data.programId as string | undefined) ?? undefined;
       const program = programId ? await db.query.programs.findFirst({ where: eq(programsTable.id, programId) }) : null;
@@ -144,6 +147,7 @@ export function createHandlers(deps: WorkerDeps): Record<string, jobs.JobHandler
         // Built-in notification first, then the tenant's own rules (AUTO-01..05).
         const transports = await transportsFor(db, ctx);
         await sendBuiltInNotification(db, ctx, event, transports);
+        await notificationsSvc.fanOutForEvent(db, ctx, event);
         await automation.runRulesForEvent(db, ctx, event, { email: deps.email, webUrl: deps.webUrl, text: transports.text, textStatusUrl: transports.textStatusUrl });
         await webhooks.fanOut(db, ctx, event);
       });

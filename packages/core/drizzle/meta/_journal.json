@@ -99,6 +99,13 @@
       "when": 1788936385567,
       "tag": "0013_backups_retention",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1788938837892,
+      "tag": "0014_notifications",
+      "breakpoints": true
     }
   ]
 }

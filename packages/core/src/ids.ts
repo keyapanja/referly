@@ -46,6 +46,7 @@ export const ID_PREFIXES = {
   affiliateGroupMember: "grm",
   affiliateGroup: "grp",
   maintenanceRun: "mnt",
+  notification: "ntf",
 } as const;
 
 export type IdKind = keyof typeof ID_PREFIXES;
