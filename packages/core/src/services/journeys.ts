@@ -41,6 +41,7 @@ export interface TrackingView {
   siteKey: string | null;
   domains: string[];
   pixelConversions: boolean;
+  consentMode: "off" | "wait";
   lastEventAt: Date | null;
   lastEventHost: string | null;
   events7d: number;
@@ -60,6 +61,7 @@ export const trackingSettingsSchema = z
   .object({
     domains: z.array(hostname).max(20).optional(),
     pixelConversions: z.boolean().optional(),
+    consentMode: z.enum(["off", "wait"]).optional(),
   })
   .strict();
 
@@ -85,6 +87,7 @@ export async function getTracking(db: DbLike, ctx: TenantContext): Promise<Track
     siteKey: tenant.siteKey,
     domains: tenant.tracking?.domains ?? [],
     pixelConversions: !!tenant.tracking?.pixelConversions,
+    consentMode: tenant.tracking?.consentMode ?? "off",
     lastEventAt: last?.occurredAt ?? null,
     lastEventHost: last?.url ? hostOf(last.url) : null,
     events7d: stats?.events ?? 0,
@@ -121,6 +124,7 @@ export async function updateTracking(db: DbLike, ctx: TenantContext, rawInput: z
   const next: TenantTracking = { ...(tenant.tracking ?? {}) };
   if (input.domains !== undefined) next.domains = [...new Set(input.domains)];
   if (input.pixelConversions !== undefined) next.pixelConversions = input.pixelConversions;
+  if (input.consentMode !== undefined) next.consentMode = input.consentMode;
   if (next.pixelConversions && !(next.domains?.length)) throw validation("list your website's domains before accepting orders reported by the snippet");
   await db.update(tenants).set({ tracking: next, updatedAt: ctx.now() }).where(eq(tenants.id, ctx.tenantId));
   await writeAudit(db, ctx, { entityType: "tenant", entityId: ctx.tenantId, action: "tracking_updated", before: { tracking: tenant.tracking ?? {} }, after: { tracking: next } });
@@ -185,6 +189,8 @@ export const ingestSchema = z.object({
   sessionId: z.string().regex(VISITOR_ID),
   /** Click token from the landing URL or the snippet's first-party cookie. */
   ref: z.string().max(64).nullable().optional(),
+  /** `granted` when the snippet runs in consent mode and the visitor agreed; `not_required` otherwise. */
+  consent: z.enum(["granted", "not_required"]).optional(),
   events: z.array(clientEvent).min(1).max(MAX_EVENTS_PER_BATCH),
 });
 export type IngestInput = z.input<typeof ingestSchema>;
@@ -194,6 +200,13 @@ export interface IngestResult {
   attributed: boolean;
   /** When the ref resolved: how long the snippet should keep it, from the program's attribution window. */
   ref: { ttlSeconds: number } | null;
+  /** Set when the batch was refused: the workspace requires consent and the batch did not carry it. */
+  dropped?: "consent_required";
+}
+
+export interface IngestOptions {
+  /** The workspace's consent mode is `wait`: batches without `consent: "granted"` are dropped, whatever the page sent. */
+  consentRequired?: boolean;
 }
 
 interface ResolvedClick {
@@ -244,8 +257,9 @@ function plausibleTime(at: number | undefined, now: Date): Date {
 }
 
 /** Record a batch the snippet sent. The request must already be scoped to the tenant the site key resolved to. */
-export async function ingestEvents(db: DbLike, ctx: TenantContext, rawInput: IngestInput): Promise<IngestResult> {
+export async function ingestEvents(db: DbLike, ctx: TenantContext, rawInput: IngestInput, opts: IngestOptions = {}): Promise<IngestResult> {
   const input = ingestSchema.parse(rawInput);
+  if (opts.consentRequired && input.consent !== "granted") return { accepted: 0, attributed: false, ref: null, dropped: "consent_required" };
   const now = ctx.now();
   const click = await resolveClick(db, ctx, input.ref, input.visitorId);
   const rows = input.events.map((e) => ({
@@ -264,6 +278,7 @@ export async function ingestEvents(db: DbLike, ctx: TenantContext, rawInput: Ing
     referrer: e.referrer?.slice(0, 2000) ?? null,
     conversionId: null,
     properties: boundedProperties(e.properties),
+    consentState: input.consent ?? "not_required",
     occurredAt: plausibleTime(e.at, now),
     createdAt: now,
   }));
@@ -292,16 +307,18 @@ export async function visitorClickTokens(db: DbLike, ctx: TenantContext, visitor
 export async function linkConversion(db: DbLike, ctx: TenantContext, input: { conversion: Conversion; visitorId?: string | null; clickId?: string | null }): Promise<JourneyEvent | null> {
   let visitorId = input.visitorId ?? null;
   let sessionId: string | null = null;
+  let consentState = "not_required";
   const where = visitorId
     ? and(eq(journeyEvents.tenantId, ctx.tenantId), eq(journeyEvents.visitorId, visitorId))
     : input.clickId
       ? and(eq(journeyEvents.tenantId, ctx.tenantId), eq(journeyEvents.clickId, input.clickId))
       : null;
   if (where) {
-    const [latest] = await db.select({ visitorId: journeyEvents.visitorId, sessionId: journeyEvents.sessionId }).from(journeyEvents).where(where).orderBy(desc(journeyEvents.occurredAt), desc(journeyEvents.seq)).limit(1);
+    const [latest] = await db.select({ visitorId: journeyEvents.visitorId, sessionId: journeyEvents.sessionId, consentState: journeyEvents.consentState }).from(journeyEvents).where(where).orderBy(desc(journeyEvents.occurredAt), desc(journeyEvents.seq)).limit(1);
     if (latest) {
       visitorId = latest.visitorId;
       sessionId = latest.sessionId;
+      consentState = latest.consentState;
     }
   }
   if (!visitorId) return null;
@@ -324,6 +341,7 @@ export async function linkConversion(db: DbLike, ctx: TenantContext, input: { co
       referrer: null,
       conversionId: c.id,
       properties: { amountMinor: c.amountMinor, currency: c.currency, source: c.source, attributed: !!c.affiliateId },
+      consentState,
       occurredAt: c.occurredAt,
       createdAt: ctx.now(),
     })

@@ -43,12 +43,14 @@ export function WebsiteTrackingCard() {
   const { busy, error: actionError, success, run } = useAction();
   const [domains, setDomains] = useState<string | null>(null);
   const [pixel, setPixel] = useState(false);
+  const [consent, setConsent] = useState(false);
   const [showMore, setShowMore] = useState(false);
 
   useEffect(() => {
     if (data && domains === null) {
       setDomains((data.domains ?? []).join(", "));
       setPixel(!!data.pixelConversions);
+      setConsent(data.consentMode === "wait");
     }
   }, [data, domains]);
 
@@ -90,7 +92,7 @@ export function WebsiteTrackingCard() {
           <form
             onSubmit={async (e) => {
               e.preventDefault();
-              const ok = await run(() => api("/v1/tenant/tracking", { method: "PATCH", json: { domains: domainList, pixelConversions: pixel } }), "Tracking settings saved.");
+              const ok = await run(() => api("/v1/tenant/tracking", { method: "PATCH", json: { domains: domainList, pixelConversions: pixel, consentMode: consent ? "wait" : "off" } }), "Tracking settings saved.");
               if (ok) reload();
             }}
           >
@@ -101,6 +103,12 @@ export function WebsiteTrackingCard() {
               <input type="checkbox" checked={pixel} onChange={(e) => setPixel(e.target.checked)} disabled={domainList.length === 0} /> Accept orders reported by the snippet from the thank-you page
               {domainList.length === 0 ? <span className="muted"> (add your domains first)</span> : null}
             </label>
+            <label className="checkbox">
+              <input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} /> Wait for cookie consent before tracking
+            </label>
+            <p className="muted" style={{ marginTop: 4 }}>
+              For sites that show a cookie banner. The snippet stores and sends nothing until your banner reports consent: Cookiebot and OneTrust are recognised automatically, any other banner calls <span className="mono">referly(&apos;consent&apos;, &apos;granted&apos;)</span>. Events that happen while the banner is open are sent on accept and dropped on decline, and this API refuses anything sent without consent. Orders from the thank-you page are still recorded, without the visitor id. Save, then paste the updated snippet: it carries <span className="mono">data-consent=&quot;wait&quot;</span>.
+            </p>
             <p className="muted" style={{ marginTop: 4 }}>
               Orders from the snippet are recorded with source <span className="mono">pixel</span> and go through the same attribution, holding period and approval as every other sale. A server-side post from your checkout stays the most reliable option; use the snippet when you cannot change the checkout.
             </p>
@@ -133,6 +141,9 @@ export function WebsiteTrackingCard() {
               </Field>
               <Field label="Lead forms" help="Add these hidden inputs to a form that posts to a program's capture endpoint; the snippet fills them in.">
                 <SnippetBox value={data.examples.form} rows={2} />
+              </Field>
+              <Field label="Cookie consent (with the consent switch on)" help="Call this from your banner's accept and decline handlers, or dispatch a referly:consent event on the document with detail 'granted' or 'denied'. Not needed with Cookiebot or OneTrust.">
+                <SnippetBox value={data.examples.consent} rows={1} />
               </Field>
               <p className="muted">
                 Also available: <span className="mono">referly(&apos;ref&apos;)</span> returns the current click token for your own integrations, <span className="mono">referly(&apos;visitor&apos;)</span> the visitor id you can forward as <span className="mono">visitorId</span> when posting to the conversions endpoint.

@@ -24,6 +24,7 @@ const pixelOrderSchema = z.object({
   ref: z.string().max(64).optional(),
   visitorId: z.string().regex(journeys.VISITOR_ID).optional(),
   sessionId: z.string().regex(journeys.VISITOR_ID).optional(),
+  consent: z.string().max(20).optional(),
   url: z.string().max(2000).optional(),
 });
 
@@ -197,8 +198,8 @@ export function publicRoutes() {
   /** Page views and custom events. Nothing about the affiliate is echoed back; only whether to keep the ref and for how long. */
   r.post("/t/:siteKey/events", async (c) => {
     const tenant = await siteTenant(c);
-    const result = await journeys.ingestEvents(c.get("deps").db, systemContext(tenant.id, c.get("now")), (await snippetBody(c)) as journeys.IngestInput);
-    return c.json({ ok: true, accepted: result.accepted, ref: result.ref });
+    const result = await journeys.ingestEvents(c.get("deps").db, systemContext(tenant.id, c.get("now")), (await snippetBody(c)) as journeys.IngestInput, { consentRequired: tenant.tracking?.consentMode === "wait" });
+    return c.json({ ok: true, accepted: result.accepted, ref: result.ref, ...(result.dropped ? { dropped: result.dropped } : {}) });
   });
 
   /**
@@ -214,6 +215,11 @@ export function publicRoutes() {
     const ctx = systemContext(tenant.id, c.get("now"));
     const body = await snippetBody(c);
     const input = pixelOrderSchema.parse(body);
+    // In consent mode the order still counts (it is contract data) but the visitor id does not travel without consent.
+    if (tenant.tracking?.consentMode === "wait" && input.consent !== "granted") {
+      delete input.visitorId;
+      delete input.sessionId;
+    }
     const amountMinor = input.amountMinor ?? toMinor(input.amount ?? 0, input.currency ?? tenant.currency);
     const deliveryId = newId("webhookDelivery");
     await db.insert(deliveriesTable).values({ id: deliveryId, tenantId: tenant.id, source: "pixel", idempotencyKey: `pixel:${input.orderId}:${deliveryId}`, payload: body, receivedAt: ctx.now() });

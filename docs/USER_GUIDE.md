@@ -137,7 +137,23 @@ Turn on **Accept orders reported by the snippet** in the card (it needs at least
 
 The sale is attributed exactly like any other (click token, the visitor's recorded clicks, or coupon), goes through the same holding period and approval, and is recorded with source `pixel` so you can tell it apart. Repeating an order id never double-pays. Because a browser call can be forged more easily than a server call, keep the domain list tight and prefer the checkout post (section 7) where you can; use the snippet when you cannot change the checkout at all. The call returns a promise resolving to `{ ok, conversionId, duplicate, attributed }` if you want to check it.
 
-### 6.6 Lead forms
+### 6.6 Cookie consent (EU sites)
+
+If your site shows a cookie banner, switch on **Wait for cookie consent before tracking** and paste the updated snippet: it now carries `data-consent="wait"`. Until your banner reports a decision the snippet writes no cookie, no local storage and no session entry, and sends nothing; the API refuses anything that arrives without consent, so a misconfigured page cannot leak past the switch.
+
+How the decision reaches the snippet:
+
+- **Cookiebot** and **OneTrust** are recognised automatically. Cookiebot's statistics or marketing category counts as consent; OneTrust's performance (C0002) or targeting (C0004) group does.
+- **Any other banner**: call `referly('consent', 'granted')` from your accept handler and `referly('consent', 'denied')` from your decline handler. A `referly:consent` DOM event on `document` with detail `granted` or `denied` works too, if your banner only emits events.
+
+What happens on each outcome:
+
+- **Granted**: the click token and visitor id are written, everything that happened while the banner was open is sent, and the events are stored marked as consented. The decision is remembered for 180 days, so later pages track immediately.
+- **Denied**: the queued events are discarded, any ids already in the browser are deleted, hidden visitor inputs are blanked, and nothing further is sent. Only the decision itself is remembered.
+
+Orders reported from the thank-you page still go through while consent is pending or denied, because an order is contract data rather than analytics, but they travel **without** the visitor id, so they are attributed by the click token or coupon alone and do not appear on a journey. If your legal position is that even that requires consent, leave the thank-you page call inside your banner's consented branch.
+
+### 6.7 Lead forms
 
 Add two hidden inputs to any form that posts to a program's capture endpoint (section 7):
 
@@ -148,23 +164,24 @@ Add two hidden inputs to any form that posts to a program's capture endpoint (se
 
 The snippet fills them in on load and again on submit, so the lead is attributed even when the form is on a page the visitor reached several clicks after landing.
 
-### 6.7 Your own integrations
+### 6.8 Your own integrations
 
 - `referly('ref')` returns the current click token; `referly('visitor')` the visitor id. Send either with your server-side conversion post (`clickToken` or `visitorId` in the body): the visitor id works even after the cookie is gone, because Referly remembers which clicks that visitor arrived through.
 - `referly('page')` records a page view by hand (for apps that manage their own routing); `referly('flush')` sends what is queued immediately.
 - Add `data-auto="false"` to the script tag to switch off automatic page views and form filling and call `referly('page')` yourself.
 
-### 6.8 Reading the journeys
+### 6.9 Reading the journeys
 
 **Journeys** (main navigation) lists every visit that came through an affiliate link: when it started, the affiliate, the landing page, pages and events, the outcome (browsing, engaged, lead, converted) and last activity. Filter by affiliate, show converted visits only, or all visitors for comparison; pick the last 7, 30 or 90 days. **View journey** opens the visitor's whole history across visits as a timeline. The same timeline appears on each conversion page under "Website journey", so a disputed or surprising sale can be checked against what the buyer actually did.
 
-### 6.9 If nothing shows up
+### 6.10 If nothing shows up
 
 - View the page source and confirm both script lines are present with your site key.
 - Open the browser console: a red request to `/t/<site key>/events` with a 404 means the key is wrong, the workspace is suspended, or the page's domain is not in your domain list.
 - Content blockers on your own machine can block the script; test in a private window.
 - Journeys only list visits that arrived through an affiliate link by default; switch to "All visitors" to confirm the snippet works before any affiliate has sent traffic.
 - Rotating the site key (button in the card) invalidates the old snippet immediately; update the script tag afterwards.
+- With consent mode on, nothing is recorded until your banner reports consent: check `referly('consent')` in the console; `pending` means your banner never called it.
 
 Journey events are kept for the period set under Settings → Data (90 days by default) and are included in backups and the workspace export.
 

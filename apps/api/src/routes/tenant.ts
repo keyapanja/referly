@@ -103,7 +103,7 @@ export function tenantRoutes() {
   async function trackingView(c: Parameters<typeof requireMerchantPrincipal>[0]) {
     const view = await journeys.getTracking(c.get("deps").db, c.get("ctx"));
     const base = c.get("deps").config.baseUrl.replace(/\/$/, "");
-    return { ...view, scriptUrl: `${base}/referly.js`, install: view.siteKey ? installSnippet(base, view.siteKey) : null, examples: SNIPPET_EXAMPLES };
+    return { ...view, scriptUrl: `${base}/referly.js`, install: view.siteKey ? installSnippet(base, view.siteKey, { consentMode: view.consentMode }) : null, examples: SNIPPET_EXAMPLES };
   }
   r.get("/tracking", async (c) => c.json(await trackingView(c)));
   r.post("/tracking/enable", async (c) => {

@@ -1,0 +1,1 @@
+ALTER TABLE "journey_events" ADD COLUMN "consent_state" text DEFAULT 'not_required' NOT NULL;

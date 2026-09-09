@@ -96,6 +96,8 @@ The embedded server comes from the `embedded-postgres` dev dependency (real Post
 
 `GET /referly.js` serves the snippet (cacheable for an hour; the site key travels in the script tag). Browsers post to `POST /t/<siteKey>/events` and `POST /t/<siteKey>/convert` with `text/plain` bodies, so no preflight is needed and `sendBeacon` delivers the last batch on page close. Both endpoints answer 404 for unknown keys, inactive workspaces and origins outside the workspace's domain list; `/convert` also needs the workspace's "accept orders from the snippet" switch, which itself needs at least one domain. Rate limit: 600 requests per minute per IP. `BASE_URL` must be reachable from visitors' browsers; put it behind the same TLS as the rest of the API. Journey rows are RLS-scoped, included in backups and the workspace export, and pruned after `journeyDays` (90 by default, 7 to 400).
 
+Consent mode (`tracking.consentMode = "wait"`, per workspace) makes the snippet withhold every cookie, storage entry and request until the page reports consent, and makes `/t/<siteKey>/events` drop any batch that does not carry `consent: "granted"` — the server-side check is what makes it enforceable, since the snippet runs on the merchant's page and could be misconfigured. Each stored event records the consent state it arrived under. Orders on `/convert` are still accepted without consent but lose the visitor id.
+
 ## Outbound webhooks (Zapier, Make, custom)
 
 Merchants add endpoints under Webhooks. Every stored event of a subscribed type becomes a signed POST from the worker:

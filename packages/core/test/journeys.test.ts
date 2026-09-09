@@ -194,3 +194,29 @@ describe("journey ingest and attribution", () => {
     expect((await tenants.getTenant(db, ws.ctx)).retention?.journeyDays).toBe(14);
   });
 });
+
+describe("consent mode", () => {
+  it("is a workspace setting carried on the install snippet; with it on, batches without consent are dropped and consented events are marked", async () => {
+    const ws2 = await createWorkspace(db, clock);
+    await journeys.enableTracking(db, ws2.ctx);
+    expect((await journeys.getTracking(db, ws2.ctx)).consentMode).toBe("off");
+    expect((await journeys.updateTracking(db, ws2.ctx, { consentMode: "wait" })).consentMode).toBe("wait");
+    await expect(journeys.updateTracking(db, ws2.ctx, { consentMode: "maybe" as never })).rejects.toThrow();
+    const ctx = systemContext(ws2.tenant.id, clock.now);
+    const batch = { visitorId: "v_eu_visitor_00001", sessionId: "s_eu_session_00001", events: [{ type: "page_view" as const, url: "https://acme.example.com/" }] };
+    expect(await journeys.ingestEvents(db, ctx, batch, { consentRequired: true })).toEqual({ accepted: 0, attributed: false, ref: null, dropped: "consent_required" });
+    expect(await journeys.ingestEvents(db, ctx, { ...batch, consent: "not_required" }, { consentRequired: true })).toMatchObject({ accepted: 0, dropped: "consent_required" });
+    expect(await journeys.visitorEvents(db, ws2.ctx, batch.visitorId)).toEqual([]);
+    expect(await journeys.ingestEvents(db, ctx, { ...batch, consent: "granted" }, { consentRequired: true })).toEqual({ accepted: 1, attributed: false, ref: null });
+    const [ev] = await journeys.visitorEvents(db, ws2.ctx, batch.visitorId);
+    expect(ev!.consentState).toBe("granted");
+    // without consent mode the flag is simply recorded as not required
+    expect(await journeys.ingestEvents(db, ctx, batch)).toMatchObject({ accepted: 1 });
+    const rows = await journeys.visitorEvents(db, ws2.ctx, batch.visitorId);
+    expect(rows.map((r) => r.consentState)).toEqual(["granted", "not_required"]);
+    // a sale linked to this visitor inherits the latest consent state
+    const sale = await conversions.recordConversion(db, ws2.ctx, { source: "api", externalOrderId: "EU-1", offerId: ws2.offer.id, amountMinor: 1_000, visitorId: batch.visitorId });
+    const journey = await journeys.journeyForConversion(db, ws2.ctx, sale.conversion.id, null);
+    expect(journey.events.at(-1)).toMatchObject({ type: "conversion", consentState: "not_required" });
+  });
+});

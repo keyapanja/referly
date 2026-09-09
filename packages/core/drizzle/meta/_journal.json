@@ -120,6 +120,13 @@
       "when": 1788951197576,
       "tag": "0016_journeys",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1788952984830,
+      "tag": "0017_journey_consent",
+      "breakpoints": true
     }
   ]
 }

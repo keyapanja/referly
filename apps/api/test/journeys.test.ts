@@ -222,3 +222,37 @@ describe("website tracking over HTTP", () => {
     expect((await beacon(`/t/${rotated.body.siteKey}/events`, { visitorId: visitor, sessionId: "s_browser_session2", events: [{ type: "page_view" }] })).status).toBe(200);
   });
 });
+
+describe("consent mode over HTTP", () => {
+  it("the install snippet carries data-consent, the API drops batches without consent, and orders keep working without the visitor id", async () => {
+    const signup = await call("/v1/auth/signup", { method: "POST", json: { name: "EU Shop", slug: "eu-shop", currency: "EUR", owner: { name: "Eva", email: "eva@eu.test", password: "supersecret1" } } });
+    const token = signup.body.token;
+    const on = await call("/v1/tenant/tracking/enable", { method: "POST", token });
+    expect(on.body.install).not.toContain("data-consent");
+    const saved = await call("/v1/tenant/tracking", { method: "PATCH", token, json: { domains: ["eu.test"], pixelConversions: true, consentMode: "wait" } });
+    expect(saved.status).toBe(200);
+    expect(saved.body.consentMode).toBe("wait");
+    expect(saved.body.install).toContain(`data-site="${on.body.siteKey}" data-consent="wait"`);
+    expect(saved.body.examples.consent).toContain("referly('consent'");
+    const key = on.body.siteKey;
+    const batch = { visitorId: "v_eu_browser_0001", sessionId: "s_eu_browser_0001", events: [{ type: "page_view", url: "https://eu.test/" }] };
+    const dropped = await beacon(`/t/${key}/events`, batch, "https://eu.test");
+    expect(dropped.status).toBe(200);
+    expect(dropped.body).toEqual({ ok: true, accepted: 0, ref: null, dropped: "consent_required" });
+    const kept = await beacon(`/t/${key}/events`, { ...batch, consent: "granted" }, "https://eu.test");
+    expect(kept.body).toEqual({ ok: true, accepted: 1, ref: null });
+    const events = await call(`/v1/journeys/visitors/${batch.visitorId}`, { token });
+    expect(events.body.events.map((e: any) => e.consentState)).toEqual(["granted"]);
+    // an order before consent is recorded without the visitor id; with consent it lands on the journey
+    const anon = await beacon(`/t/${key}/convert`, { visitorId: batch.visitorId, sessionId: batch.sessionId, consent: "pending", orderId: "EU-1", amount: 10 }, "https://eu.test");
+    expect(anon.status).toBe(201);
+    expect(anon.body.attributed).toBe(false);
+    expect((await call(`/v1/journeys/visitors/${batch.visitorId}`, { token })).body.events.length).toBe(1);
+    const consented = await beacon(`/t/${key}/convert`, { visitorId: batch.visitorId, sessionId: batch.sessionId, consent: "granted", orderId: "EU-2", amount: 10 }, "https://eu.test");
+    expect(consented.status).toBe(201);
+    expect((await call(`/v1/journeys/visitors/${batch.visitorId}`, { token })).body.events.map((e: any) => [e.type, e.consentState])).toEqual([["page_view", "granted"], ["conversion", "granted"]]);
+    // switching consent mode off accepts plain batches again
+    await call("/v1/tenant/tracking", { method: "PATCH", token, json: { consentMode: "off" } });
+    expect((await beacon(`/t/${key}/events`, batch, "https://eu.test")).body).toMatchObject({ accepted: 1 });
+  });
+});

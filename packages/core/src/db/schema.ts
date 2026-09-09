@@ -71,6 +71,8 @@ export interface TenantTracking {
   domains?: string[];
   /** Accept sales reported by the snippet from the merchant's thank-you page (source `pixel`). */
   pixelConversions?: boolean;
+  /** `wait`: the snippet stores and sends nothing until the page reports consent, and the API drops batches that do not carry it. */
+  consentMode?: "off" | "wait";
 }
 
 /** `{ [category]: { inApp?: boolean; email?: boolean } }`; a missing key means on. */
@@ -474,6 +476,8 @@ export const journeyEvents = pgTable(
     referrer: text("referrer"),
     conversionId: text("conversion_id").references(() => conversions.id),
     properties: jsonb("properties").$type<Record<string, unknown>>().notNull().default({}),
+    /** granted (the visitor consented through the snippet's consent mode) | not_required (no consent mode). */
+    consentState: text("consent_state").notNull().default("not_required"),
     occurredAt: ts("occurred_at").notNull(),
     createdAt: createdAt(),
   },
