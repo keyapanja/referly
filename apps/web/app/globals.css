@@ -258,6 +258,26 @@ code {
   background: var(--surface-2);
   color: var(--text);
 }
+.var-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.var-chip {
+  height: auto;
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 12px;
+  gap: 6px;
+}
+.var-chip span {
+  font-family: inherit;
+  font-family: var(--font, inherit);
+  font-size: 11.5px;
+  color: var(--muted);
+}
 .pw-wrap {
   position: relative;
   display: block;

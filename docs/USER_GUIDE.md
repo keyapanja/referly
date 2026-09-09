@@ -108,6 +108,8 @@ Groups (Groups page) classify affiliates: partner type, channel, geography, nego
 
 Assets page: upload banners, files and copy, or link to a URL. Assign access to everyone, specific groups, or specific affiliates. Affiliates download approved creative from their portal.
 
+Copy and guideline text can carry merge fields: `{{link}}` (the affiliate's own tracking link, created for them if they have none), `{{coupon_code}}`, `{{affiliate_name}}`, `{{business_name}}`, `{{offer_name}}`, `{{offer_url}}`, `{{commission}}` and `{{portal_url}}`. Write the text once; every affiliate sees it filled in with their own details and can paste it straight into a post.
+
 ## 11. Messages and notifications
 
 - **Messages → Templates**: every email and text the platform sends, per tone. Variables are fixed and safe. Edit the wording, never the logic.

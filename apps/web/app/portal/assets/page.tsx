@@ -22,8 +22,9 @@ export default function PortalAssets() {
             </div>
             {a.body ? (
               <>
-                <pre style={{ whiteSpace: "pre-wrap", fontFamily: "inherit", margin: "0 0 10px", background: "var(--surface-2)", border: "1px solid var(--border)", borderRadius: 8, padding: 12 }}>{a.body}</pre>
-                <CopyBox value={a.body} />
+                <pre style={{ whiteSpace: "pre-wrap", fontFamily: "inherit", margin: "0 0 10px", background: "var(--surface-2)", border: "1px solid var(--border)", borderRadius: 8, padding: 12 }}>{a.renderedBody ?? a.body}</pre>
+                {a.variablesUsed?.length ? <p className="help" style={{ margin: "0 0 8px" }}>Personalised for you: it already carries your {a.variablesUsed.includes("link") ? "tracking link" : "details"}{a.variablesUsed.includes("coupon_code") ? " and coupon code" : ""}. Paste it as-is.</p> : null}
+                <CopyBox value={a.renderedBody ?? a.body} />
               </>
             ) : null}
             {a.url ? (

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { api, upload } from "@/lib/api";
 import { useAction, useApi } from "@/lib/hooks";
 import { date } from "@/lib/format";
@@ -21,6 +21,23 @@ export default function AssetsPage() {
   const { busy, error: actionError, success, run } = useAction();
   const [show, setShow] = useState(false);
   const [form, setForm] = useState(emptyForm);
+  const bodyRef = useRef<HTMLTextAreaElement>(null);
+  function insertVariable(key: string) {
+    const el = bodyRef.current;
+    const token = `{{${key}}}`;
+    if (!el) {
+      setForm((f: any) => ({ ...f, body: `${f.body}${f.body && !f.body.endsWith(" ") ? " " : ""}${token}` }));
+      return;
+    }
+    const start = el.selectionStart ?? el.value.length;
+    const end = el.selectionEnd ?? start;
+    const next = `${el.value.slice(0, start)}${token}${el.value.slice(end)}`;
+    setForm((f: any) => ({ ...f, body: next }));
+    requestAnimationFrame(() => {
+      el.focus();
+      el.setSelectionRange(start + token.length, start + token.length);
+    });
+  }
   const [editing, setEditing] = useState<any>(null);
   const [file, setFile] = useState<File | null>(null);
   const [source, setSource] = useState<"upload" | "url">("upload");
@@ -132,8 +149,16 @@ export default function AssetsPage() {
               </Field>
             </div>
             {TEXT_TYPES.has(form.type) ? (
-              <Field label={form.type === "copy" ? "Approved copy" : "Guideline text"}>
-                <textarea value={form.body} onChange={(e) => setForm({ ...form, body: e.target.value })} required />
+              <Field label={form.type === "copy" ? "Approved copy" : "Guideline text"} help="Each affiliate sees this with their own link, code and name filled in. Click a field to insert it where the cursor is.">
+                <textarea ref={bodyRef} value={form.body} onChange={(e) => setForm({ ...form, body: e.target.value })} required />
+                <div className="var-chips" role="group" aria-label="Insert a field">
+                  {(data?.variables ?? []).map((v: any) => (
+                    <button key={v.key} type="button" className="var-chip" title={v.description} onClick={() => insertVariable(v.key)}>
+                      {`{{${v.key}}}`}
+                      <span>{v.label}</span>
+                    </button>
+                  ))}
+                </div>
               </Field>
             ) : FILE_TYPES.has(form.type) ? (
               <>

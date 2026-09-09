@@ -10,7 +10,7 @@ export function assetRoutes() {
     requireMerchantPrincipal(c);
     await next();
   });
-  r.get("/", async (c) => c.json({ assets: await assets.listAssets(c.get("deps").db, c.get("ctx"), { includeArchived: c.req.query("archived") === "1" }), types: assets.ASSET_TYPES }));
+  r.get("/", async (c) => c.json({ assets: await assets.listAssets(c.get("deps").db, c.get("ctx"), { includeArchived: c.req.query("archived") === "1" }), types: assets.ASSET_TYPES, variables: assets.COPY_VARIABLES }));
   r.post("/", async (c) => c.json({ asset: await assets.createAsset(c.get("deps").db, c.get("ctx"), await c.req.json()) }, 201));
   /**
    * AST-01: multipart upload. Returns the stored file's public URL and metadata; the client

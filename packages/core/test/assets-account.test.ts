@@ -1,7 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import type { Db } from "../src/db/client";
-import { closeDb, createActiveAffiliate, createWorkspace, getDb, makeClock, type Workspace } from "./helpers";
+import { clickFor, closeDb, createActiveAffiliate, createWorkspace, getDb, makeClock, type Workspace } from "./helpers";
+import * as tracking from "../src/services/tracking";
 import * as assets from "../src/services/assets";
 import * as account from "../src/services/account";
 import * as auth from "../src/services/auth";
@@ -101,5 +102,42 @@ describe("email verification and password reset", () => {
     await expect(account.resetPassword(db, { token: token2, password: "another123" }, clock.now())).rejects.toMatchObject({ code: "validation" });
     // restore for other tests
     await db.update(users).set({ passwordHash: await auth.hashPassword("password123") }).where(eq(users.id, ws.owner.id));
+  });
+
+  describe("merge fields in copy assets", () => {
+    it("renders known variables, leaves unknown ones visible, and reports which are used", () => {
+      expect(assets.renderCopy("Hi {{affiliate_name}}, use {{ link }} or code {{coupon_code}}. {{nope}}", { affiliate_name: "Ann", link: "https://x/r/abc", coupon_code: null })).toBe("Hi Ann, use https://x/r/abc or code . {{nope}}");
+      expect(assets.copyVariablesUsed("{{link}} {{link}} {{offer_url}} {{nope}}")).toEqual(["link", "offer_url"]);
+      expect(assets.COPY_VARIABLES.map((v) => v.key)).toContain("commission");
+    });
+
+    it("personalises copy per affiliate with their own link (created if missing), coupon, commission and names", async () => {
+      const ws2 = await createWorkspace(db, clock, { programOverrides: { approvalMode: "auto" } });
+      const ann = await createActiveAffiliate(db, ws2, "Ann");
+      const bea = await createActiveAffiliate(db, ws2, "Bea");
+      await tracking.createCouponCode(db, ws2.ctx, { affiliateId: bea.id, programId: ws2.program.id, code: "BEA20" });
+      const { link: beaLink } = await clickFor(db, ws2, bea, clock);
+      const asset = await assets.createAsset(db, ws2.ctx, { type: "copy", title: "Post", body: "{{affiliate_name}} recommends {{offer_name}} by {{business_name}}: {{link}} code {{coupon_code}} ({{commission}}) {{offer_url}} {{portal_url}}", visibility: "all" });
+      await assets.createAsset(db, ws2.ctx, { type: "guideline", title: "Plain", body: "No fields here", visibility: "all" });
+      const opts = { baseUrl: "https://api.test", webUrl: "https://web.test/" };
+
+      const annCtx = tenantContext(ws2.tenant.id, { type: "affiliate", id: ann.id, affiliateId: ann.id, role: "affiliate" }, clock.now);
+      const annRows = await assets.personaliseAssets(db, annCtx, ann.id, await assets.listAssetsForAffiliate(db, annCtx, ann.id), opts);
+      const annPost = annRows.find((a) => a.id === asset.id)!;
+      const annLinks = await tracking.listTrackingLinks(db, annCtx, ann.id);
+      expect(annLinks).toHaveLength(1); // created on first view
+      expect(annPost.renderedBody).toBe(`Ann recommends ${ws2.offer.name} by ${ws2.tenant.name}: https://api.test/r/${annLinks[0]!.token} code  (20%) ${ws2.offer.salesUrl} https://web.test/portal`);
+      expect(annPost.variablesUsed).toEqual(["affiliate_name", "offer_name", "business_name", "link", "coupon_code", "commission", "offer_url", "portal_url"]);
+      expect(annRows.find((a) => a.title === "Plain")!.renderedBody).toBe("No fields here");
+
+      const beaCtx = tenantContext(ws2.tenant.id, { type: "affiliate", id: bea.id, affiliateId: bea.id, role: "affiliate" }, clock.now);
+      const beaRows = await assets.personaliseAssets(db, beaCtx, bea.id, await assets.listAssetsForAffiliate(db, beaCtx, bea.id), opts);
+      const beaPost = beaRows.find((a) => a.id === asset.id)!;
+      expect(beaPost.renderedBody).toContain(`https://api.test/r/${beaLink.token}`); // existing link reused, none created
+      expect(beaPost.renderedBody).toContain("code BEA20");
+      expect(await tracking.listTrackingLinks(db, beaCtx, bea.id)).toHaveLength(1);
+      // one affiliate can never render another's copy
+      await expect(assets.personaliseAssets(db, annCtx, bea.id, [], opts)).rejects.toThrow(/scope/);
+    });
   });
 });

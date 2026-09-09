@@ -3,7 +3,9 @@ import { z } from "zod";
 import { httpUrl } from "../urls";
 import type { DbLike } from "../db/client";
 import { withTx } from "../db/client";
-import { affiliatePrograms, assetPermissions, assets, programOffers, type Asset, type AssetPermission } from "../db/schema";
+import { affiliatePrograms, affiliates, assetPermissions, assets, programOffers, programs, tenants, type Asset, type AssetPermission } from "../db/schema";
+import { listOffersForPrograms } from "./offers";
+import { createTrackingLink, listCouponCodes, listTrackingLinks, trackingUrl } from "./tracking";
 import { newId } from "../ids";
 import { notFound } from "../errors";
 import { type TenantContext, require as requirePerm, requireAffiliate } from "../context";
@@ -19,6 +21,38 @@ import { groupIdsForAffiliate } from "./groups";
  */
 
 export const ASSET_TYPES = ["image", "banner", "pdf", "video", "copy", "link", "guideline"] as const;
+
+/**
+ * Merge fields for copy and guideline assets. Merchants write `{{link}}` once; every affiliate
+ * sees the text with their own tracking link, coupon and name filled in, ready to paste.
+ */
+export const COPY_VARIABLES = [
+  { key: "link", label: "Affiliate's tracking link", description: "Their unique link for this asset's offer (or their first link). Created on first view if they have none." },
+  { key: "coupon_code", label: "Affiliate's coupon code", description: "Their active coupon code, if they have one." },
+  { key: "affiliate_name", label: "Affiliate's name", description: "As they signed up." },
+  { key: "business_name", label: "Your business name", description: "From Settings." },
+  { key: "offer_name", label: "Offer name", description: "The asset's offer, or the first offer they can promote." },
+  { key: "offer_url", label: "Offer page (untracked)", description: "The offer's public sales URL without tracking." },
+  { key: "commission", label: "Their commission", description: "For example 20% or 15.00 USD, from the program they promote." },
+  { key: "portal_url", label: "Portal link", description: "Where they sign in." },
+] as const;
+export type CopyVariable = (typeof COPY_VARIABLES)[number]["key"];
+const COPY_VARIABLE_RE = /\{\{\s*([a-z_]+)\s*\}\}/g;
+
+/** Replace known `{{variables}}`; unknown ones are left in place so a typo is visible rather than silently blank. */
+export function renderCopy(text: string, vars: Partial<Record<CopyVariable, string | null | undefined>>): string {
+  return text.replace(COPY_VARIABLE_RE, (m, name: string) => {
+    if (!COPY_VARIABLES.some((v) => v.key === name)) return m;
+    const v = vars[name as CopyVariable];
+    return v == null ? "" : String(v);
+  });
+}
+
+export function copyVariablesUsed(text: string): CopyVariable[] {
+  const out = new Set<CopyVariable>();
+  for (const m of text.matchAll(COPY_VARIABLE_RE)) if (COPY_VARIABLES.some((v) => v.key === m[1])) out.add(m[1] as CopyVariable);
+  return [...out];
+}
 
 const permissionShape = {
   programIds: z.array(z.string()).default([]),
@@ -144,6 +178,64 @@ export async function listAssets(db: DbLike, ctx: TenantContext, filter: { inclu
 }
 
 /** Portal view: only what this affiliate is allowed to see. */
+export interface PersonaliseOptions {
+  baseUrl: string;
+  webUrl: string;
+}
+
+/**
+ * Fill the merge fields of every text asset for one affiliate. Looks up their links, coupons
+ * and programs once; creates a tracking link for their first eligible offer when they have
+ * none yet, so `{{link}}` is never empty for an active affiliate.
+ */
+export async function personaliseAssets(db: DbLike, ctx: TenantContext, affiliateId: string, rows: Asset[], opts: PersonaliseOptions): Promise<(Asset & { renderedBody: string | null; variablesUsed: CopyVariable[] })[]> {
+  requireAffiliate(ctx, affiliateId);
+  const textAssets = rows.filter((a) => a.body && copyVariablesUsed(a.body).length > 0);
+  if (textAssets.length === 0) return rows.map((a) => ({ ...a, renderedBody: a.body, variablesUsed: [] }));
+
+  const [affiliate, tenant, memberships] = await Promise.all([
+    db.query.affiliates.findFirst({ where: and(eq(affiliates.id, affiliateId), eq(affiliates.tenantId, ctx.tenantId)) }),
+    db.query.tenants.findFirst({ where: eq(tenants.id, ctx.tenantId) }),
+    db.select({ programId: affiliatePrograms.programId }).from(affiliatePrograms).where(and(eq(affiliatePrograms.tenantId, ctx.tenantId), eq(affiliatePrograms.affiliateId, affiliateId), eq(affiliatePrograms.status, "active"))),
+  ]);
+  if (!affiliate || !tenant) return rows.map((a) => ({ ...a, renderedBody: a.body, variablesUsed: [] }));
+  const programIds = memberships.map((m) => m.programId);
+  const programRows = programIds.length ? await db.select().from(programs).where(and(eq(programs.tenantId, ctx.tenantId), inArray(programs.id, programIds))) : [];
+  const offerRows = programIds.length ? await listOffersForPrograms(db, ctx, programIds) : [];
+  let links = await listTrackingLinks(db, ctx, affiliateId);
+  const coupons = (await listCouponCodes(db, ctx, affiliateId)).filter((c) => c.status === "active");
+  const perms = textAssets.some((a) => a.visibility === "restricted") ? await db.select().from(assetPermissions).where(inArray(assetPermissions.assetId, textAssets.map((a) => a.id))) : [];
+
+  // A link for the first eligible offer, created once if the affiliate has none at all.
+  if (links.length === 0 && offerRows[0]) {
+    const first = offerRows[0];
+    links = [await createTrackingLink(db, ctx, { affiliateId, programId: first.programId, offerId: first.id })];
+  }
+  const commissionOf = (programId: string | null | undefined) => {
+    const p = programRows.find((x) => x.id === programId) ?? programRows[0];
+    if (!p) return "";
+    return p.commissionModel === "percentage" ? `${p.commissionRateBps / 100}%` : `${(p.commissionFixedMinor / 100).toFixed(2)} ${tenant.currency}`;
+  };
+
+  return rows.map((a) => {
+    if (!a.body || !textAssets.includes(a)) return { ...a, renderedBody: a.body, variablesUsed: [] };
+    const scopedOffer = perms.find((p) => p.assetId === a.id && p.offerId)?.offerId ?? null;
+    const link = (scopedOffer ? links.find((l) => l.offerId === scopedOffer) : null) ?? links[0] ?? null;
+    const offer = offerRows.find((o) => o.id === (scopedOffer ?? link?.offerId)) ?? offerRows[0] ?? null;
+    const vars: Partial<Record<CopyVariable, string | null>> = {
+      link: link ? trackingUrl(opts.baseUrl, link) : null,
+      coupon_code: coupons[0]?.code ?? null,
+      affiliate_name: affiliate.name,
+      business_name: tenant.name,
+      offer_name: offer?.name ?? null,
+      offer_url: offer?.salesUrl ?? null,
+      commission: commissionOf(link?.programId ?? offer?.programId),
+      portal_url: `${opts.webUrl.replace(/\/$/, "")}/portal`,
+    };
+    return { ...a, renderedBody: renderCopy(a.body, vars), variablesUsed: copyVariablesUsed(a.body) };
+  });
+}
+
 export async function listAssetsForAffiliate(db: DbLike, ctx: TenantContext, affiliateId: string): Promise<Asset[]> {
   requireAffiliate(ctx, affiliateId);
   const memberships = await db

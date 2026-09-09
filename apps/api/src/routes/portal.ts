@@ -152,7 +152,12 @@ export function portalRoutes() {
   });
 
   /** AST-02: only assets permitted for this affiliate's programs. */
-  r.get("/assets", async (c) => c.json({ assets: await assets.listAssetsForAffiliate(c.get("deps").db, c.get("ctx"), requireAffiliatePrincipal(c)) }));
+  r.get("/assets", async (c) => {
+    const affiliateId = requireAffiliatePrincipal(c);
+    const { db, config } = c.get("deps");
+    const rows = await assets.listAssetsForAffiliate(db, c.get("ctx"), affiliateId);
+    return c.json({ assets: await assets.personaliseAssets(db, c.get("ctx"), affiliateId, rows, { baseUrl: config.baseUrl, webUrl: config.webUrl }) });
+  });
 
   r.patch("/profile", async (c) => c.json({ affiliate: portalAffiliate(await affiliates.updateAffiliate(c.get("deps").db, c.get("ctx"), requireAffiliatePrincipal(c), await c.req.json())) }));
   r.put("/payout-profile", async (c) => c.json({ affiliate: portalAffiliate(await affiliates.setPayoutProfile(c.get("deps").db, c.get("ctx"), requireAffiliatePrincipal(c), await c.req.json())) }));
