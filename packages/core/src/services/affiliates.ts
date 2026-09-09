@@ -420,6 +420,12 @@ async function findOrCreateAffiliate(db: DbLike, ctx: TenantContext, input: Find
     if (input.source === "invite" && input.password) {
       const user = existing.userId ? await db.query.users.findFirst({ where: eq(users.id, existing.userId) }) : null;
       if (user) return { affiliate: existing, authenticated: await verifyPassword(input.password, user.passwordHash) };
+      // Added by the merchant by hand (or imported): no portal login yet. The invite token went to
+      // this email, so accepting it is where the login gets created.
+      const created = await createPortalUser(db, ctx, { name: input.name, email, password: input.password });
+      const [linked] = await db.update(affiliates).set({ userId: created.id, updatedAt: ctx.now() }).where(eq(affiliates.id, existing.id)).returning();
+      await writeAudit(db, ctx, { entityType: "affiliate", entityId: existing.id, action: "login_created", after: { userId: created.id } });
+      return { affiliate: linked!, authenticated: true };
     }
     return { affiliate: existing, authenticated: false };
   }
@@ -434,21 +440,7 @@ async function findOrCreateAffiliate(db: DbLike, ctx: TenantContext, input: Find
       userId = existingUser.id;
       authenticated = await verifyPassword(input.password, existingUser.passwordHash);
     } else {
-      const [user] = await db
-        .insert(users)
-        .values({
-          id: newId("user"),
-          tenantId: ctx.tenantId,
-          role: "affiliate",
-          name: input.name,
-          email,
-          passwordHash: await hashPassword(input.password),
-          status: input.initialStatus === "active" || input.initialStatus === "applied" ? "active" : "disabled",
-          createdAt: ctx.now(),
-          updatedAt: ctx.now(),
-        })
-        .returning();
-      userId = user!.id;
+      userId = (await createPortalUser(db, ctx, { name: input.name, email, password: input.password })).id;
       authenticated = true;
     }
   }
@@ -475,6 +467,15 @@ async function findOrCreateAffiliate(db: DbLike, ctx: TenantContext, input: Find
     .returning();
   await writeAudit(db, ctx, { entityType: "affiliate", entityId: affiliate!.id, action: "created", after: snapshot(affiliate!, ["id", "email", "status", "source"]) });
   return { affiliate: affiliate!, authenticated };
+}
+
+/** The portal user behind an affiliate: role `affiliate`, active, one per email per workspace. */
+async function createPortalUser(db: DbLike, ctx: TenantContext, input: { name: string; email: string; password: string }) {
+  const [user] = await db
+    .insert(users)
+    .values({ id: newId("user"), tenantId: ctx.tenantId, role: "affiliate", name: input.name, email: input.email, passwordHash: await hashPassword(input.password), status: "active", createdAt: ctx.now(), updatedAt: ctx.now() })
+    .returning();
+  return user!;
 }
 
 async function upsertMembership(db: DbLike, ctx: TenantContext, affiliate: Affiliate, program: typeof programs.$inferSelect, requested: "pending" | "active"): Promise<AffiliateProgram> {

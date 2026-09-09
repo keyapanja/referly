@@ -100,6 +100,25 @@ describe("security guards", () => {
     expect(re.membership.status).toBe("active");
   });
 
+  it("an affiliate added by hand gets a portal login when they accept an invite, and can then sign in with that password", async () => {
+    const manual = await affiliates.createAffiliate(db, ws.ctx, { name: "Hand Added", email: "hand@example.com", programIds: [ws.program.id] });
+    expect(manual.userId).toBeNull();
+    const invite = await affiliates.inviteAffiliate(db, ws.ctx, { programId: ws.program.id, email: "hand@example.com", name: "Hand Added" });
+    const publicCtx = tenantContext(ws.tenant.id, { type: "public" }, clock.now);
+    const accepted = await affiliates.acceptInvite(db, publicCtx, invite, { name: "Hand Added", password: "chosenpass123", acceptTerms: true });
+    expect(accepted.authenticated).toBe(true);
+    expect(accepted.affiliate.id).toBe(manual.id);
+    expect(accepted.affiliate.userId).toBeTruthy();
+    const user = await db.query.users.findFirst({ where: eq(users.id, accepted.affiliate.userId!) });
+    expect(user?.role).toBe("affiliate");
+    expect(await auth.verifyPassword("chosenpass123", user!.passwordHash)).toBe(true);
+    // accepting again with the wrong password keeps the record but is not authenticated
+    const invite2 = await affiliates.inviteAffiliate(db, ws.ctx, { programId: ws.program.id, email: "hand@example.com", name: "Hand Added" });
+    const again = await affiliates.acceptInvite(db, publicCtx, invite2, { name: "Hand Added", password: "wrongpass123", acceptTerms: true });
+    expect(again.authenticated).toBe(false);
+    expect(again.affiliate.userId).toBe(accepted.affiliate.userId);
+  });
+
   it("commission reversal and settlement need commissions.write; balance adjustments need an affiliate of this tenant", async () => {
     const readonly = tenantContext(ws.tenant.id, { type: "user", id: "usr_ro", role: "readonly" }, clock.now);
     await expect(commissions.reverseCommission(db, readonly, "com_x", "because")).rejects.toThrow(/commissions.write/);
