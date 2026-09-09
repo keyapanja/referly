@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { api, setSignedInHint } from "@/lib/api";
 import { useAction } from "@/lib/hooks";
-import { Alert, CopyBox, Field } from "@/components/ui";
+import { Alert, CopyBox, Field, PasswordInput } from "@/components/ui";
 import { toMinor } from "@/lib/format";
 import { AuthBrand } from "@/components/shell";
 
@@ -114,7 +114,7 @@ export default function SignupPage() {
                 <input type="email" value={account.email} onChange={(e) => setAccount({ ...account, email: e.target.value })} required />
               </Field>
               <Field label="Password" help="At least 8 characters.">
-                <input type="password" value={account.password} onChange={(e) => setAccount({ ...account, password: e.target.value })} minLength={8} required />
+                <PasswordInput value={account.password} onChange={(e) => setAccount({ ...account, password: e.target.value })} minLength={8} required />
               </Field>
             </>
           )}

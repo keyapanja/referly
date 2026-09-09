@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { useAction, useApi } from "@/lib/hooks";
-import { Alert, Field, Loading, PageHeader } from "@/components/ui";
+import { Alert, Field, Loading, PageHeader, PasswordInput } from "@/components/ui";
 
 export default function PortalProfile() {
   const { data, error, reload } = useApi<any>("/portal/me");
@@ -152,10 +152,10 @@ export default function PortalProfile() {
         >
           <div className="row">
             <Field label="Current password">
-              <input type="password" value={pw.currentPassword} onChange={(e) => setPw({ ...pw, currentPassword: e.target.value })} required autoComplete="current-password" />
+              <PasswordInput value={pw.currentPassword} onChange={(e) => setPw({ ...pw, currentPassword: e.target.value })} required autoComplete="current-password" />
             </Field>
             <Field label="New password" help="At least 8 characters.">
-              <input type="password" value={pw.newPassword} onChange={(e) => setPw({ ...pw, newPassword: e.target.value })} required minLength={8} autoComplete="new-password" />
+              <PasswordInput value={pw.newPassword} onChange={(e) => setPw({ ...pw, newPassword: e.target.value })} required minLength={8} autoComplete="new-password" />
             </Field>
           </div>
           <button disabled={busy}>Change password</button>

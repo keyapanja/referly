@@ -6,7 +6,7 @@ import { useState } from "react";
 import { api, setSignedInHint } from "@/lib/api";
 import { useAction, useApi } from "@/lib/hooks";
 import { money } from "@/lib/format";
-import { Alert, Field, Loading } from "@/components/ui";
+import { Alert, Field, Loading, PasswordInput } from "@/components/ui";
 import { AuthBrand } from "@/components/shell";
 import { brandStyle } from "@/lib/brand";
 
@@ -91,7 +91,7 @@ export default function JoinPage() {
                 <input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} required />
               </Field>
               <Field label="Choose a password">
-                <input type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} minLength={8} required />
+                <PasswordInput value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} minLength={8} required />
               </Field>
               <Field label="Website or main channel">
                 <input value={form.website} onChange={(e) => setForm({ ...form, website: e.target.value })} />

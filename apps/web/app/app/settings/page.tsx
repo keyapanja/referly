@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { api, API_URL } from "@/lib/api";
 import { useAction, useApi } from "@/lib/hooks";
 import { dateTime } from "@/lib/format";
-import { Alert, Badge, CopyBox, Field, Loading, PageHeader, Table } from "@/components/ui";
+import { Alert, Badge, CopyBox, Field, Loading, PageHeader, PasswordInput, Table } from "@/components/ui";
 import { DataRetentionCard } from "@/components/data-card";
 
 export default function SettingsPage() {
@@ -237,7 +237,7 @@ export default function SettingsPage() {
                     >
                       {provider === "stripe_connect" ? (
                         <Field label="Stripe secret key" help="From the Stripe dashboard (Developers → API keys). Restricted keys with transfer and account permissions also work.">
-                          <input type="password" value={stripeKey} onChange={(e) => setStripeKey(e.target.value)} placeholder="sk_live_…" required />
+                          <PasswordInput value={stripeKey} onChange={(e) => setStripeKey(e.target.value)} placeholder="sk_live_…" required />
                         </Field>
                       ) : (
                         <>
@@ -246,7 +246,7 @@ export default function SettingsPage() {
                               <input value={paypal.clientId} onChange={(e) => setPaypal({ ...paypal, clientId: e.target.value })} required />
                             </Field>
                             <Field label="Client secret">
-                              <input type="password" value={paypal.clientSecret} onChange={(e) => setPaypal({ ...paypal, clientSecret: e.target.value })} required />
+                              <PasswordInput value={paypal.clientSecret} onChange={(e) => setPaypal({ ...paypal, clientSecret: e.target.value })} required />
                             </Field>
                           </div>
                           <label className="checkbox" style={{ marginBottom: 10 }}>
@@ -311,7 +311,7 @@ export default function SettingsPage() {
                           <input value={twilio.accountSid} onChange={(e) => setTwilio({ ...twilio, accountSid: e.target.value })} placeholder="AC…" required />
                         </Field>
                         <Field label="Auth token">
-                          <input type="password" value={twilio.authToken} onChange={(e) => setTwilio({ ...twilio, authToken: e.target.value })} required />
+                          <PasswordInput value={twilio.authToken} onChange={(e) => setTwilio({ ...twilio, authToken: e.target.value })} required />
                         </Field>
                       </div>
                       <div className="row">
@@ -343,10 +343,10 @@ export default function SettingsPage() {
             >
               <div className="row">
                 <Field label="Current password">
-                  <input type="password" value={pw.currentPassword} onChange={(e) => setPw({ ...pw, currentPassword: e.target.value })} required autoComplete="current-password" />
+                  <PasswordInput value={pw.currentPassword} onChange={(e) => setPw({ ...pw, currentPassword: e.target.value })} required autoComplete="current-password" />
                 </Field>
                 <Field label="New password" help="At least 8 characters.">
-                  <input type="password" value={pw.newPassword} onChange={(e) => setPw({ ...pw, newPassword: e.target.value })} required minLength={8} autoComplete="new-password" />
+                  <PasswordInput value={pw.newPassword} onChange={(e) => setPw({ ...pw, newPassword: e.target.value })} required minLength={8} autoComplete="new-password" />
                 </Field>
               </div>
               <button disabled={busy}>Change password</button>

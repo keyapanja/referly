@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useState, type InputHTMLAttributes, type ReactNode } from "react";
 import { Icon } from "./icons";
 
 export function Badge({ value }: { value: string | null | undefined }) {
@@ -32,6 +32,19 @@ export function PageHeader({ title, subtitle, actions }: { title: string; subtit
       </div>
       {actions ? <div className="actions">{actions}</div> : null}
     </div>
+  );
+}
+
+/** Password input with a show/hide toggle. Takes every prop a plain input does. */
+export function PasswordInput(props: InputHTMLAttributes<HTMLInputElement>) {
+  const [shown, setShown] = useState(false);
+  return (
+    <span className="pw-wrap">
+      <input {...props} type={shown ? "text" : "password"} />
+      <button type="button" className="pw-toggle" onClick={() => setShown((s) => !s)} aria-label={shown ? "Hide password" : "Show password"} title={shown ? "Hide password" : "Show password"} tabIndex={-1}>
+        <Icon name={shown ? "eyeOff" : "eye"} width={16} height={16} />
+      </button>
+    </span>
   );
 }
 

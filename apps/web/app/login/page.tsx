@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";
 import { api, setSignedInHint } from "@/lib/api";
 import { useAction } from "@/lib/hooks";
-import { Alert, Field } from "@/components/ui";
+import { Alert, Field, PasswordInput } from "@/components/ui";
 import { AuthBrand } from "@/components/shell";
 
 function LoginForm() {
@@ -36,7 +36,7 @@ function LoginForm() {
             <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoFocus />
           </Field>
           <Field label="Password">
-            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+            <PasswordInput value={password} onChange={(e) => setPassword(e.target.value)} required />
             <div className="help" style={{ textAlign: "right" }}>
               <Link href="/forgot-password">Forgot password?</Link>
             </div>

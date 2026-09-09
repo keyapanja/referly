@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";
 import { api, setSignedInHint } from "@/lib/api";
 import { useAction } from "@/lib/hooks";
-import { Alert, Field } from "@/components/ui";
+import { Alert, Field, PasswordInput } from "@/components/ui";
 import { AuthBrand } from "@/components/shell";
 
 function ResetInner() {
@@ -42,10 +42,10 @@ function ResetInner() {
             }}
           >
             <Field label="New password" help="At least 8 characters.">
-              <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} minLength={8} required autoFocus />
+              <PasswordInput value={password} onChange={(e) => setPassword(e.target.value)} minLength={8} required autoFocus />
             </Field>
             <Field label="Confirm password">
-              <input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} minLength={8} required />
+              <PasswordInput value={confirm} onChange={(e) => setConfirm(e.target.value)} minLength={8} required />
             </Field>
             <button className="primary" disabled={busy || !token}>
               {busy ? "Saving…" : "Set password"}
