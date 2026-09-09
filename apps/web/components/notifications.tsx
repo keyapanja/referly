@@ -5,9 +5,8 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { useAction, useApi } from "@/lib/hooks";
-import { dateTime } from "@/lib/format";
 import { Alert, Loading, PageHeader } from "@/components/ui";
-import { Icon } from "@/components/icons";
+import { Icon, type IconName } from "@/components/icons";
 
 /** Pages fire this after marking notifications read so the bell updates without waiting for the next poll. */
 const REFRESH_EVENT = "referly:notifications";
@@ -40,7 +39,37 @@ export function NotificationBell({ base }: { base: "/v1/notifications" | "/porta
   );
 }
 
-/** Notifications page shared by the merchant app and the portal: feed, mark read, category preferences. */
+/** Day bucket label for grouping the feed. */
+function dayLabel(iso: string): string {
+  const d = new Date(iso);
+  const today = new Date();
+  const startOf = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const diff = Math.round((startOf(today) - startOf(d)) / 86_400_000);
+  if (diff === 0) return "Today";
+  if (diff === 1) return "Yesterday";
+  return d.toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long", ...(d.getFullYear() !== today.getFullYear() ? { year: "numeric" } : {}) });
+}
+
+function timeLabel(iso: string): string {
+  return new Date(iso).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+}
+
+const CATEGORY_ICON: Record<string, IconName> = {
+  applications: "users",
+  sales: "receipt",
+  leads: "inbox",
+  disputes: "alert",
+  payouts: "banknote",
+  tasks: "check",
+  account: "user",
+  earnings: "percent",
+  affiliate_payouts: "wallet",
+  campaigns: "megaphone",
+  affiliate_disputes: "alert",
+  program: "layers",
+};
+
+/** Notifications page shared by the merchant app and the portal: feed grouped by day, mark read, category preferences. */
 export function NotificationsPage({ base }: { base: "/v1/notifications" | "/portal/notifications" }) {
   const router = useRouter();
   const [filter, setFilter] = useState<"unread" | "all">("unread");
@@ -60,6 +89,13 @@ export function NotificationsPage({ base }: { base: "/v1/notifications" | "/port
 
   if (!data) return <Loading error={error} />;
   const items: any[] = data.notifications;
+  const groups: { label: string; items: any[] }[] = [];
+  for (const n of items) {
+    const label = dayLabel(n.createdAt);
+    const g = groups[groups.length - 1];
+    if (g && g.label === label) g.items.push(n);
+    else groups.push({ label, items: [n] });
+  }
 
   return (
     <>
@@ -83,67 +119,93 @@ export function NotificationsPage({ base }: { base: "/v1/notifications" | "/port
         }
       />
       <Alert kind="error">{actionError}</Alert>
-      <div className="card" style={{ padding: 0 }}>
-        {items.length === 0 ? (
-          <p className="muted" style={{ padding: 16, margin: 0 }}>
-            {filter === "unread" ? "Nothing unread." : "No notifications yet."}
-          </p>
-        ) : (
-          <ul className="notif-list">
-            {items.map((n) => (
-              <li key={n.id} className={n.readAt ? "read" : "unread"}>
-                <button className="notif" onClick={() => open(n)}>
-                  <span className="dot" aria-hidden />
-                  <span className="notif-body">
-                    <strong>{n.title}</strong>
-                    {n.body ? <span className="muted">{n.body}</span> : null}
-                    <small className="muted">
-                      {dateTime(n.createdAt)} · {n.category.replace(/^affiliate_/, "").replace(/_/g, " ")}
-                    </small>
-                  </span>
-                  {n.link ? <Icon name="chevron" /> : null}
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
+      {items.length === 0 ? (
+        <div className="card notif-empty">
+          <Icon name="bell" width={22} height={22} />
+          <strong>{filter === "unread" ? "Nothing unread" : "No notifications yet"}</strong>
+          <span className="muted">{filter === "unread" ? "New activity shows up here as it happens." : isPortal ? "Approvals, sales, payouts and campaign invites will appear here." : "Applications, sales, leads, disputes and tasks will appear here."}</span>
+        </div>
+      ) : (
+        groups.map((g) => (
+          <section key={g.label} className="notif-group">
+            <h3 className="notif-day">{g.label}</h3>
+            <div className="card notif-card">
+              <ul className="notif-list">
+                {g.items.map((n) => (
+                  <li key={n.id} className={n.readAt ? "read" : "unread"}>
+                    <button className="notif" onClick={() => open(n)}>
+                      <span className={`notif-icon cat-${n.category}`} aria-hidden>
+                        <Icon name={CATEGORY_ICON[n.category] ?? "bell"} width={15} height={15} />
+                      </span>
+                      <span className="notif-body">
+                        <span className="notif-title">
+                          <strong>{n.title}</strong>
+                          {!n.readAt ? <span className="notif-new" aria-label="unread" /> : null}
+                        </span>
+                        {n.body ? <span className="notif-text">{n.body}</span> : null}
+                      </span>
+                      <span className="notif-meta">
+                        <span className="notif-cat">{n.category.replace(/^affiliate_/, "").replace(/_/g, " ")}</span>
+                        <time dateTime={n.createdAt}>{timeLabel(n.createdAt)}</time>
+                      </span>
+                      {n.link ? <Icon name="chevron" width={16} height={16} className="notif-go" /> : null}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </section>
+        ))
+      )}
       {prefs ? (
-        <div className="card">
-          <h2>What you're notified about</h2>
-          <p className="muted">{isPortal ? "Switch categories off here for the app and for email. Account and security emails are always sent." : "Switch categories off for your in-app feed. These settings are yours alone; teammates have their own."}</p>
-          <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Category</th>
-                <th style={{ textAlign: "center" }}>In app</th>
-                {isPortal ? <th style={{ textAlign: "center" }}>Email</th> : null}
-              </tr>
-            </thead>
-            <tbody>
+        <section className="notif-group">
+          <h3 className="notif-day">Preferences</h3>
+          <div className="card notif-card">
+            <div className="notif-prefs-head">
+              <div>
+                <strong>What you're notified about</strong>
+                <div className="muted">{isPortal ? "Switch categories off for the app and for email. Account and security emails are always sent." : "Switch categories off for your in-app feed. These settings are yours alone; teammates have their own."}</div>
+              </div>
+              <div className="notif-prefs-cols" aria-hidden>
+                <span>In app</span>
+                {isPortal ? <span>Email</span> : null}
+              </div>
+            </div>
+            <ul className="notif-prefs">
               {prefs.categories.map((c: any) => {
                 const on = (ch: "inApp" | "email") => prefs.prefs[c.key]?.[ch] !== false;
                 const toggle = (ch: "inApp" | "email") => run(() => api(`${base}/preferences`, { method: "PATCH", json: { [c.key]: { [ch]: !on(ch) } } })).then(reloadPrefs);
                 return (
-                  <tr key={c.key}>
-                    <td>
+                  <li key={c.key}>
+                    <span className={`notif-icon cat-${c.key}`} aria-hidden>
+                      <Icon name={CATEGORY_ICON[c.key] ?? "bell"} width={15} height={15} />
+                    </span>
+                    <span className="notif-body">
                       <strong>{c.label}</strong>
-                      <div className="muted">{c.description}</div>
-                    </td>
-                    <td style={{ textAlign: "center" }}>
-                      <input type="checkbox" checked={on("inApp")} disabled={busy} onChange={() => toggle("inApp")} aria-label={`${c.label} in app`} />
-                    </td>
-                    {isPortal ? (
-                      <td style={{ textAlign: "center" }}>{c.email ? <input type="checkbox" checked={on("email")} disabled={busy} onChange={() => toggle("email")} aria-label={`${c.label} by email`} /> : <span className="muted">—</span>}</td>
-                    ) : null}
-                  </tr>
+                      <span className="notif-text">{c.description}</span>
+                    </span>
+                    <span className="notif-switches">
+                      <label className="switch" title={`${c.label} in app`}>
+                        <input type="checkbox" checked={on("inApp")} disabled={busy} onChange={() => toggle("inApp")} aria-label={`${c.label} in app`} />
+                        <span className="track" />
+                      </label>
+                      {isPortal ? (
+                        c.email ? (
+                          <label className="switch" title={`${c.label} by email`}>
+                            <input type="checkbox" checked={on("email")} disabled={busy} onChange={() => toggle("email")} aria-label={`${c.label} by email`} />
+                            <span className="track" />
+                          </label>
+                        ) : (
+                          <span className="switch-blank" aria-hidden />
+                        )
+                      ) : null}
+                    </span>
+                  </li>
                 );
               })}
-            </tbody>
-          </table>
+            </ul>
           </div>
-        </div>
+        </section>
       ) : null}
     </>
   );
