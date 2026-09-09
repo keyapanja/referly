@@ -30,7 +30,11 @@ api.yourdomain.com {
 
 `BASE_URL` must be the public API origin: tracking links (`/r/<token>`) are served from it, and `cookieSecure` switches on automatically when it starts with `https`.
 
-## Option B: managed hosting
+## Option B: Coolify on one VPS
+
+A self-hosted platform-as-a-service that builds both images from this repository, runs Postgres beside them and handles TLS. Step by step in [COOLIFY.md](COOLIFY.md).
+
+## Option C: managed hosting
 
 - **Database:** Neon, Supabase, RDS or similar. Set `DATABASE_URL` on the API.
 - **API:** any container host (Render, Railway, Fly.io, ECS). Image: `ghcr.io/<owner>/referly-api` from the Publish images workflow, or build `apps/api/Dockerfile`. Health check `GET /health` returns 503 when the database is unreachable.

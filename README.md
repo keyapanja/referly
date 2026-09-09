@@ -66,7 +66,7 @@ The worker takes an encrypted logical backup every day (database plus uploaded f
 
 ## Deploy
 
-Docker images for the API and web app, a `docker-compose.yml` with Postgres, and GitHub Actions for CI and image publishing are included. See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
+Docker images for the API and web app, a `docker-compose.yml` with Postgres, and GitHub Actions for CI and image publishing are included. See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for the general picture, or [docs/COOLIFY.md](docs/COOLIFY.md) for a step-by-step Coolify install on a single VPS.
 
 ## Core concepts
 
