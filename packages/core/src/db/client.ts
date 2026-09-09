@@ -36,7 +36,8 @@ const migrationsFolder = path.resolve(path.dirname(fileURLToPath(import.meta.url
 export const APP_ROLE = "referly_app";
 
 const APP_ROLE_SETUP = [
-  sql`do $$ begin if not exists (select 1 from pg_roles where rolname = 'referly_app') then create role referly_app nosuperuser nocreatedb nocreaterole nobypassrls; end if; end $$`,
+  // Roles are cluster-wide; parallel test databases on one server can race here, so the create tolerates losing.
+  sql`do $$ begin if not exists (select 1 from pg_roles where rolname = 'referly_app') then begin create role referly_app nosuperuser nocreatedb nocreaterole nobypassrls; exception when duplicate_object or unique_violation then null; end; end if; end $$`,
   sql`grant usage on schema public to referly_app`,
   sql`grant all on all tables in schema public to referly_app`,
   sql`grant usage, select, update on all sequences in schema public to referly_app`,
