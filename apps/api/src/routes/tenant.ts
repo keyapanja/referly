@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { z } from "zod";
-import { tenants, auth, audit, account, plans, integrations, retention, MERCHANT_ROLES, API_KEY_SCOPES, forbidden } from "@referly/core";
+import { tenants, auth, audit, account, plans, integrations, retention, journeys, MERCHANT_ROLES, API_KEY_SCOPES, forbidden } from "@referly/core";
+import { installSnippet, SNIPPET_EXAMPLES } from "../snippet";
 import { getCookie } from "hono/cookie";
 import { requireMerchantPrincipal, SESSION_COOKIE, type AppEnv } from "../lib/auth";
 import { publicUser } from "./auth";
@@ -96,6 +97,26 @@ export function tenantRoutes() {
   r.get("/audit", async (c) => {
     const q = c.req.query();
     return c.json({ entries: await audit.listAudit(c.get("deps").db, c.get("ctx"), { entityType: q.entityType, entityId: q.entityId, limit: q.limit ? Number(q.limit) : undefined }) });
+  });
+
+  /** Website tracking (TRK-09): site key, domain list, snippet-reported orders, install snippet and recent activity. */
+  async function trackingView(c: Parameters<typeof requireMerchantPrincipal>[0]) {
+    const view = await journeys.getTracking(c.get("deps").db, c.get("ctx"));
+    const base = c.get("deps").config.baseUrl.replace(/\/$/, "");
+    return { ...view, scriptUrl: `${base}/referly.js`, install: view.siteKey ? installSnippet(base, view.siteKey) : null, examples: SNIPPET_EXAMPLES };
+  }
+  r.get("/tracking", async (c) => c.json(await trackingView(c)));
+  r.post("/tracking/enable", async (c) => {
+    await journeys.enableTracking(c.get("deps").db, c.get("ctx"));
+    return c.json(await trackingView(c));
+  });
+  r.post("/tracking/rotate", async (c) => {
+    await journeys.rotateSiteKey(c.get("deps").db, c.get("ctx"));
+    return c.json(await trackingView(c));
+  });
+  r.patch("/tracking", async (c) => {
+    await journeys.updateTracking(c.get("deps").db, c.get("ctx"), await c.req.json());
+    return c.json(await trackingView(c));
   });
 
   /** Data retention: the workspace's policy, the platform defaults, and what the next prune would delete. */

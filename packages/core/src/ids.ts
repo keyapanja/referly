@@ -48,6 +48,7 @@ export const ID_PREFIXES = {
   maintenanceRun: "mnt",
   notification: "ntf",
   lead: "lead",
+  journeyEvent: "jev",
 } as const;
 
 export type IdKind = keyof typeof ID_PREFIXES;

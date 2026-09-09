@@ -10,6 +10,7 @@ import { writeAudit } from "./audit";
 import { recordConversion, approveConversion, cancelConversion, currentCommission, hashEmail, CONVERSION_SOURCES } from "./conversions";
 import { approveCommission } from "./commissions";
 import { httpUrl } from "../urls";
+import { VISITOR_ID } from "./journeys";
 
 /**
  * Leads intake (pay-per-lead programs). A lead is a conversion of kind `lead` with a contact
@@ -47,6 +48,8 @@ export const recordLeadSchema = z
     clickToken: z.string().optional(),
     clickTokens: z.array(z.string()).optional(),
     couponCode: z.string().max(40).optional(),
+    /** Visitor id from the site snippet, when the form carried it. */
+    visitorId: z.string().regex(VISITOR_ID).optional(),
     occurredAt: z.coerce.date().optional(),
     /** Manual attribution: explicit affiliate + program with a reason. */
     affiliateId: z.string().optional(),
@@ -105,6 +108,7 @@ export async function recordLead(db: DbLike, ctx: TenantContext, rawInput: Recor
       clickToken: input.clickToken,
       clickTokens: input.clickTokens,
       couponCode: input.couponCode,
+      visitorId: input.visitorId,
       occurredAt,
       affiliateId: input.affiliateId,
       reason: input.reason,
@@ -302,6 +306,8 @@ export const captureSchema = z.object({
   ...contactShape,
   /** Click token forwarded from the redirect's `ref` query parameter. */
   ref: z.string().max(200).optional(),
+  /** Visitor id the site snippet fills into a hidden `referly_visitor` field. */
+  visitorId: z.string().regex(VISITOR_ID).optional(),
   couponCode: z.string().max(40).optional(),
   /** Where to send the browser afterwards (plain HTML forms); must be http(s). */
   redirect: httpUrl.optional(),

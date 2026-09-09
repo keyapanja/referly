@@ -15,8 +15,9 @@ import { createCommissionForConversion, reduceCommissionRow, reverseCommissionRo
 import { evaluateBonus, findLiveCampaign } from "./campaigns";
 import { getMembership } from "./affiliates";
 import { proportion } from "../money";
+import { linkConversion, visitorClickTokens, VISITOR_ID } from "./journeys";
 
-export const CONVERSION_SOURCES = ["webhook", "api", "manual", "stripe", "shopify", "woocommerce", "import", "form"] as const;
+export const CONVERSION_SOURCES = ["webhook", "api", "manual", "stripe", "shopify", "woocommerce", "import", "form", "pixel"] as const;
 export const CONVERSION_KINDS = ["sale", "lead"] as const;
 export type ConversionKind = (typeof CONVERSION_KINDS)[number];
 
@@ -37,6 +38,8 @@ export const recordConversionSchema = z.object({
   clickToken: z.string().optional(),
   clickTokens: z.array(z.string()).optional(),
   couponCode: z.string().max(40).optional(),
+  /** Visitor id from the site snippet (TRK-09): its recorded clicks join the candidates and the sale lands on the visitor's journey. */
+  visitorId: z.string().regex(VISITOR_ID).optional(),
   occurredAt: z.coerce.date().optional(),
   metadata: z.record(z.string(), z.unknown()).default({}),
   /** Manual attribution (CONV-05/TRK-08): explicit affiliate + program; requires a reason. */
@@ -78,6 +81,8 @@ export async function recordConversion(db: DbLike, ctx: TenantContext, rawInput:
       }
       const occurredAt = input.occurredAt ?? ctx.now();
       const clickTokens = [...(input.clickTokens ?? []), ...(input.clickToken ? [input.clickToken] : [])];
+      // The snippet's visitor id stands in for a lost cookie: every click that visitor arrived through is a candidate.
+      if (input.visitorId) for (const t of await visitorClickTokens(tx, ctx, input.visitorId)) if (!clickTokens.includes(t)) clickTokens.push(t);
 
       let decision: AttributionDecision | null;
       let manualReason: string | undefined;
@@ -129,6 +134,7 @@ export async function recordConversion(db: DbLike, ctx: TenantContext, rawInput:
         commission = await createCommissionForConversion(tx, ctx, { conversion: conversion!, attributionId: attribution.id, affiliateId: decision.affiliateId, program, isTest: decision.isTest, campaign });
         if (campaign && !decision.isTest) await evaluateBonus(tx, ctx, campaign, decision.affiliateId, conversion!.currency);
       }
+      await linkConversion(tx, ctx, { conversion: conversion!, visitorId: input.visitorId ?? null, clickId: decision?.clickId ?? null });
       await writeAudit(tx, ctx, { entityType: "conversion", entityId: conversion!.id, action: "created", after: snapshot(conversion!), reason: manualReason });
       await emitEvent(tx, ctx, "conversion.created", { type: "conversion", id: conversion!.id }, {
         kind: conversion!.kind,

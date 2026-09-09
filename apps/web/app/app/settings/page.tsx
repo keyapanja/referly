@@ -7,6 +7,7 @@ import { useAction, useApi } from "@/lib/hooks";
 import { dateTime } from "@/lib/format";
 import { Alert, Badge, CopyBox, Field, Loading, PageHeader, PasswordInput, Table } from "@/components/ui";
 import { DataRetentionCard } from "@/components/data-card";
+import { WebsiteTrackingCard } from "@/components/tracking-card";
 
 export default function SettingsPage() {
   const { data, error, reload } = useApi<any>("/v1/tenant");
@@ -202,6 +203,7 @@ export default function SettingsPage() {
               <button disabled={busy || keyScopes.length === 0}>Create API key</button>
             </form>
           </div>
+          <WebsiteTrackingCard />
           <div className="card">
             <h2>Payout providers</h2>
             <p className="muted">Pay affiliates automatically. Credentials are verified with the provider and stored encrypted; only a hint is shown afterwards. Manual payouts keep working alongside.</p>

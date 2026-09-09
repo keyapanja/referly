@@ -1,13 +1,36 @@
 import { Hono, type Context } from "hono";
+import { z } from "zod";
+import { eq } from "drizzle-orm";
 import { getCookie, setCookie } from "hono/cookie";
 import { tracking, programs, affiliates, auth, tenants, systemContext, notFound, validation, offers, integrations, messaging, textProviders, webhookDeliveries, newId } from "@referly/core";
 import { setSessionCookie, type AppEnv } from "../lib/auth";
 import { scopeRequest } from "../lib/rls";
-import { leads as leadsSvc } from "@referly/core";
+import { leads as leadsSvc, journeys, conversions as conversionsSvc, webhookDeliveries as deliveriesTable } from "@referly/core";
 import { publicTenant } from "./auth";
+import { SNIPPET_JS } from "../snippet";
 
 export const CLICK_COOKIE = "referly_clicks";
 const MAX_COOKIE_TOKENS = 10;
+
+/** What the snippet's convert call may carry. Amount in major units (129.00) or minor (12900). */
+const pixelOrderSchema = z.object({
+  orderId: z.coerce.string().trim().min(1).max(200),
+  amount: z.coerce.number().min(0).max(1e9).optional(),
+  amountMinor: z.coerce.number().int().min(0).max(1e11).optional(),
+  currency: z.string().trim().length(3).toUpperCase().optional(),
+  email: z.string().trim().email().max(320).optional(),
+  couponCode: z.string().trim().max(40).optional(),
+  offerId: z.string().max(60).optional(),
+  ref: z.string().max(64).optional(),
+  visitorId: z.string().regex(journeys.VISITOR_ID).optional(),
+  sessionId: z.string().regex(journeys.VISITOR_ID).optional(),
+  url: z.string().max(2000).optional(),
+});
+
+const ZERO_DECIMAL = new Set(["JPY", "KRW", "VND", "CLP", "ISK", "UGX", "XAF", "XOF", "PYG", "RWF"]);
+function toMinor(amount: number, currency: string): number {
+  return Math.round(amount * (ZERO_DECIMAL.has(currency.toUpperCase()) ? 1 : 100));
+}
 
 /**
  * Unauthenticated endpoints. Tenant is always derived from an opaque token in the URL
@@ -106,75 +129,117 @@ export function publicRoutes() {
     return c.redirect(url.toString(), 302);
   });
 
+  /**
+   * Lead capture for forms on the merchant's site. JSON or form-encoded; `ref` carries the click
+   * token the /r redirect placed in the destination URL. Returns JSON, or redirects when the
+   * form asks for it. Never echoes the contact back and never reveals whether the program exists
+   * beyond a 404.
+   */
+  r.post("/capture/:token", async (c) => {
+    const { db } = c.get("deps");
+    const program = await leadsSvc.getProgramByCaptureToken(db, c.req.param("token"));
+    if (!program || !program.leadsEnabled || program.status !== "active") throw notFound("capture form");
+    await scopeRequest(c, program.tenantId);
+    const ctx = systemContext(program.tenantId, c.get("now"));
+    const contentType = c.req.header("content-type") ?? "";
+    const raw: Record<string, unknown> = contentType.includes("application/json") ? await c.req.json() : Object.fromEntries((await c.req.formData()).entries());
+    const fields: Record<string, string> = {};
+    const known = new Set(["name", "email", "phone", "company", "ref", "couponCode", "redirect", "landingUrl", "fields"]);
+    for (const [k, v] of Object.entries(raw)) if (!known.has(k) && typeof v === "string" && k.length <= 60) fields[k] = v.slice(0, 2000);
+    const input = leadsSvc.captureSchema.parse({ ...raw, fields: { ...fields, ...((raw.fields as Record<string, string> | undefined) ?? {}) }, landingUrl: (raw.landingUrl as string | undefined) ?? c.req.header("referer") });
+    const result = await leadsSvc.recordLead(db, ctx, {
+      source: "form",
+      programId: program.id,
+      name: input.name,
+      email: input.email,
+      phone: input.phone,
+      company: input.company,
+      fields: input.fields,
+      landingUrl: input.landingUrl,
+      clickToken: input.ref,
+      couponCode: input.couponCode,
+    });
+    if (input.redirect) return c.redirect(input.redirect, 303);
+    return c.json({ ok: true, leadId: result.lead.id, duplicate: result.disposition === "duplicate" }, 201);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Website tracking snippet (TRK-09)
+  // ---------------------------------------------------------------------------
+
+  /** The snippet itself. Cacheable; the site key travels in the script tag, not in the file. */
+  r.get("/referly.js", (c) => c.text(SNIPPET_JS, 200, { "content-type": "application/javascript; charset=utf-8", "cache-control": "public, max-age=3600" }));
+
+  /**
+   * Resolve the site key to a workspace and check the browser origin against its domain list.
+   * One answer for unknown key, inactive workspace and disallowed origin so nothing enumerates.
+   */
+  async function siteTenant(c: Context<AppEnv, "/t/:siteKey/events" | "/t/:siteKey/convert">) {
+    const tenant = await journeys.getTenantBySiteKey(c.get("deps").db, c.req.param("siteKey"));
+    if (!tenant || tenant.status !== "active") throw notFound("site");
+    if (!journeys.originAllowed(tenant.tracking, c.req.header("origin"))) throw notFound("site");
+    await scopeRequest(c, tenant.id);
+    return tenant;
+  }
+
+  /** The snippet sends text/plain (no preflight, works with sendBeacon); the body is JSON. */
+  async function snippetBody(c: Context<AppEnv, "/t/:siteKey/events" | "/t/:siteKey/convert">): Promise<Record<string, unknown>> {
+    const text = await c.req.text();
+    try {
+      const parsed = JSON.parse(text);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("not an object");
+      return parsed as Record<string, unknown>;
+    } catch {
+      throw validation("body must be a JSON object");
+    }
+  }
+
+  /** Page views and custom events. Nothing about the affiliate is echoed back; only whether to keep the ref and for how long. */
+  r.post("/t/:siteKey/events", async (c) => {
+    const tenant = await siteTenant(c);
+    const result = await journeys.ingestEvents(c.get("deps").db, systemContext(tenant.id, c.get("now")), (await snippetBody(c)) as journeys.IngestInput);
+    return c.json({ ok: true, accepted: result.accepted, ref: result.ref });
+  });
+
+  /**
+   * An order reported from the thank-you page. Off by default; the merchant turns it on for a
+   * fixed domain list. Recorded as source `pixel` so it is distinguishable from server-side
+   * intake, idempotent on the order id, attributed by the ref, the visitor's recorded clicks or a
+   * coupon like every other conversion. Logged as a delivery for debugging like the API endpoint.
+   */
+  r.post("/t/:siteKey/convert", async (c) => {
+    const tenant = await siteTenant(c);
+    if (!tenant.tracking?.pixelConversions) throw notFound("site");
+    const { db } = c.get("deps");
+    const ctx = systemContext(tenant.id, c.get("now"));
+    const body = await snippetBody(c);
+    const input = pixelOrderSchema.parse(body);
+    const amountMinor = input.amountMinor ?? toMinor(input.amount ?? 0, input.currency ?? tenant.currency);
+    const deliveryId = newId("webhookDelivery");
+    await db.insert(deliveriesTable).values({ id: deliveryId, tenantId: tenant.id, source: "pixel", idempotencyKey: `pixel:${input.orderId}:${deliveryId}`, payload: body, receivedAt: ctx.now() });
+    try {
+      const result = await conversionsSvc.recordConversion(db, ctx, {
+        source: "pixel",
+        kind: "sale",
+        externalOrderId: input.orderId,
+        offerId: input.offerId,
+        amountMinor,
+        currency: input.currency,
+        customerEmail: input.email,
+        clickToken: input.ref,
+        visitorId: input.visitorId,
+        couponCode: input.couponCode,
+        metadata: { url: input.url, sessionId: input.sessionId, origin: c.req.header("origin") ?? null },
+      });
+      await db.update(deliveriesTable).set({ status: result.duplicate ? "duplicate" : "processed", resultEntityType: "conversion", resultEntityId: result.conversion.id, processedAt: ctx.now() }).where(eq(deliveriesTable.id, deliveryId));
+      return c.json({ ok: true, conversionId: result.conversion.id, duplicate: result.duplicate, attributed: !!result.conversion.affiliateId }, result.duplicate ? 200 : 201);
+    } catch (err) {
+      await db.update(deliveriesTable).set({ status: "failed", error: err instanceof Error ? err.message : String(err), processedAt: ctx.now() }).where(eq(deliveriesTable.id, deliveryId));
+      throw err;
+    }
+  });
+
   /** Journey C: branded application page data. */
-  /**
-   * Lead capture for forms on the merchant's site. JSON or form-encoded; `ref` carries the click
-   * token the /r redirect placed in the destination URL. Returns JSON, or redirects when the
-   * form asks for it. Never echoes the contact back and never reveals whether the program exists
-   * beyond a 404.
-   */
-  r.post("/capture/:token", async (c) => {
-    const { db } = c.get("deps");
-    const program = await leadsSvc.getProgramByCaptureToken(db, c.req.param("token"));
-    if (!program || !program.leadsEnabled || program.status !== "active") throw notFound("capture form");
-    await scopeRequest(c, program.tenantId);
-    const ctx = systemContext(program.tenantId, c.get("now"));
-    const contentType = c.req.header("content-type") ?? "";
-    const raw: Record<string, unknown> = contentType.includes("application/json") ? await c.req.json() : Object.fromEntries((await c.req.formData()).entries());
-    const fields: Record<string, string> = {};
-    const known = new Set(["name", "email", "phone", "company", "ref", "couponCode", "redirect", "landingUrl", "fields"]);
-    for (const [k, v] of Object.entries(raw)) if (!known.has(k) && typeof v === "string" && k.length <= 60) fields[k] = v.slice(0, 2000);
-    const input = leadsSvc.captureSchema.parse({ ...raw, fields: { ...fields, ...((raw.fields as Record<string, string> | undefined) ?? {}) }, landingUrl: (raw.landingUrl as string | undefined) ?? c.req.header("referer") });
-    const result = await leadsSvc.recordLead(db, ctx, {
-      source: "form",
-      programId: program.id,
-      name: input.name,
-      email: input.email,
-      phone: input.phone,
-      company: input.company,
-      fields: input.fields,
-      landingUrl: input.landingUrl,
-      clickToken: input.ref,
-      couponCode: input.couponCode,
-    });
-    if (input.redirect) return c.redirect(input.redirect, 303);
-    return c.json({ ok: true, leadId: result.lead.id, duplicate: result.disposition === "duplicate" }, 201);
-  });
-
-  /**
-   * Lead capture for forms on the merchant's site. JSON or form-encoded; `ref` carries the click
-   * token the /r redirect placed in the destination URL. Returns JSON, or redirects when the
-   * form asks for it. Never echoes the contact back and never reveals whether the program exists
-   * beyond a 404.
-   */
-  r.post("/capture/:token", async (c) => {
-    const { db } = c.get("deps");
-    const program = await leadsSvc.getProgramByCaptureToken(db, c.req.param("token"));
-    if (!program || !program.leadsEnabled || program.status !== "active") throw notFound("capture form");
-    await scopeRequest(c, program.tenantId);
-    const ctx = systemContext(program.tenantId, c.get("now"));
-    const contentType = c.req.header("content-type") ?? "";
-    const raw: Record<string, unknown> = contentType.includes("application/json") ? await c.req.json() : Object.fromEntries((await c.req.formData()).entries());
-    const fields: Record<string, string> = {};
-    const known = new Set(["name", "email", "phone", "company", "ref", "couponCode", "redirect", "landingUrl", "fields"]);
-    for (const [k, v] of Object.entries(raw)) if (!known.has(k) && typeof v === "string" && k.length <= 60) fields[k] = v.slice(0, 2000);
-    const input = leadsSvc.captureSchema.parse({ ...raw, fields: { ...fields, ...((raw.fields as Record<string, string> | undefined) ?? {}) }, landingUrl: (raw.landingUrl as string | undefined) ?? c.req.header("referer") });
-    const result = await leadsSvc.recordLead(db, ctx, {
-      source: "form",
-      programId: program.id,
-      name: input.name,
-      email: input.email,
-      phone: input.phone,
-      company: input.company,
-      fields: input.fields,
-      landingUrl: input.landingUrl,
-      clickToken: input.ref,
-      couponCode: input.couponCode,
-    });
-    if (input.redirect) return c.redirect(input.redirect, 303);
-    return c.json({ ok: true, leadId: result.lead.id, duplicate: result.disposition === "duplicate" }, 201);
-  });
-
   r.get("/join/:token", async (c) => {
     const { db } = c.get("deps");
     const program = await programs.getProgramByJoinToken(db, c.req.param("token"));

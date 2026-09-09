@@ -92,6 +92,10 @@ TEST_DATABASE_URL=postgres://user:pass@host/postgres npm run test:postgres   # o
 
 The embedded server comes from the `embedded-postgres` dev dependency (real Postgres binaries). On Windows those binaries need the Microsoft Visual C++ 2015-2022 runtime installed. CI runs the suites and an API boot smoke against a `postgres:16` service on every push.
 
+## Website tracking snippet
+
+`GET /referly.js` serves the snippet (cacheable for an hour; the site key travels in the script tag). Browsers post to `POST /t/<siteKey>/events` and `POST /t/<siteKey>/convert` with `text/plain` bodies, so no preflight is needed and `sendBeacon` delivers the last batch on page close. Both endpoints answer 404 for unknown keys, inactive workspaces and origins outside the workspace's domain list; `/convert` also needs the workspace's "accept orders from the snippet" switch, which itself needs at least one domain. Rate limit: 600 requests per minute per IP. `BASE_URL` must be reachable from visitors' browsers; put it behind the same TLS as the rest of the API. Journey rows are RLS-scoped, included in backups and the workspace export, and pruned after `journeyDays` (90 by default, 7 to 400).
+
 ## Outbound webhooks (Zapier, Make, custom)
 
 Merchants add endpoints under Webhooks. Every stored event of a subscribed type becomes a signed POST from the worker:

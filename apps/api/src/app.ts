@@ -25,6 +25,7 @@ import { publicRoutes } from "./routes/public";
 import { portalRoutes } from "./routes/portal";
 import { notificationRoutes } from "./routes/notifications";
 import { leadRoutes } from "./routes/leads";
+import { journeyRoutes } from "./routes/journeys";
 import { messageRoutes } from "./routes/messages";
 import { analyticsRoutes } from "./routes/analytics";
 import { assetRoutes } from "./routes/assets";
@@ -98,6 +99,8 @@ export function createApp(rawDeps: AppDeps & { db: Db }) {
   // Lead capture is called from merchants' own sites: any origin, no credentials. Registered before the
   // app-only CORS so it answers the preflight.
   app.use("/capture/*", cors({ origin: "*", allowMethods: ["POST", "OPTIONS"], allowHeaders: ["content-type"] }));
+  // The site snippet reports from merchants' own domains (the workspace's domain list is checked in the route).
+  app.use("/t/*", cors({ origin: "*", allowMethods: ["POST", "OPTIONS"], allowHeaders: ["content-type"] }));
   app.use("*", cors({ origin: deps.config.webUrl, credentials: true, exposeHeaders: ["x-request-id", "retry-after", "x-ratelimit-remaining"] }));
   // Request id (honouring one from a trusted proxy), timing, structured access log and metrics.
   app.use("*", async (c, next) => {
@@ -192,6 +195,8 @@ export function createApp(rawDeps: AppDeps & { db: Db }) {
   app.use("/r/*", rateLimit({ name: "redirect", limit: rl.redirect, windowMs: 60_000 }));
   app.use("/join/*", rateLimit({ name: "public", limit: rl.public, windowMs: 10 * 60_000 }));
   app.use("/capture/*", rateLimit({ name: "public", limit: rl.public, windowMs: 10 * 60_000 }));
+  // Snippet traffic is a few requests per page per visitor; generous, but bounded per IP.
+  app.use("/t/*", rateLimit({ name: "snippet", limit: rl.redirect * 2, windowMs: 60_000 }));
   app.use("/invite/*", rateLimit({ name: "public", limit: rl.public, windowMs: 10 * 60_000 }));
   app.use("/hooks/*", rateLimit({ name: "redirect", limit: rl.redirect, windowMs: 60_000 }));
   app.use("/v1/auth/*", rateLimit({ name: "auth", limit: rl.auth, windowMs: 15 * 60_000 }));
@@ -223,7 +228,7 @@ export function createApp(rawDeps: AppDeps & { db: Db }) {
   });
 
   // Every data-touching route runs in one transaction with row-level security active.
-  for (const prefix of ["/r/*", "/join/*", "/invite/*", "/hooks/*", "/capture/*", "/v1/*", "/portal/*", "/admin/*"]) app.use(prefix, rlsTransaction(deps.db));
+  for (const prefix of ["/r/*", "/join/*", "/invite/*", "/hooks/*", "/capture/*", "/t/*", "/v1/*", "/portal/*", "/admin/*"]) app.use(prefix, rlsTransaction(deps.db));
 
   // Public, unauthenticated: tracking redirect, join/apply, invites, signup/login.
   app.route("/", publicRoutes());
@@ -237,6 +242,7 @@ export function createApp(rawDeps: AppDeps & { db: Db }) {
   app.route("/v1/tenant", tenantRoutes());
   app.route("/v1/notifications", notificationRoutes("merchant"));
   app.route("/v1/leads", leadRoutes());
+  app.route("/v1/journeys", journeyRoutes());
   app.route("/portal/notifications", notificationRoutes("portal"));
   app.route("/v1/offers", offerRoutes());
   app.route("/v1/programs", programRoutes());

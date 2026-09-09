@@ -6,7 +6,7 @@ import { useAction, useApi } from "@/lib/hooks";
 import { dateTime } from "@/lib/format";
 import { Badge, Field, Table } from "@/components/ui";
 
-const CATEGORIES = ["clicksDays", "messageLogsDays", "auditLogsDays", "webhookDeliveriesDays", "automationRunsDays", "notificationsDays", "leadsDays"] as const;
+const CATEGORIES = ["clicksDays", "messageLogsDays", "auditLogsDays", "webhookDeliveriesDays", "automationRunsDays", "notificationsDays", "leadsDays", "journeyDays"] as const;
 
 /**
  * Settings → Data: how long operational records are kept (per category, within platform

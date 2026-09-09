@@ -44,4 +44,5 @@ export * as maintenance from "./services/maintenance";
 export * as privacy from "./services/privacy";
 export * as notifications from "./services/notifications";
 export * as leads from "./services/leads";
+export * as journeys from "./services/journeys";
 export { encryptJson, decryptJson, assertIntegrationSecret } from "./crypto";

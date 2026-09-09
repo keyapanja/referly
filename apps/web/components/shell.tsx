@@ -18,6 +18,7 @@ const MERCHANT_NAV: { section: string; items: NavItem[] }[] = [
       ["/app", "Home", "home"],
       ["/app/notifications", "Notifications", "bell"],
       ["/app/analytics", "Analytics", "chart"],
+      ["/app/journeys", "Journeys", "route"],
     ],
   },
   {

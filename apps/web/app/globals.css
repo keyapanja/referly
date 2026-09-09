@@ -1426,6 +1426,119 @@ li {
   border-color: var(--accent-hover);
 }
 
+.snippet {
+  position: relative;
+}
+.snippet textarea {
+  width: 100%;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  padding-right: 84px;
+  resize: vertical;
+  white-space: pre;
+  overflow-x: auto;
+  background: var(--surface-2);
+}
+.snippet > button {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+}
+
+/* Journey timeline (website tracking) */
+.journey {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.journey-session {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  margin: 14px 0 6px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.journey-row:first-child .journey-session {
+  margin-top: 0;
+}
+.journey-item {
+  display: grid;
+  grid-template-columns: 14px 56px auto 1fr;
+  gap: 8px;
+  align-items: center;
+  padding: 5px 0;
+  position: relative;
+  min-height: 28px;
+}
+.journey-item::before {
+  content: "";
+  position: absolute;
+  left: 6px;
+  top: -6px;
+  bottom: -6px;
+  width: 2px;
+  background: var(--border);
+}
+.journey-row:last-child .journey-item::before {
+  bottom: 50%;
+}
+.journey-row.session-start .journey-item::before {
+  top: 50%;
+}
+.journey-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--surface);
+  border: 2px solid var(--muted);
+  position: relative;
+  z-index: 1;
+  margin-left: 2px;
+}
+.journey-row.conversion .journey-dot,
+.journey-row.lead .journey-dot {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.journey-row.event .journey-dot {
+  border-color: var(--accent);
+}
+.journey-when {
+  font-size: 11px;
+  color: var(--muted);
+  text-align: right;
+}
+.journey-what {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+}
+.journey-row.conversion .journey-what,
+.journey-row.lead .journey-what {
+  font-size: 14px;
+}
+.badge.page,
+.badge.event {
+  background: var(--surface-2);
+  color: var(--muted);
+}
+.badge.sale,
+.badge.lead,
+.badge.converted {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--accent);
+}
+.badge.engaged {
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  color: var(--text);
+}
+.badge.browsing {
+  background: var(--surface-2);
+  color: var(--muted);
+}
+
 .footnote {
   margin-top: 20px;
   padding-top: 16px;

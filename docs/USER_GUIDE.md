@@ -70,6 +70,8 @@ Affiliates get an email and an in-app notification at each step.
 - **Coupon codes** (affiliate page → New coupon code) attribute without a click: a sale reporting the code is attributed to the code's affiliate. The program's precedence setting decides what wins when both a click and a code are present.
 - Clicks from bots, iframes and script loads are refused; consent state is recorded per click.
 
+**Website tracking snippet** (Settings → Integrations → Website tracking): turn it on, paste the two-line script on every page of your site, and the journey is recorded automatically. The snippet keeps the click token from the landing URL in a first-party cookie for the program's attribution window, gives each visitor an id, reports every page view (also in single-page apps) and any custom event you call `referly('track', 'add_to_cart', {...})` for, and fills hidden `ref` and `referly_visitor` inputs in your lead forms. List your website's domains so nothing else can report under your key. With **Accept orders reported by the snippet** on, a `referly('convert', { orderId, amount, currency, email })` call on the thank-you page records the sale (source `pixel`) without any checkout code; a server-side post from the checkout remains the most reliable way and can carry `visitorId` instead of the click token when the cookie is gone. What visitors did shows under **Journeys** (visits from affiliate links, landing page, pages, events, outcome, the full timeline per visitor) and on each conversion page.
+
 ## 6. Getting sales in
 
 **Checkout webhook or API** (recommended): after an order, POST to `/v1/conversions` with the API key:
@@ -87,6 +89,8 @@ Repeating the same `externalOrderId` returns the original record and never doubl
 **Correcting attribution**: conversion page → Correct attribution. The old commission is voided and a new one created for the right affiliate, with the reason recorded.
 
 **Leads** (pay-per-lead): send them to `/v1/leads` with the API key, record them on the Leads page, or point a form on your site at the program's capture endpoint (JSON or form fields, forward `ref` from the landing page, optional `redirect` to a thank-you page). Leads wait on the Leads page until you **qualify** (commission approved, then holding period) or **disqualify** (commission voided). A repeat email inside the program's dedupe window is a duplicate and earns nothing.
+
+**From the website snippet**: with website tracking on and snippet orders accepted (section 5), the thank-you page reports the order itself. Such sales carry source `pixel`; review them like any other and prefer the checkout post where you can.
 
 ## 7. Commissions, holding periods and payouts
 
@@ -125,7 +129,9 @@ Automation page: rules are **trigger + conditions + actions + stop conditions**.
 
 A merchant can dispute a sale (fraud, refund, amount). An affiliate can claim a missing attribution or a wrong amount from the portal. Opening a dispute holds the sale and its commission. Review it, link related sales, discuss in the thread, then resolve: restore the sale, cancel it and void the commission, or reattribute it. Affiliates are notified at each step.
 
-## 14. Analytics and exports
+## 14. Analytics, journeys and exports
+
+Journeys: every visit that came through an affiliate link, with the landing page, pages viewed, custom events, and whether it ended in a sale or lead; open a row for the visitor's whole history across visits. Filter by affiliate, converted only, or all visitors (including direct traffic, for comparison). Needs the website tracking snippet (section 5).
 
 Analytics: clicks, sales, attributed revenue, commission and new affiliates over time with comparison to the previous period; the click → attributed → approved funnel; breakdowns by affiliate, offer, program, campaign, group and attribution source. Exports build in the background (affiliates, conversions, commissions, payouts, ledger, clicks as CSV; the whole workspace as JSON lines) and stay downloadable for 7 days.
 
@@ -135,7 +141,7 @@ Webhooks page: endpoints for Zapier, Make or your own systems. Pick events, get 
 
 ## 16. Data, retention and privacy
 
-Settings → Data: how long clicks, message logs, audit trail, webhook deliveries, automation runs, notifications and lead contact details are kept. Financial records are never deleted. Export the whole workspace from the same card. Affiliates can request erasure from their portal; carry it out from their page once nothing is owed.
+Settings → Data: how long clicks, message logs, audit trail, webhook deliveries, automation runs, notifications, lead contact details and website journey events are kept. Financial records are never deleted. Export the whole workspace from the same card. Affiliates can request erasure from their portal; carry it out from their page once nothing is owed.
 
 ## 17. The affiliate portal
 

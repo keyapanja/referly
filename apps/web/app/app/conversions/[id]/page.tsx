@@ -7,12 +7,14 @@ import { api } from "@/lib/api";
 import { useAction, useApi } from "@/lib/hooks";
 import { dateTime, money, toMinor } from "@/lib/format";
 import { Alert, Badge, Field, Loading, PageHeader, Table } from "@/components/ui";
+import { JourneyTimeline } from "@/components/journey";
 
 export default function ConversionDetail() {
   const { id } = useParams<{ id: string }>();
   const { data, error, reload } = useApi<any>(`/v1/conversions/${id}`);
   const { data: audit, reload: reloadAudit } = useApi<any>(`/v1/tenant/audit?entityType=conversion&entityId=${id}`);
   const { data: affiliates } = useApi<any>("/v1/affiliates?status=active");
+  const { data: journey } = useApi<any>(`/v1/conversions/${id}/journey`);
   const { busy, error: actionError, run } = useAction();
   const [refund, setRefund] = useState({ amount: "", reason: "" });
   const [reattr, setReattr] = useState({ affiliateId: "", reason: "" });
@@ -120,6 +122,15 @@ export default function ConversionDetail() {
           {data.commissionHistory?.length > 1 ? <p className="muted">{data.commissionHistory.length - 1} earlier commission(s) voided by reattribution.</p> : null}
         </div>
       </div>
+      {journey && journey.events.length > 0 ? (
+        <div className="card">
+          <h2>Website journey</h2>
+          <p className="muted">
+            What this buyer did on your site before and after the order, recorded by the site snippet. Visitor <span className="mono">{journey.visitorId}</span>. <Link href="/app/journeys">All journeys</Link>
+          </p>
+          <JourneyTimeline events={journey.events} />
+        </div>
+      ) : null}
       <div className="card">
         <h2>Attribution history</h2>
         <Table

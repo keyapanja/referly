@@ -40,7 +40,7 @@ Set `DATABASE_URL=postgres://...` to run against a real Postgres. Migrations in 
 | `RESEND_API_KEY`, `EMAIL_FROM` | for `resend` |
 | `SMTP_URL`, `EMAIL_FROM` | for `smtp`, e.g. `smtp://user:pass@smtp.example.com:587` |
 
-Public endpoints are rate limited per client IP (click redirect 300/min; join and invite 30 per 10 min; auth 30 per 15 min). Limits are in-process; use one API instance or put a shared store behind `lib/ratelimit.ts`.
+Public endpoints are rate limited per client IP (click redirect 300/min; snippet events 600/min; join, invite and capture 30 per 10 min; auth 30 per 15 min). Limits are in-process; use one API instance or put a shared store behind `lib/ratelimit.ts`.
 
 ```bash
 npm test                 # core unit/integration tests + API end-to-end tests (embedded PGlite)
@@ -51,6 +51,10 @@ npm run typecheck
 ## Leads (pay-per-lead)
 
 Programs can pay a fixed amount per qualified lead alongside, or instead of, sale commissions. Leads arrive through `POST /v1/leads` (API key), the Leads page, or a per-program capture endpoint `POST /capture/<token>` that a form on your own site can post to (JSON or form fields; forward the `ref` query parameter from the landing page so the lead is attributed; add `redirect` for a thank-you page). Merchants qualify or disqualify leads on the Leads page; duplicates inside the program's dedupe window earn nothing. Affiliates see lead status and commission in the portal, never the contact details.
+
+## Website tracking snippet
+
+One script tag on the merchant's site records the whole affiliate journey: `GET /referly.js` keeps the `?ref=` click token in a first-party cookie, assigns a visitor id, reports page views and custom events to `POST /t/<siteKey>/events` (text/plain JSON, beacon-friendly, any origin but checked against the workspace's domain list), fills hidden inputs in lead forms, and can report orders from the thank-you page to `POST /t/<siteKey>/convert` when the workspace allows it (source `pixel`, same attribution and idempotency as every other sale). Server-side conversions may pass `visitorId` instead of a click token. Merchants see visits, outcomes and per-visitor timelines under Journeys and on each conversion.
 
 ## Notifications
 

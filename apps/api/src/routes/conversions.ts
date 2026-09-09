@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { z } from "zod";
-import { conversions, webhookDeliveries, newId, disputes } from "@referly/core";
+import { conversions, webhookDeliveries, newId, disputes, journeys } from "@referly/core";
 import { requireMerchantPrincipal, type AppEnv } from "../lib/auth";
 
 export function conversionRoutes() {
@@ -48,6 +48,12 @@ export function conversionRoutes() {
   });
 
   r.get("/:id", async (c) => c.json(await conversions.getConversionTimeline(c.get("deps").db, c.get("ctx"), c.req.param("id"))));
+  /** What the buyer did on the merchant's site before and after this sale, when the site runs the snippet. */
+  r.get("/:id/journey", async (c) => {
+    const timeline = await conversions.getConversionTimeline(c.get("deps").db, c.get("ctx"), c.req.param("id"));
+    const clickId = timeline.attributions.find((a) => !a.supersededById)?.clickId ?? timeline.attributions[0]?.clickId ?? null;
+    return c.json(await journeys.journeyForConversion(c.get("deps").db, c.get("ctx"), timeline.conversion.id, clickId));
+  });
   r.post("/:id/refund", async (c) => {
     const body = z.object({ amountMinor: z.number().int().positive().optional(), reason: z.string().min(1) }).parse(await c.req.json());
     return c.json(await conversions.refundConversion(c.get("deps").db, c.get("ctx"), { conversionId: c.req.param("id"), ...body }));
