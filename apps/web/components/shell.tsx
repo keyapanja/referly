@@ -47,8 +47,10 @@ const MERCHANT_NAV: { section: string; items: NavItem[] }[] = [
     items: [
       ["/app/messages", "Messages", "mail"],
       ["/app/automation", "Automation", "sliders"],
+      ["/app/tracking", "Website tracking", "code"],
       ["/app/webhooks", "Webhooks", "link"],
       ["/app/settings", "Settings", "sliders"],
+      ["/app/guide", "Guide", "book"],
     ],
   },
 ];
@@ -79,6 +81,7 @@ const PORTAL_NAV: { section: string; items: NavItem[] }[] = [
     items: [
       ["/portal/notifications", "Notifications", "bell"],
       ["/portal/profile", "Profile", "user"],
+      ["/portal/guide", "Guide", "book"],
     ],
   },
 ];
@@ -90,6 +93,7 @@ const PLATFORM_NAV: { section: string; items: NavItem[] }[] = [
       ["/admin", "Overview", "home"],
       ["/admin/tenants", "Tenants", "layers"],
       ["/admin/jobs", "Jobs", "sliders"],
+      ["/admin/guide", "Guide", "book"],
     ],
   },
 ];

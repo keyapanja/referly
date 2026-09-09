@@ -8,6 +8,7 @@ import { resetRateLimits } from "../src/lib/ratelimit";
 import { LocalStorage } from "../src/storage";
 import { createLogger } from "../src/lib/log";
 import { SNIPPET_JS } from "../src/snippet";
+import { PLATFORM_IDS, platformGuides } from "../src/platforms";
 
 /**
  * Website tracking over HTTP (TRK-09): the served snippet, settings endpoints, the public
@@ -254,5 +255,65 @@ describe("consent mode over HTTP", () => {
     // switching consent mode off accepts plain batches again
     await call("/v1/tenant/tracking", { method: "PATCH", token, json: { consentMode: "off" } });
     expect((await beacon(`/t/${key}/events`, batch, "https://eu.test")).body).toMatchObject({ accepted: 1 });
+  });
+});
+
+describe("per-platform install instructions", () => {
+  const SITE = "site_abcdefghijklmnopqrstuvwx";
+  const BASE_URL = "https://api.example.com";
+
+  it("covers every platform with steps and code that already carries the site key", () => {
+    const guides = platformGuides(BASE_URL, SITE);
+    expect(guides.map((g) => g.id)).toEqual([...PLATFORM_IDS]);
+    for (const guide of guides) {
+      expect(guide.name, guide.id).toBeTruthy();
+      expect(guide.summary, guide.id).toBeTruthy();
+      expect(guide.install.steps.length, guide.id).toBeGreaterThan(0);
+      expect(guide.install.code, guide.id).toContain(SITE);
+      expect(guide.install.code, guide.id).toContain(BASE_URL);
+      // nothing may reach a merchant with an unresolved placeholder
+      expect(guide.install.code, guide.id).not.toContain("YOUR-");
+      expect(guide.install.code, guide.id).not.toContain("${");
+      if (guide.order) {
+        expect(guide.order.steps.length, guide.id).toBeGreaterThan(0);
+        expect(guide.order.code, guide.id).toContain("referly");
+      }
+    }
+  });
+
+  it("gives each platform the order code in its own language, and omits it where the platform cannot", () => {
+    const byId = Object.fromEntries(platformGuides(BASE_URL, SITE).map((g) => [g.id, g]));
+    // WooCommerce: a PHP hook that reads the real order
+    expect(byId.wordpress!.order!.language).toBe("php");
+    expect(byId.wordpress!.order!.code).toContain("woocommerce_thankyou");
+    expect(byId.wordpress!.order!.code).toContain("$order->get_order_number()");
+    // Shopify: Liquid on the order status page, using the exact cents value, and self-contained
+    expect(byId.shopify!.order!.code).toContain("{{ checkout.order_number | json }}");
+    expect(byId.shopify!.order!.code).toContain("amountMinor: {{ checkout.total_price }}");
+    expect(byId.shopify!.order!.code).toContain(SITE);
+    // Wix and Squarespace have no order hook, so no order block is offered
+    expect(byId["wix-squarespace"]!.order).toBeUndefined();
+    expect(byId.react!.install.language).toBe("tsx");
+    expect(byId.gtm!.install.code).toBe(byId.custom!.install.code);
+  });
+
+  it("carries the consent attribute into every platform's code when the workspace requires consent", () => {
+    for (const guide of platformGuides(BASE_URL, SITE, { consentMode: "wait" })) {
+      expect(guide.install.code, guide.id).toContain('data-consent="wait"');
+    }
+    for (const guide of platformGuides(BASE_URL, SITE, { consentMode: "off" })) {
+      expect(guide.install.code, guide.id).not.toContain("data-consent");
+    }
+  });
+
+  it("serves them from the tracking endpoint for the workspace's own key", async () => {
+    const signup = await call("/v1/auth/signup", { method: "POST", json: { name: "Platforms", slug: "platform-shop", currency: "USD", owner: { name: "Pia", email: "pia@platform.test", password: "supersecret1" } } });
+    const token = signup.body.token;
+    expect((await call("/v1/tenant/tracking", { token })).body.platforms).toEqual([]);
+    const on = await call("/v1/tenant/tracking/enable", { method: "POST", token });
+    const platforms = on.body.platforms;
+    expect(platforms.map((p: any) => p.id)).toEqual([...PLATFORM_IDS]);
+    expect(platforms[0].install.code).toContain(on.body.siteKey);
+    expect(JSON.stringify(platforms)).not.toContain("site_xxx");
   });
 });

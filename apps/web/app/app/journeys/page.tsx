@@ -78,11 +78,11 @@ export default function JourneysPage() {
       <Alert kind="error">{error}</Alert>
       {tracking && !tracking.enabled ? (
         <Alert kind="info">
-          Website tracking is off. Turn it on under <Link href="/app/settings">Settings → Website tracking</Link> and paste the snippet on your site; journeys start showing here as soon as visitors arrive through affiliate links.
+          Website tracking is off. Turn it on under <Link href="/app/tracking">Website tracking</Link> and paste the code on your site; journeys start showing here as soon as visitors arrive through affiliate links.
         </Alert>
       ) : tracking && tracking.enabled && !tracking.lastEventAt ? (
         <Alert kind="info">
-          The snippet has not reported anything yet. Check it is installed on every page: <Link href="/app/settings">Settings → Website tracking</Link>.
+          The snippet has not reported anything yet. Check it is installed on every page: <Link href="/app/tracking">Website tracking</Link>.
         </Alert>
       ) : null}
       <div className="grid cols-4" style={{ marginBottom: 16 }}>

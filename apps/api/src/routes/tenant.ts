@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { tenants, auth, audit, account, plans, integrations, retention, journeys, MERCHANT_ROLES, API_KEY_SCOPES, forbidden } from "@referly/core";
 import { installSnippet, SNIPPET_EXAMPLES } from "../snippet";
+import { platformGuides } from "../platforms";
 import { getCookie } from "hono/cookie";
 import { requireMerchantPrincipal, SESSION_COOKIE, type AppEnv } from "../lib/auth";
 import { publicUser } from "./auth";
@@ -103,7 +104,13 @@ export function tenantRoutes() {
   async function trackingView(c: Parameters<typeof requireMerchantPrincipal>[0]) {
     const view = await journeys.getTracking(c.get("deps").db, c.get("ctx"));
     const base = c.get("deps").config.baseUrl.replace(/\/$/, "");
-    return { ...view, scriptUrl: `${base}/referly.js`, install: view.siteKey ? installSnippet(base, view.siteKey, { consentMode: view.consentMode }) : null, examples: SNIPPET_EXAMPLES };
+    return {
+      ...view,
+      scriptUrl: `${base}/referly.js`,
+      install: view.siteKey ? installSnippet(base, view.siteKey, { consentMode: view.consentMode }) : null,
+      platforms: view.siteKey ? platformGuides(base, view.siteKey, { consentMode: view.consentMode }) : [],
+      examples: SNIPPET_EXAMPLES,
+    };
   }
   r.get("/tracking", async (c) => c.json(await trackingView(c)));
   r.post("/tracking/enable", async (c) => {

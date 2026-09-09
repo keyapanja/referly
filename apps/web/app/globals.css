@@ -1539,6 +1539,234 @@ li {
   color: var(--muted);
 }
 
+/* Copy-me code, with a language label and a copy button */
+.codeblock {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  margin: 10px 0 14px;
+  background: var(--surface-2);
+}
+.codeblock-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 5px 6px 5px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+.codeblock-lang {
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.codeblock pre {
+  margin: 0;
+  padding: 12px 14px;
+  overflow-x: auto;
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+.codeblock pre code {
+  background: none;
+  padding: 0;
+  white-space: pre;
+}
+
+/* Platform picker on the website tracking page */
+.platform-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 12px 0 16px;
+}
+.platform-picker button {
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 13px;
+  cursor: pointer;
+}
+.platform-picker button:hover {
+  color: var(--text);
+  border-color: var(--muted);
+}
+.platform-picker button.active {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+.platform-summary {
+  margin: 0 0 6px;
+  font-weight: 600;
+}
+ol.install-steps {
+  margin: 8px 0 10px;
+  padding-left: 20px;
+}
+ol.install-steps li {
+  line-height: 1.6;
+  margin-bottom: 4px;
+}
+.muted.small {
+  font-size: 13px;
+  margin-top: -6px;
+}
+
+/* In-app guides: contents rail plus long-form prose */
+.guide {
+  display: grid;
+  grid-template-columns: 232px minmax(0, 1fr);
+  gap: 28px;
+  align-items: start;
+}
+.guide-toc {
+  position: sticky;
+  top: 16px;
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+  padding-right: 4px;
+}
+.guide-toc input {
+  width: 100%;
+  margin-bottom: 10px;
+}
+.guide-toc nav {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.guide-toc a {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 6px 9px;
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.35;
+  text-decoration: none;
+}
+.guide-toc a:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+.guide-toc a.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+.guide-toc a.dim {
+  opacity: 0.35;
+}
+.guide-toc .n {
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  color: var(--muted);
+  min-width: 14px;
+}
+.guide-body {
+  max-width: 74ch;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 28px 32px;
+}
+.guide-lede {
+  margin-top: 0;
+  color: var(--muted);
+}
+.guide-body section {
+  scroll-margin-top: 16px;
+}
+.guide-body h2 {
+  margin: 34px 0 10px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border);
+  font-size: 20px;
+  scroll-margin-top: 16px;
+}
+.guide-body section:first-of-type h2 {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+.guide-body h3 {
+  margin: 24px 0 8px;
+  font-size: 15px;
+  scroll-margin-top: 16px;
+}
+.guide-body p,
+.guide-body li {
+  line-height: 1.65;
+}
+.guide-body ul,
+.guide-body ol {
+  padding-left: 22px;
+}
+.guide-body li + li {
+  margin-top: 5px;
+}
+.guide-body li > ul {
+  margin: 5px 0 0;
+}
+.guide-body table {
+  margin: 12px 0;
+}
+.guide-body .table-wrap {
+  overflow-x: auto;
+}
+.guide-code {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  overflow-x: auto;
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+.guide-code code {
+  background: none;
+  padding: 0;
+  white-space: pre;
+}
+@media (max-width: 900px) {
+  .guide {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .guide-toc {
+    position: static;
+    max-height: 42vh;
+    padding: 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface);
+  }
+  .guide-body {
+    padding: 20px 18px;
+  }
+}
+
+@media print {
+  .guide-toc,
+  .sidebar {
+    display: none;
+  }
+  .guide {
+    display: block;
+  }
+  .guide-body {
+    border: 0;
+    padding: 0;
+    max-width: none;
+  }
+}
+
 .footnote {
   margin-top: 20px;
   padding-top: 16px;
