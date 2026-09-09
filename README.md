@@ -4,6 +4,8 @@ Multi-tenant affiliate marketing SaaS for expert-led businesses (coaches, consul
 
 Product contract: `Affiliate_Growth_Platform_PRD.docx`. Engineering plan and decisions: [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md).
 
+Operating the product end to end (setup, affiliates, tracking, sales, payouts, campaigns, and the rest) is covered in [docs/USER_GUIDE.md](docs/USER_GUIDE.md).
+
 ## Layout
 
 ```
