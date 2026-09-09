@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useApi } from "@/lib/hooks";
 import { money } from "@/lib/format";
 import { Loading, PageHeader, Stat, Table, Badge } from "@/components/ui";
+import { MaintenanceCard } from "@/components/maintenance-card";
 
 export default function AdminOverview() {
   const { data, error } = useApi<any>("/admin/overview");
@@ -41,6 +42,7 @@ export default function AdminOverview() {
           <Stat label="By type" value={q?.byType?.filter((r: any) => r.status !== "done").length ?? "…"} hint={q?.byType?.map((r: any) => `${r.type}:${r.status}=${r.n}`).join(" ") || "queue is empty"} />
         </div>
       </div>
+      <MaintenanceCard ops={ops} />
       <div className="grid cols-2">
         <div className="card">
           <h2>Plans</h2>

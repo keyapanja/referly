@@ -64,14 +64,27 @@ export default function AffiliateDetail() {
                 Suspend
               </button>
             )}
-            {(a.status === "suspended" || a.status === "rejected") && (
+            {(a.status === "suspended" || a.status === "rejected") && !a.erasedAt && (
               <button disabled={busy} onClick={() => run(() => api(`/v1/affiliates/${id}/reactivate`, { method: "POST", json: { reason: reason || undefined } })).then(refresh)}>
                 Reactivate
+              </button>
+            )}
+            {!a.erasedAt && (
+              <button
+                className="danger"
+                disabled={busy}
+                onClick={() => {
+                  const r = window.prompt(`Erase ${a.name}'s personal data? Name, email, phone, payout details and messages are replaced with placeholders and their portal login is disabled. Sales, commissions and payouts stay. This cannot be undone. Type a reason to confirm:`);
+                  if (r) run(() => api(`/v1/affiliates/${id}/erase`, { method: "POST", json: { reason: r } }), "Personal data erased.").then(refresh);
+                }}
+              >
+                Erase personal data
               </button>
             )}
           </>
         }
       />
+      {a.erasedAt ? <Alert kind="info">Personal data erased {dateTime(a.erasedAt)}. Financial records are kept for the books.</Alert> : null}
       <Alert kind="error">{error ?? actionError}</Alert>
       <Alert kind="success">{success}</Alert>
       <div className="grid cols-4" style={{ marginBottom: 16 }}>

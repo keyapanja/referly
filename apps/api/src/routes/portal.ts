@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { z } from "zod";
-import { affiliates, commissions, conversions, offers, payouts, tenants, tracking, programs as programsSvc, assets, campaigns, tiers, integrations, disputes, auth, forbidden, type Affiliate } from "@referly/core";
+import { affiliates, commissions, conversions, offers, payouts, tenants, tracking, programs as programsSvc, assets, campaigns, tiers, integrations, disputes, auth, privacy, forbidden, type Affiliate } from "@referly/core";
 import { requireAffiliatePrincipal, SESSION_COOKIE, type AppEnv } from "../lib/auth";
 import { getCookie } from "hono/cookie";
 import { publicTenant } from "./auth";
@@ -165,6 +165,8 @@ export function portalRoutes() {
     await auth.changePassword(c.get("deps").db, p.userId, { ...body, keepSessionToken: keep ?? undefined }, c.get("now")());
     return c.json({ ok: true });
   });
+  /** The affiliate asks for their personal data to be deleted; the team gets a task and decides. */
+  r.post("/erasure-request", async (c) => c.json({ task: await privacy.requestErasure(c.get("deps").db, c.get("ctx"), requireAffiliatePrincipal(c)) }, 202));
   r.post("/programs/:programId/join", async (c) => {
     const { acceptTerms } = z.object({ acceptTerms: z.boolean() }).parse(await c.req.json());
     return c.json({ membership: await affiliates.joinProgram(c.get("deps").db, c.get("ctx"), requireAffiliatePrincipal(c), c.req.param("programId"), acceptTerms) });

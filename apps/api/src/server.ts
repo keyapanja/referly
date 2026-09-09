@@ -7,6 +7,8 @@ import { createFileStorage } from "./storage";
 import { createTextDeps } from "./text";
 import { log } from "./lib/log";
 import { createErrorReporter } from "./lib/report";
+import { backupConfigFromEnv } from "./backup";
+import { retention } from "@referly/core";
 
 // Local development: load apps/api/.env if present (never committed). Hosted setups use real env vars.
 try {
@@ -25,6 +27,8 @@ const email = createEmailProvider();
 const storage = createFileStorage(process.env, baseUrl);
 const text = createTextDeps();
 const reporter = createErrorReporter();
+const backup = backupConfigFromEnv();
+const platformRetention = retention.platformRetentionFromEnv();
 let workerHandle: ReturnType<typeof startWorker> | null = null;
 const app = createApp({
   db,
@@ -33,6 +37,8 @@ const app = createApp({
   text,
   reporter,
   log,
+  backup,
+  platformRetention,
   config: {
     baseUrl,
     webUrl,
@@ -55,7 +61,7 @@ if (process.env.PLATFORM_ADMIN_EMAIL && process.env.PLATFORM_ADMIN_PASSWORD) {
   const admin = await withRlsBypass(db, (tx) => platform.ensurePlatformAdmin(tx, { email: process.env.PLATFORM_ADMIN_EMAIL!, password: process.env.PLATFORM_ADMIN_PASSWORD!, name: process.env.PLATFORM_ADMIN_NAME }));
   log.info("platform_admin_ready", { email: admin.email });
 }
-const worker = startWorker({ db, email, storage, webUrl, baseUrl, text, reporter, log });
+const worker = startWorker({ db, email, storage, webUrl, baseUrl, text, reporter, log, backup, platformRetention });
 workerHandle = worker;
 // webhook deliveries use the global fetch
 

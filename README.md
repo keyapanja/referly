@@ -46,6 +46,10 @@ npm run test:postgres    # the same suites against a real Postgres (embedded ser
 npm run typecheck
 ```
 
+## Backups and data lifecycle
+
+The worker takes an encrypted logical backup every day (database plus uploaded files) and rotates them; `npm run backup` takes one now, `npm run restore -- <key> --yes` restores it, and CI rehearses the restore on every push. Nightly retention prunes clicks, message logs, audit trail, webhook deliveries and automation history per workspace under an owner-adjustable policy; closed workspaces are purged after a grace period; affiliates can request erasure and owners can export everything as JSON lines. Details in [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
+
 ## Deploy
 
 Docker images for the API and web app, a `docker-compose.yml` with Postgres, and GitHub Actions for CI and image publishing are included. See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).

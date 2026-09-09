@@ -16,8 +16,13 @@ import { writeAudit } from "./audit";
  * expires. Every step is recorded on the export row so the UI can show progress.
  */
 
-export const EXPORT_ENTITIES = ["affiliates", "conversions", "commissions", "payouts", "ledger", "clicks"] as const;
+export const EXPORT_ENTITIES = ["affiliates", "conversions", "commissions", "payouts", "ledger", "clicks", "workspace"] as const;
 export type ExportEntity = (typeof EXPORT_ENTITIES)[number];
+/** `workspace` is the whole account as JSON lines (data portability); everything else is a CSV table. */
+export const JSON_EXPORT_ENTITIES: readonly ExportEntity[] = ["workspace"];
+export function exportFileMeta(entity: string): { extension: string; contentType: string } {
+  return JSON_EXPORT_ENTITIES.includes(entity as ExportEntity) ? { extension: "jsonl", contentType: "application/x-ndjson; charset=utf-8" } : { extension: "csv", contentType: "text/csv; charset=utf-8" };
+}
 export const EXPORT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 export const requestExportSchema = z.object({ entity: z.enum(EXPORT_ENTITIES) });
@@ -25,6 +30,7 @@ export const requestExportSchema = z.object({ entity: z.enum(EXPORT_ENTITIES) })
 export async function requestExport(db: DbLike, ctx: TenantContext, rawInput: z.input<typeof requestExportSchema>): Promise<Export> {
   requirePerm(ctx, "read");
   const input = requestExportSchema.parse(rawInput);
+  if (JSON_EXPORT_ENTITIES.includes(input.entity)) requirePerm(ctx, "tenant.manage");
   const [row] = await db
     .insert(exports)
     .values({
@@ -81,9 +87,10 @@ const TABLES = { affiliates, conversions, commissions, payouts, ledger: ledgerEn
  */
 export async function* iterateExportRows(db: DbLike, ctx: TenantContext, entity: ExportEntity, batchSize = 2000): AsyncGenerator<Record<string, unknown>[]> {
   requirePerm(ctx, "read");
-  if (!TABLES[entity]) throw validation(`unknown export entity ${entity}`);
+  const picked = (TABLES as Record<string, unknown>)[entity];
+  if (!picked) throw validation(`export entity ${entity} is not a CSV table`);
   // The tables share the id/tenant_id shape; one static type keeps the query builder happy.
-  const table = TABLES[entity] as unknown as typeof conversions;
+  const table = picked as typeof conversions;
   const orderKey = entity === "clicks" ? "occurredAt" : "createdAt";
   const createdAt: AnyPgColumn = entity === "clicks" ? clicks.occurredAt : table.createdAt;
   let last: { createdAt: Date; id: string } | null = null;

@@ -7,7 +7,8 @@ import { log as rootLog, type Logger } from "./lib/log";
 import { httpDuration, httpRequests, renderMetrics, routeLabel } from "./lib/metrics";
 import { createErrorReporter, type ErrorReporter } from "./lib/report";
 import { clientIp } from "./lib/ratelimit";
-import type { Db, DbLike, integrations, Lookup } from "@referly/core";
+import type { Db, DbLike, integrations, Lookup, retention } from "@referly/core";
+import type { BackupConfig } from "./backup";
 import type { messaging } from "@referly/core";
 import { errorHandler } from "./lib/errors";
 import { authMiddleware, type AppEnv } from "./lib/auth";
@@ -76,6 +77,9 @@ export interface AppDeps {
   /** Unhandled-error sink (logs, and posts to ERROR_REPORT_URL when configured). */
   reporter?: ErrorReporter;
   log?: Logger;
+  /** Backup schedule as the worker sees it; the admin maintenance panel shows it and manual runs require it. */
+  backup?: BackupConfig;
+  platformRetention?: retention.PlatformRetention;
 }
 
 export function createApp(rawDeps: AppDeps & { db: Db }) {
@@ -171,6 +175,9 @@ export function createApp(rawDeps: AppDeps & { db: Db }) {
       { name: "referly_webhook_paused_subscriptions", help: "Webhook endpoints auto-paused after repeated failures", values: [{ value: ops.webhooks.pausedSubscriptions }] },
       { name: "referly_messages_failed_24h", help: "Email and text sends that failed in the last day", values: [{ value: ops.messages.failed24h }] },
       { name: "referly_worker_heartbeat_age_seconds", help: "Seconds since the worker last polled (-1 when no worker runs in this process)", values: [{ value: heartbeat ? Math.round((Date.now() - heartbeat.getTime()) / 1000) : -1 }] },
+      { name: "referly_backup_age_seconds", help: "Seconds since the last backup finished (-1 when none has run); its status label says whether it succeeded", values: ops.maintenance.backup ? [{ labels: { status: ops.maintenance.backup.status }, value: ops.maintenance.backup.ageSeconds }] : [{ labels: { status: "none" }, value: -1 }] },
+      { name: "referly_backup_size_bytes", help: "Size of the most recent backup archive", values: [{ value: ops.maintenance.backup?.sizeBytes ?? 0 }] },
+      { name: "referly_retention_age_seconds", help: "Seconds since the last retention prune finished (-1 when none has run)", values: ops.maintenance.retention ? [{ labels: { status: ops.maintenance.retention.status }, value: ops.maintenance.retention.ageSeconds }] : [{ labels: { status: "none" }, value: -1 }] },
     ]);
     return c.text(body, 200, { "content-type": "text/plain; version=0.0.4; charset=utf-8" });
   });

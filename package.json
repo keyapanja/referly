@@ -12,7 +12,9 @@
     "test:postgres": "node scripts/test-postgres.mjs",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "dev:api": "npm run dev -w @referly/api",
-    "dev:web": "npm run dev -w @referly/web"
+    "dev:web": "npm run dev -w @referly/web",
+    "backup": "npm run cli -w @referly/api -- backup",
+    "restore": "npm run cli -w @referly/api -- restore"
   },
   "engines": {
     "node": ">=20"

@@ -54,9 +54,21 @@ export const tenants = pgTable("tenants", {
   branding: jsonb("branding").$type<TenantBranding>().notNull().default({}),
   tone: text("tone").notNull().default("friendly"), // friendly | professional | concise | warm | formal
   defaults: jsonb("defaults").$type<TenantDefaults>().notNull().default({}),
+  /** Per-tenant data-retention overrides in days; null keys fall back to the platform defaults. */
+  retention: jsonb("retention").$type<TenantRetention>(),
+  /** Set when a platform admin closes the workspace; rows and files are purged after the grace period. */
+  closedAt: ts("closed_at"),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });
+
+export interface TenantRetention {
+  clicksDays?: number | null;
+  messageLogsDays?: number | null;
+  auditLogsDays?: number | null;
+  webhookDeliveriesDays?: number | null;
+  automationRunsDays?: number | null;
+}
 
 export interface TenantBranding {
   primaryColor?: string;
@@ -231,6 +243,8 @@ export const affiliates = pgTable(
     textOptOutAt: ts("text_opt_out_at"),
     applicationAnswers: jsonb("application_answers").$type<Record<string, unknown>>().notNull().default({}),
     suspendedAt: ts("suspended_at"),
+    /** Personal data replaced with placeholders (erasure request); financial records stay. */
+    erasedAt: ts("erased_at"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -899,6 +913,27 @@ export const webhookDeliveries = pgTable(
   (t) => [uniqueIndex("webhook_deliveries_uq").on(t.tenantId, t.source, t.idempotencyKey)],
 );
 
+/**
+ * Platform-level maintenance history: backups, retention pruning, workspace purges and
+ * restores. Not tenant-scoped (like jobs); the admin operations panel and /metrics read it.
+ */
+export const maintenanceRuns = pgTable(
+  "maintenance_runs",
+  {
+    id: id(),
+    kind: text("kind").notNull(), // backup | retention | purge | restore
+    trigger: text("trigger").notNull().default("scheduled"), // scheduled | manual | cli
+    status: text("status").notNull().default("running"), // running | done | failed
+    storageKey: text("storage_key"),
+    sizeBytes: money("size_bytes"),
+    summary: jsonb("summary").$type<Record<string, unknown>>().notNull().default({}),
+    error: text("error"),
+    startedAt: ts("started_at").notNull().defaultNow(),
+    completedAt: ts("completed_at"),
+  },
+  (t) => [index("maintenance_runs_kind_idx").on(t.kind, t.startedAt)],
+);
+
 export const schema = {
   tenants,
   users,
@@ -941,6 +976,7 @@ export const schema = {
   jobs,
   exports,
   webhookDeliveries,
+  maintenanceRuns,
 };
 
 export type Tenant = typeof tenants.$inferSelect;
@@ -979,3 +1015,4 @@ export type MessageTemplate = typeof messageTemplates.$inferSelect;
 export type MessageLog = typeof messageLogs.$inferSelect;
 export type AuditLog = typeof auditLogs.$inferSelect;
 export type Job = typeof jobs.$inferSelect;
+export type MaintenanceRun = typeof maintenanceRuns.$inferSelect;

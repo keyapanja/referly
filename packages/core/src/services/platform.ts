@@ -1,7 +1,7 @@
 import { and, count, desc, eq, gte, ilike, inArray, lt, lte, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { DbLike } from "../db/client";
-import { affiliates, conversions, jobs, messageLogs, tenants, users, webhookOutboundDeliveries, webhookSubscriptions, type Job, type Tenant, type User } from "../db/schema";
+import { affiliates, conversions, jobs, maintenanceRuns, messageLogs, tenants, users, webhookOutboundDeliveries, webhookSubscriptions, type Job, type MaintenanceRun, type Tenant, type User } from "../db/schema";
 import { newId } from "../ids";
 import { notFound, validation } from "../errors";
 import { tenantContext } from "../context";
@@ -103,7 +103,8 @@ export async function getTenantDetail(db: DbLike, tenantId: string, now = new Da
 }
 
 export const adminUpdateTenantSchema = z.object({
-  status: z.enum(["active", "suspended"]).optional(),
+  /** `closed` starts the purge clock (TENANT_PURGE_DAYS); reactivating before it runs out cancels the purge. */
+  status: z.enum(["active", "suspended", "closed"]).optional(),
   planId: z.enum(PLAN_IDS).optional(),
   /** Per-tenant overrides; null clears a limit (unlimited), omit a key to keep the plan default. */
   planLimits: z.partialRecord(z.enum(["activeAffiliates", "programs", "teamMembers", "monthlyConversions"]), z.number().int().min(0).nullable()).nullable().optional(),
@@ -115,7 +116,10 @@ export async function updateTenantByAdmin(db: DbLike, admin: PlatformActor, tena
   const before = await db.query.tenants.findFirst({ where: eq(tenants.id, tenantId) });
   if (!before || before.slug === PLATFORM_TENANT_SLUG) throw notFound("tenant", tenantId);
   const patch: Partial<Tenant> = { updatedAt: now };
-  if (input.status) patch.status = input.status;
+  if (input.status) {
+    patch.status = input.status;
+    patch.closedAt = input.status === "closed" ? (before.closedAt ?? now) : null;
+  }
   if (input.planId) patch.planId = input.planId;
   if (input.planLimits !== undefined) patch.planLimits = input.planLimits;
   if (Object.keys(patch).length === 1) throw validation("nothing to update");
@@ -125,8 +129,8 @@ export async function updateTenantByAdmin(db: DbLike, admin: PlatformActor, tena
     entityType: "tenant",
     entityId: tenantId,
     action: "admin_update",
-    before: { status: before.status, planId: before.planId, planLimits: before.planLimits },
-    after: { status: after!.status, planId: after!.planId, planLimits: after!.planLimits },
+    before: { status: before.status, planId: before.planId, planLimits: before.planLimits, closedAt: before.closedAt?.toISOString() ?? null },
+    after: { status: after!.status, planId: after!.planId, planLimits: after!.planLimits, closedAt: after!.closedAt?.toISOString() ?? null },
     reason: input.reason,
   });
   return after!;
@@ -183,7 +187,7 @@ export async function opsSummary(db: DbLike, now = new Date()) {
   const hour = new Date(now.getTime() - 3_600_000);
   const day = new Date(now.getTime() - 86_400_000);
   const stuckBefore = new Date(now.getTime() - STUCK_JOB_MS);
-  const [byStatus, [retrying], [oldest], [stuck], [doneHour], [deadHour], byType, [deadDeliveries], [pausedSubs], [failedMail]] = await Promise.all([
+  const [byStatus, [retrying], [oldest], [stuck], [doneHour], [deadHour], byType, [deadDeliveries], [pausedSubs], [failedMail], [lastBackup], [lastRetention], [lastPurge]] = await Promise.all([
     db.select({ status: jobs.status, n: count() }).from(jobs).groupBy(jobs.status),
     db.select({ n: count() }).from(jobs).where(and(eq(jobs.status, "queued"), sql`${jobs.lastError} is not null`)),
     db.select({ runAt: sql<string | null>`min(${jobs.runAt})` }).from(jobs).where(and(eq(jobs.status, "queued"), lte(jobs.runAt, now))),
@@ -194,8 +198,15 @@ export async function opsSummary(db: DbLike, now = new Date()) {
     db.select({ n: count() }).from(webhookOutboundDeliveries).where(and(eq(webhookOutboundDeliveries.status, "dead"), gte(webhookOutboundDeliveries.createdAt, day))),
     db.select({ n: count() }).from(webhookSubscriptions).where(eq(webhookSubscriptions.status, "paused")),
     db.select({ n: count() }).from(messageLogs).where(and(eq(messageLogs.status, "failed"), gte(messageLogs.createdAt, day))),
+    db.select().from(maintenanceRuns).where(eq(maintenanceRuns.kind, "backup")).orderBy(desc(maintenanceRuns.startedAt)).limit(1),
+    db.select().from(maintenanceRuns).where(eq(maintenanceRuns.kind, "retention")).orderBy(desc(maintenanceRuns.startedAt)).limit(1),
+    db.select().from(maintenanceRuns).where(eq(maintenanceRuns.kind, "purge")).orderBy(desc(maintenanceRuns.startedAt)).limit(1),
   ]);
   const status = Object.fromEntries(byStatus.map((r) => [r.status, r.n])) as Record<string, number>;
+  const runView = (r: MaintenanceRun | undefined) =>
+    r
+      ? { id: r.id, status: r.status, trigger: r.trigger, startedAt: r.startedAt.toISOString(), completedAt: r.completedAt?.toISOString() ?? null, sizeBytes: r.sizeBytes ?? null, storageKey: r.storageKey ?? null, error: r.error ?? null, summary: r.summary, ageSeconds: Math.max(0, Math.round((now.getTime() - (r.completedAt ?? r.startedAt).getTime()) / 1000)) }
+      : null;
   const oldestRunAt = oldest?.runAt ? new Date(oldest.runAt) : null;
   return {
     at: now.toISOString(),
@@ -213,5 +224,6 @@ export async function opsSummary(db: DbLike, now = new Date()) {
     },
     webhooks: { deadDeliveries24h: deadDeliveries!.n, pausedSubscriptions: pausedSubs!.n },
     messages: { failed24h: failedMail!.n },
+    maintenance: { backup: runView(lastBackup), retention: runView(lastRetention), purge: runView(lastPurge) },
   };
 }

@@ -45,8 +45,9 @@ export function analyticsRoutes() {
     if (record.expiresAt && record.expiresAt.getTime() < c.get("now")().getTime()) throw validation("export has expired; request a new one");
     const file = await c.get("deps").storage.get(record.storageKey);
     if (!file) throw validation("export file is no longer available");
+    const meta = exportsSvc.exportFileMeta(record.entity);
     return new Response(file.data as unknown as BodyInit, {
-      headers: { "content-type": "text/csv; charset=utf-8", "content-disposition": `attachment; filename="${record.entity}-${record.createdAt.toISOString().slice(0, 10)}.csv"`, "cache-control": "private, no-store" },
+      headers: { "content-type": meta.contentType, "content-disposition": `attachment; filename="${record.entity}-${record.createdAt.toISOString().slice(0, 10)}.${meta.extension}"`, "cache-control": "private, no-store" },
     });
   });
 

@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { z } from "zod";
-import { tenants, auth, audit, account, plans, integrations, MERCHANT_ROLES, API_KEY_SCOPES, forbidden } from "@referly/core";
+import { tenants, auth, audit, account, plans, integrations, retention, MERCHANT_ROLES, API_KEY_SCOPES, forbidden } from "@referly/core";
 import { getCookie } from "hono/cookie";
 import { requireMerchantPrincipal, SESSION_COOKIE, type AppEnv } from "../lib/auth";
 import { publicUser } from "./auth";
@@ -96,6 +96,13 @@ export function tenantRoutes() {
   r.get("/audit", async (c) => {
     const q = c.req.query();
     return c.json({ entries: await audit.listAudit(c.get("deps").db, c.get("ctx"), { entityType: q.entityType, entityId: q.entityId, limit: q.limit ? Number(q.limit) : undefined }) });
+  });
+
+  /** Data retention: the workspace's policy, the platform defaults, and what the next prune would delete. */
+  r.get("/retention", async (c) => c.json(await retention.getRetention(c.get("deps").db, c.get("ctx"))));
+  r.patch("/retention", async (c) => {
+    await retention.updateRetention(c.get("deps").db, c.get("ctx"), await c.req.json());
+    return c.json(await retention.getRetention(c.get("deps").db, c.get("ctx")));
   });
 
   return r;

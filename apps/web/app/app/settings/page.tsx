@@ -6,6 +6,7 @@ import { api, API_URL } from "@/lib/api";
 import { useAction, useApi } from "@/lib/hooks";
 import { dateTime } from "@/lib/format";
 import { Alert, Badge, CopyBox, Field, Loading, PageHeader, Table } from "@/components/ui";
+import { DataRetentionCard } from "@/components/data-card";
 
 export default function SettingsPage() {
   const { data, error, reload } = useApi<any>("/v1/tenant");
@@ -396,6 +397,7 @@ export default function SettingsPage() {
           </div>
         </div>
       </div>
+      <DataRetentionCard />
       <div className="card">
         <h2>Recent audit activity</h2>
         <Table

@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { z } from "zod";
-import { affiliates, tracking, commissions, groups } from "@referly/core";
+import { affiliates, tracking, commissions, groups, privacy } from "@referly/core";
 import { requireMerchantPrincipal, type AppEnv } from "../lib/auth";
 
 export function affiliateRoutes() {
@@ -43,6 +43,8 @@ export function affiliateRoutes() {
     return c.json({ affiliate: await affiliates.suspendAffiliate(c.get("deps").db, c.get("ctx"), c.req.param("id"), reason) });
   });
   r.post("/:id/reactivate", async (c) => c.json({ affiliate: await affiliates.reactivateAffiliate(c.get("deps").db, c.get("ctx"), c.req.param("id"), reasonBody.parse(await c.req.json().catch(() => ({}))).reason) }));
+  /** Data-subject erasure: personal fields become placeholders, the portal login is disabled; financial records stay. */
+  r.post("/:id/erase", async (c) => c.json({ affiliate: await privacy.eraseAffiliate(c.get("deps").db, c.get("ctx"), c.req.param("id"), await c.req.json().catch(() => ({}))) }));
 
   r.post("/:id/coupons", async (c) => {
     const body = await c.req.json();

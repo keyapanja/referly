@@ -52,6 +52,9 @@ api.yourdomain.com {
 | `PLATFORM_ADMIN_EMAIL`, `PLATFORM_ADMIN_PASSWORD`, `PLATFORM_ADMIN_NAME` | api | Creates the platform admin account on boot if it does not exist (idempotent). Sign in at `WEB_URL/login`; admins land on `/admin`. |
 | `PLATFORM_SUPPORT_EMAIL` | api | Shown to merchants on the Plan and usage card for plan changes. |
 | `INTEGRATION_SECRET` | api | Key (16+ chars) for encrypting merchants' payout-provider and Twilio credentials and webhook signing secrets at rest (AES-256-GCM). The API refuses to start in production without it; rotate by re-connecting providers. |
+| `BACKUP_KEY` | api | Encrypts backup archives (AES-256-GCM, key = SHA-256 of this value). Falls back to `INTEGRATION_SECRET`. Keep it with your other secrets; without it an archive cannot be restored. |
+| `BACKUP_EVERY_HOURS`, `BACKUP_KEEP_DAYS`, `BACKUP_KEEP_WEEKS`, `BACKUP_INCLUDE_FILES` | api | Backup schedule (default every 24 h; `0` disables the schedule) and rotation (every backup for 14 days, then one per week for 8 weeks). `BACKUP_INCLUDE_FILES` bundles uploaded files into the archive: default `true` with local storage, `false` with S3 (use bucket versioning there). |
+| `RETENTION_JOBS_DAYS`, `TENANT_PURGE_DAYS`, `RETENTION_MAINTENANCE_DAYS` | api | Platform retention: finished jobs to keep (30), days a closed workspace waits before it is purged (30), maintenance history to keep (365). Per-workspace retention is set in the app. |
 | `LOG_LEVEL`, `LOG_FORMAT` | api | `debug`/`info`/`warn`/`error` (default `info`); `json` (default in production) or `pretty`. |
 | `METRICS_TOKEN` | api | Bearer token for `GET /metrics`. Required in production; without it the endpoint returns 404. |
 | `ERROR_REPORT_URL`, `ERROR_REPORT_TOKEN` | api | Optional sink for unhandled errors: one JSON POST per error (throttled to 30/min) with the request or job id, works with Slack incoming webhooks and most alerting services. |
@@ -131,6 +134,34 @@ WhatsApp: Meta requires business-initiated messages outside a 24-hour conversati
 - **Operations panel.** Platform admins see the same queue and delivery numbers on the admin overview, with dead jobs one click away for retry.
 - **Errors.** Unhandled request and job errors are logged with their ids and, when `ERROR_REPORT_URL` is set, posted there. Uncaught exceptions are reported and the process exits so the supervisor restarts it.
 
+## Backups, retention and data requests
+
+**Backups.** The worker takes a logical backup on a schedule (`BACKUP_EVERY_HOURS`, default daily): every table, read in one consistent snapshot through the app's own connection (no `pg_dump` needed, so it works the same on managed Postgres and on the embedded database), plus every uploaded file when `BACKUP_INCLUDE_FILES` is on. The archive is JSON lines, gzip-compressed and encrypted with AES-256-GCM under `BACKUP_KEY`, written to the file store under `private/backups/<timestamp>.rbk` (the `FILES_DIR` volume or the S3 bucket). Rotation keeps every archive for `BACKUP_KEEP_DAYS`, then one per ISO week for `BACKUP_KEEP_WEEKS`. Each run is recorded in `maintenance_runs`; the admin overview shows the last backup, its size and contents, and lets you trigger one; `/metrics` exports `referly_backup_age_seconds{status}` and `referly_backup_size_bytes` (alert on age above `1.5 × BACKUP_EVERY_HOURS` or `status!="done"`). Failures are logged, reported to `ERROR_REPORT_URL`, and retried once. Archives are assembled in memory; for databases beyond a few gigabytes, run `pg_dump` from a cron job as well.
+
+Keep a copy of the archives somewhere the API host cannot delete: replicate the bucket, or run `npm run backup -- save <key> <file>` from another machine on a schedule. Platform admins can also download an archive from the API (`GET /admin/maintenance/backups/<run id>/download`); it stays encrypted, so the download is safe to move around and useless without the key.
+
+```bash
+npm run backup                         # take one now; prints the storage key and row counts
+npm run backup -- list                 # archives in the store
+npm run backup -- verify <key|file>    # decrypt and summarise without touching a database
+```
+
+**Restore drill.** Restoring is destructive and only runs from the CLI with `--yes`. Point `DATABASE_URL` at the target (an empty database is fine: migrations run first, so an archive from an older release lands in the current schema and any columns the schema no longer has are dropped with a note), then:
+
+```bash
+DATABASE_URL=postgres://.../referly_restore npm run restore -- private/backups/2026-09-09T02-00-00-000Z.rbk --yes --files
+```
+
+`--files` also writes the archive's uploaded files back into the store. The command prints per-table counts, compares them with the archive, records a `restore` maintenance run, and exits non-zero on a mismatch. CI performs this drill on every push: it backs up the smoke-test database, restores into a fresh one, and checks the counts and a login against the restored copy. Do the same against your own backups periodically; a backup that has never been restored is a hope, not a backup.
+
+**Retention.** Operational records age out; the books do not. Every night the worker prunes each workspace under its policy: raw clicks that no attribution points at (400 days by default), sent emails and texts (365), the audit trail (730), webhook deliveries in and out (90), automation run history (180). Owners adjust these within bounds in Settings → Data and see how many rows the next run would remove. Conversions, commissions, ledger entries and payouts are never pruned. Platform-wide housekeeping in the same run: finished jobs older than `RETENTION_JOBS_DAYS`, expired sessions and one-time tokens, expired export files, and maintenance history older than `RETENTION_MAINTENANCE_DAYS`. The backup for the day is always taken before the prune.
+
+**Closing a workspace.** A platform admin sets a workspace to `closed` (admin → workspace → Close workspace). Everyone in it is signed out immediately, and after `TENANT_PURGE_DAYS` the nightly job deletes every row and every file of that workspace and records a `purge` run. Reopening before then cancels the purge. The last backup taken before the purge is the only remaining copy.
+
+**Data-subject requests.**
+- *Access and portability:* an owner exports the whole workspace as JSON lines from Settings → Data (every table, credentials and hashes removed), built by the worker and downloadable for 7 days.
+- *Erasure:* an affiliate asks from their portal profile, which creates a task for the team. A merchant with `affiliates.write` erases them from the affiliate page (`POST /v1/affiliates/:id/erase`): name, email, phone, company, channels, payout details, consent trail, notes and tags become placeholders, the portal login is disabled and its sessions dropped, message bodies to them and audit snapshots about them are blanked. Conversions, commissions, ledger entries and payouts stay under the anonymised affiliate id (accounting basis). Erasure is refused while commissions are still owed; pay, reverse or void them first. Backups taken before the erasure still contain the data until rotation removes them, which is why rotation is bounded.
+
 ## Migrations
 
 `packages/core/drizzle/*.sql` run automatically when the API starts (Drizzle migrator, tracked in `__drizzle_migrations`). To add one: change `packages/core/src/db/schema.ts`, then:
@@ -155,7 +186,7 @@ Set `PLATFORM_ADMIN_EMAIL` and `PLATFORM_ADMIN_PASSWORD` before the first boot. 
 
 ## Operations
 
-- **Backups:** back up Postgres, plus `FILES_DIR` (or the bucket) if merchants upload assets.
+- **Backups:** scheduled, encrypted, rotated and restorable from the CLI; see "Backups, retention and data requests" above. Keep an off-host copy of `private/backups/`.
 - **Logs:** the API logs every request; sent emails appear in the message log (Messages page) with delivery status.
 - **Jobs:** the `jobs` table is the queue. `status = 'dead'` rows exhausted their retries and need a look.
 - **CI:** `.github/workflows/ci.yml` runs typecheck, tests and the web build on every push and PR. `docker.yml` publishes both images to GitHub Container Registry on pushes to `main` and on `v*` tags; set the repository variable `NEXT_PUBLIC_API_URL` to your API origin before relying on the web image.

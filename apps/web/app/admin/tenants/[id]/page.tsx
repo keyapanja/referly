@@ -53,17 +53,36 @@ export default function AdminTenantDetail() {
           </>
         }
         actions={
-          t.status === "active" ? (
-            <button className="danger" disabled={busy} onClick={() => run(() => api(`/admin/tenants/${id}`, { method: "PATCH", json: { status: "suspended", reason: "suspended by platform admin" } }), "Workspace suspended.").then(reload)}>
-              Suspend workspace
-            </button>
-          ) : (
-            <button className="primary" disabled={busy} onClick={() => run(() => api(`/admin/tenants/${id}`, { method: "PATCH", json: { status: "active", reason: "reactivated by platform admin" } }), "Workspace reactivated.").then(reload)}>
-              Reactivate workspace
-            </button>
-          )
+          <>
+            {t.status === "active" ? (
+              <button className="danger" disabled={busy} onClick={() => run(() => api(`/admin/tenants/${id}`, { method: "PATCH", json: { status: "suspended", reason: "suspended by platform admin" } }), "Workspace suspended.").then(reload)}>
+                Suspend workspace
+              </button>
+            ) : (
+              <button className="primary" disabled={busy} onClick={() => run(() => api(`/admin/tenants/${id}`, { method: "PATCH", json: { status: "active", reason: t.status === "closed" ? "reopened by platform admin" : "reactivated by platform admin" } }), t.status === "closed" ? "Workspace reopened; the purge is cancelled." : "Workspace reactivated.").then(reload)}>
+                {t.status === "closed" ? "Reopen workspace" : "Reactivate workspace"}
+              </button>
+            )}
+            {t.status !== "closed" ? (
+              <button
+                className="danger"
+                disabled={busy}
+                onClick={() => {
+                  const r = window.prompt(`Close ${t.name}? Everyone is signed out now, and every record and file of this workspace is permanently deleted after the grace period. Type a reason to confirm:`);
+                  if (r) run(() => api(`/admin/tenants/${id}`, { method: "PATCH", json: { status: "closed", reason: r } }), "Workspace closed; purge scheduled.").then(reload);
+                }}
+              >
+                Close workspace
+              </button>
+            ) : null}
+          </>
         }
       />
+      {t.status === "closed" ? (
+        <Alert kind="info">
+          Closed {dateTime(t.closedAt)}. Rows and files are purged by the nightly retention job once the grace period (TENANT_PURGE_DAYS, 30 by default) has passed. Reopen before then to keep everything.
+        </Alert>
+      ) : null}
       <Alert kind="error">{actionError}</Alert>
       <Alert kind="success">{success}</Alert>
       <div className="grid cols-2">

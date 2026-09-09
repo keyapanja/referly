@@ -88,6 +88,30 @@ jobs:
           kill $API_PID
           wait $API_PID || true
           echo "boot smoke ok"
+      # Back up the smoke database with the CLI, restore into an empty database, and check that the
+      # copy has the same rows and still serves the workspace created above.
+      - name: Backup and restore drill
+        run: |
+          set -euo pipefail
+          export DATABASE_URL="postgres://postgres:postgres@localhost:5432/referly_smoke"
+          export BASE_URL=http://localhost:4000 WEB_URL=http://localhost:3000
+          export INTEGRATION_SECRET=ci-secret-ci-secret-ci-secret-1234 BACKUP_KEY=ci-backup-key-ci-backup-key-1234
+          OUT=$(npm run cli --silent -w @referly/api -- backup)
+          echo "$OUT"
+          KEY=$(echo "$OUT" | sed -nE 's/.*"key": "([^"]+)".*/\1/p' | head -1)
+          test -n "$KEY"
+          npm run cli --silent -w @referly/api -- backup verify "$KEY" | tee verify.json
+          grep -q '"tenants": 2' verify.json
+          psql "postgres://postgres:postgres@localhost:5432/postgres" -c 'create database referly_restore'
+          DATABASE_URL="postgres://postgres:postgres@localhost:5432/referly_restore" npm run cli --silent -w @referly/api -- restore "$KEY" --yes --files | tee restore.json
+          grep -q '"mismatched": \[\]' restore.json
+          for t in tenants users programs offers; do
+            a=$(psql "$DATABASE_URL" -tAc "select count(*) from $t")
+            b=$(psql "postgres://postgres:postgres@localhost:5432/referly_restore" -tAc "select count(*) from $t")
+            echo "$t: $a -> $b"; test "$a" = "$b"
+          done
+          psql "postgres://postgres:postgres@localhost:5432/referly_restore" -tAc "select slug from tenants where slug = 'ci-co'" | grep -q '^ci-co$'
+          echo "restore drill ok"
       - name: API log
         if: always()
         run: cat api.log || true

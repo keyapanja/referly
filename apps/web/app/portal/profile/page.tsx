@@ -162,6 +162,18 @@ export default function PortalProfile() {
         </form>
       </div>
       <div className="card">
+        <h2>Your data</h2>
+        <p className="muted">You can ask {data.tenant?.name ?? "this business"} to delete the personal data they hold about you. They will settle anything still owed to you first; records of past sales and payouts are kept for accounting.</p>
+        <button
+          disabled={busy}
+          onClick={() => {
+            if (window.confirm("Ask for your personal data to be deleted? Your portal login will stop working once the request is carried out.")) run(() => api("/portal/erasure-request", { method: "POST", json: {} }), "Request sent. The team will be in touch.");
+          }}
+        >
+          Request deletion of my data
+        </button>
+      </div>
+      <div className="card">
         <h2>Programs and terms</h2>
         <ul style={{ margin: 0, paddingLeft: 18 }}>
           {data.memberships.map((m: any) => (

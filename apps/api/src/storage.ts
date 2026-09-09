@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 /**
@@ -23,9 +23,18 @@ export interface PutOptions {
   private?: boolean;
 }
 
+export interface StoredObject {
+  key: string;
+  sizeBytes: number;
+  lastModified?: Date;
+}
+
 export interface FileStorage {
   put(key: string, data: Uint8Array, contentType: string, opts?: PutOptions): Promise<StoredFile>;
   get(key: string): Promise<{ data: Uint8Array; contentType: string } | null>;
+  /** Every object under a prefix (backups, workspace purges). */
+  list?(prefix: string): Promise<StoredObject[]>;
+  delete?(key: string): Promise<void>;
 }
 
 /** Keys under this prefix are never served by the public /files route. */
@@ -137,6 +146,37 @@ export class LocalStorage implements FileStorage {
       return false;
     }
   }
+
+  async list(prefix: string): Promise<StoredObject[]> {
+    const base = path.resolve(this.dir);
+    const out: StoredObject[] = [];
+    const walk = async (dir: string) => {
+      let entries: import("node:fs").Dirent[];
+      try {
+        entries = await readdir(dir, { withFileTypes: true });
+      } catch {
+        return;
+      }
+      for (const e of entries) {
+        const full = path.join(dir, e.name);
+        if (e.isDirectory()) await walk(full);
+        else if (e.isFile() && !e.name.endsWith(".meta")) {
+          const key = path.relative(base, full).split(path.sep).join("/");
+          if (!key.startsWith(prefix)) continue;
+          const s = await stat(full);
+          out.push({ key, sizeBytes: s.size, lastModified: s.mtime });
+        }
+      }
+    };
+    await walk(base);
+    return out.sort((a, b) => a.key.localeCompare(b.key));
+  }
+
+  async delete(key: string): Promise<void> {
+    const full = this.resolve(key);
+    await rm(full, { force: true });
+    await rm(`${full}.meta`, { force: true });
+  }
 }
 
 export class S3Storage implements FileStorage {
@@ -179,6 +219,25 @@ export class S3Storage implements FileStorage {
       if ((err as { name?: string }).name === "NoSuchKey") return null;
       throw err;
     }
+  }
+
+  async list(prefix: string): Promise<StoredObject[]> {
+    const { ListObjectsV2Command } = await import("@aws-sdk/client-s3");
+    const client = await this.s3();
+    const out: StoredObject[] = [];
+    let token: string | undefined;
+    do {
+      const res = await client.send(new ListObjectsV2Command({ Bucket: this.opts.bucket, Prefix: prefix, ContinuationToken: token }));
+      for (const o of res.Contents ?? []) if (o.Key) out.push({ key: o.Key, sizeBytes: o.Size ?? 0, lastModified: o.LastModified });
+      token = res.IsTruncated ? res.NextContinuationToken : undefined;
+    } while (token);
+    return out;
+  }
+
+  async delete(key: string): Promise<void> {
+    const { DeleteObjectCommand } = await import("@aws-sdk/client-s3");
+    const client = await this.s3();
+    await client.send(new DeleteObjectCommand({ Bucket: this.opts.bucket, Key: key }));
   }
 }
 
