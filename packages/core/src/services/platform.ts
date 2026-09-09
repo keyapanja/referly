@@ -79,7 +79,7 @@ export async function listTenants(db: DbLike, filter: { q?: string; limit?: numb
     db
       .select({ tenantId: conversions.tenantId, n: count(), revenue: sql<number>`coalesce(sum(${conversions.amountMinor} - ${conversions.refundedAmountMinor}), 0)` })
       .from(conversions)
-      .where(and(inArray(conversions.tenantId, ids), gte(conversions.createdAt, since), sql`${conversions.status} not in ('cancelled', 'reversed')`))
+      .where(and(inArray(conversions.tenantId, ids), gte(conversions.createdAt, since), sql`${conversions.status} not in ('cancelled', 'reversed')`, eq(conversions.kind, "sale")))
       .groupBy(conversions.tenantId),
   ]);
   return rows.map((t) => ({
@@ -145,7 +145,7 @@ export async function platformOverview(db: DbLike, now = new Date()) {
     db
       .select({ n: count(), revenue: sql<number>`coalesce(sum(${conversions.amountMinor} - ${conversions.refundedAmountMinor}), 0)` })
       .from(conversions)
-      .where(and(gte(conversions.createdAt, since), sql`${conversions.status} not in ('cancelled', 'reversed')`)),
+      .where(and(gte(conversions.createdAt, since), sql`${conversions.status} not in ('cancelled', 'reversed')`, eq(conversions.kind, "sale"))),
     db.select({ n: count() }).from(jobs).where(eq(jobs.status, "dead")),
     db.select({ n: count() }).from(messageLogs).where(and(eq(messageLogs.status, "failed"), gte(messageLogs.createdAt, day))),
     db.select({ n: count() }).from(tenants).where(and(gte(tenants.createdAt, since), sql`${tenants.slug} <> ${PLATFORM_TENANT_SLUG}`)),

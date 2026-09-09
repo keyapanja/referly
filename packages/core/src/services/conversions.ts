@@ -16,10 +16,14 @@ import { evaluateBonus, findLiveCampaign } from "./campaigns";
 import { getMembership } from "./affiliates";
 import { proportion } from "../money";
 
-export const CONVERSION_SOURCES = ["webhook", "api", "manual", "stripe", "shopify", "woocommerce", "import"] as const;
+export const CONVERSION_SOURCES = ["webhook", "api", "manual", "stripe", "shopify", "woocommerce", "import", "form"] as const;
+export const CONVERSION_KINDS = ["sale", "lead"] as const;
+export type ConversionKind = (typeof CONVERSION_KINDS)[number];
 
 export const recordConversionSchema = z.object({
   source: z.enum(CONVERSION_SOURCES).default("api"),
+  /** `lead` rows are created through the leads service; the API's conversion endpoint only records sales. */
+  kind: z.enum(CONVERSION_KINDS).default("sale"),
   /** Order/transaction id from the source system. Idempotency key within (tenant, source). */
   externalOrderId: z.string().min(1).max(200),
   offerId: z.string().optional(),
@@ -95,6 +99,7 @@ export async function recordConversion(db: DbLike, ctx: TenantContext, rawInput:
           id: newId("conversion"),
           tenantId: ctx.tenantId,
           source: input.source,
+          kind: input.kind,
           externalOrderId: input.externalOrderId,
           offerId: input.offerId ?? null,
           customerRef: input.customerRef ?? null,
@@ -126,11 +131,14 @@ export async function recordConversion(db: DbLike, ctx: TenantContext, rawInput:
       }
       await writeAudit(tx, ctx, { entityType: "conversion", entityId: conversion!.id, action: "created", after: snapshot(conversion!), reason: manualReason });
       await emitEvent(tx, ctx, "conversion.created", { type: "conversion", id: conversion!.id }, {
+        kind: conversion!.kind,
+        programId: conversion!.programId,
         affiliateId: decision?.affiliateId ?? null,
         amountMinor: conversion!.amountMinor,
         currency: conversion!.currency,
         offerId: conversion!.offerId,
         commissionId: commission?.id ?? null,
+        commissionMinor: commission?.amountMinor ?? null,
       });
       return { conversion: conversion!, attribution, commission, duplicate: false };
     });
@@ -324,7 +332,7 @@ export async function findByExternalId(db: DbLike, ctx: TenantContext, _source: 
 export async function listConversions(
   db: DbLike,
   ctx: TenantContext,
-  filter: { affiliateId?: string; status?: ConversionStatus; offerId?: string; programId?: string; limit?: number } = {},
+  filter: { affiliateId?: string; status?: ConversionStatus; offerId?: string; programId?: string; limit?: number; kind?: ConversionKind | "all" } = {},
 ): Promise<Conversion[]> {
   if (filter.affiliateId) requireAffiliate(ctx, filter.affiliateId);
   else requirePerm(ctx, "read");
@@ -334,6 +342,7 @@ export async function listConversions(
     .where(
       and(
         eq(conversions.tenantId, ctx.tenantId),
+        filter.kind === "all" ? undefined : eq(conversions.kind, filter.kind ?? "sale"),
         filter.affiliateId ? eq(conversions.affiliateId, filter.affiliateId) : undefined,
         filter.status ? eq(conversions.status, filter.status) : undefined,
         filter.offerId ? eq(conversions.offerId, filter.offerId) : undefined,
@@ -364,7 +373,7 @@ export async function currentCommission(db: DbLike, conversionId: string): Promi
   return rows[0] ?? null;
 }
 
-function hashEmail(email: string): string {
+export function hashEmail(email: string): string {
   return createHash("sha256").update(email.trim().toLowerCase()).digest("hex");
 }
 

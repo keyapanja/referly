@@ -3,6 +3,7 @@ import { getCookie, setCookie } from "hono/cookie";
 import { tracking, programs, affiliates, auth, tenants, systemContext, notFound, validation, offers, integrations, messaging, textProviders, webhookDeliveries, newId } from "@referly/core";
 import { setSessionCookie, type AppEnv } from "../lib/auth";
 import { scopeRequest } from "../lib/rls";
+import { leads as leadsSvc } from "@referly/core";
 import { publicTenant } from "./auth";
 
 export const CLICK_COOKIE = "referly_clicks";
@@ -106,6 +107,74 @@ export function publicRoutes() {
   });
 
   /** Journey C: branded application page data. */
+  /**
+   * Lead capture for forms on the merchant's site. JSON or form-encoded; `ref` carries the click
+   * token the /r redirect placed in the destination URL. Returns JSON, or redirects when the
+   * form asks for it. Never echoes the contact back and never reveals whether the program exists
+   * beyond a 404.
+   */
+  r.post("/capture/:token", async (c) => {
+    const { db } = c.get("deps");
+    const program = await leadsSvc.getProgramByCaptureToken(db, c.req.param("token"));
+    if (!program || !program.leadsEnabled || program.status !== "active") throw notFound("capture form");
+    await scopeRequest(c, program.tenantId);
+    const ctx = systemContext(program.tenantId, c.get("now"));
+    const contentType = c.req.header("content-type") ?? "";
+    const raw: Record<string, unknown> = contentType.includes("application/json") ? await c.req.json() : Object.fromEntries((await c.req.formData()).entries());
+    const fields: Record<string, string> = {};
+    const known = new Set(["name", "email", "phone", "company", "ref", "couponCode", "redirect", "landingUrl", "fields"]);
+    for (const [k, v] of Object.entries(raw)) if (!known.has(k) && typeof v === "string" && k.length <= 60) fields[k] = v.slice(0, 2000);
+    const input = leadsSvc.captureSchema.parse({ ...raw, fields: { ...fields, ...((raw.fields as Record<string, string> | undefined) ?? {}) }, landingUrl: (raw.landingUrl as string | undefined) ?? c.req.header("referer") });
+    const result = await leadsSvc.recordLead(db, ctx, {
+      source: "form",
+      programId: program.id,
+      name: input.name,
+      email: input.email,
+      phone: input.phone,
+      company: input.company,
+      fields: input.fields,
+      landingUrl: input.landingUrl,
+      clickToken: input.ref,
+      couponCode: input.couponCode,
+    });
+    if (input.redirect) return c.redirect(input.redirect, 303);
+    return c.json({ ok: true, leadId: result.lead.id, duplicate: result.disposition === "duplicate" }, 201);
+  });
+
+  /**
+   * Lead capture for forms on the merchant's site. JSON or form-encoded; `ref` carries the click
+   * token the /r redirect placed in the destination URL. Returns JSON, or redirects when the
+   * form asks for it. Never echoes the contact back and never reveals whether the program exists
+   * beyond a 404.
+   */
+  r.post("/capture/:token", async (c) => {
+    const { db } = c.get("deps");
+    const program = await leadsSvc.getProgramByCaptureToken(db, c.req.param("token"));
+    if (!program || !program.leadsEnabled || program.status !== "active") throw notFound("capture form");
+    await scopeRequest(c, program.tenantId);
+    const ctx = systemContext(program.tenantId, c.get("now"));
+    const contentType = c.req.header("content-type") ?? "";
+    const raw: Record<string, unknown> = contentType.includes("application/json") ? await c.req.json() : Object.fromEntries((await c.req.formData()).entries());
+    const fields: Record<string, string> = {};
+    const known = new Set(["name", "email", "phone", "company", "ref", "couponCode", "redirect", "landingUrl", "fields"]);
+    for (const [k, v] of Object.entries(raw)) if (!known.has(k) && typeof v === "string" && k.length <= 60) fields[k] = v.slice(0, 2000);
+    const input = leadsSvc.captureSchema.parse({ ...raw, fields: { ...fields, ...((raw.fields as Record<string, string> | undefined) ?? {}) }, landingUrl: (raw.landingUrl as string | undefined) ?? c.req.header("referer") });
+    const result = await leadsSvc.recordLead(db, ctx, {
+      source: "form",
+      programId: program.id,
+      name: input.name,
+      email: input.email,
+      phone: input.phone,
+      company: input.company,
+      fields: input.fields,
+      landingUrl: input.landingUrl,
+      clickToken: input.ref,
+      couponCode: input.couponCode,
+    });
+    if (input.redirect) return c.redirect(input.redirect, 303);
+    return c.json({ ok: true, leadId: result.lead.id, duplicate: result.disposition === "duplicate" }, 201);
+  });
+
   r.get("/join/:token", async (c) => {
     const { db } = c.get("deps");
     const program = await programs.getProgramByJoinToken(db, c.req.param("token"));

@@ -41,7 +41,7 @@ async function fanOutPending(): Promise<Notification[]> {
 
 describe("notification centre", () => {
   it("has a category catalogue per audience and email categories that map onto the built-in emails", () => {
-    expect(notifications.categoriesFor("merchant").map((c) => c.key)).toEqual(["applications", "sales", "disputes", "payouts", "tasks"]);
+    expect(notifications.categoriesFor("merchant").map((c) => c.key)).toEqual(["applications", "sales", "leads", "disputes", "payouts", "tasks"]);
     expect(notifications.categoriesFor("affiliate").every((c) => c.email)).toBe(true);
     for (const cat of Object.values(notifications.EMAIL_CATEGORY)) expect(notifications.CATEGORIES.some((c) => c.key === cat && c.audience === "affiliate")).toBe(true);
     expect(notifications.wants(null, "sales", "inApp")).toBe(true);
@@ -113,7 +113,7 @@ describe("notification centre", () => {
     // marketing members only see their categories
     const mia = await db.query.users.findFirst({ where: eq(users.email, "mia-n@example.com") });
     const miaView = await notifications.getPrefs(db, tenantContext(ws.tenant.id, { type: "user", id: mia!.id, role: "marketing" }, clock.now), { type: "user", id: mia!.id });
-    expect(miaView.categories.map((c) => c.key)).toEqual(["applications", "sales", "tasks"]);
+    expect(miaView.categories.map((c) => c.key)).toEqual(["applications", "sales", "leads", "tasks"]);
     // affiliate email preference
     const affCtx = tenantContext(ws.tenant.id, { type: "affiliate", id: bob.id, affiliateId: bob.id, role: "affiliate" }, clock.now);
     await notifications.updatePrefs(db, affCtx, { type: "affiliate", id: bob.id }, { earnings: { email: false } });

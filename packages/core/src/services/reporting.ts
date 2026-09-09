@@ -75,7 +75,7 @@ export async function timeseries(db: DbLike, ctx: TenantContext, period: Period,
         attributedRevenue: num(sql`sum(case when ${conversions.affiliateId} is not null then ${conversions.amountMinor} - ${conversions.refundedAmountMinor} else 0 end)`),
       })
       .from(conversions)
-      .where(and(eq(conversions.tenantId, t), eq(conversions.isTest, false), inArray(conversions.status, VALID), gte(conversions.occurredAt, period.from), lte(conversions.occurredAt, period.to)))
+      .where(and(eq(conversions.tenantId, t), eq(conversions.isTest, false), eq(conversions.kind, "sale"), inArray(conversions.status, VALID), gte(conversions.occurredAt, period.from), lte(conversions.occurredAt, period.to)))
       .groupBy(bucket(conversions.occurredAt)),
     db
       .select({ b: bucket(commissions.createdAt), total: num(sql`sum(${commissions.amountMinor})`) })
@@ -128,7 +128,7 @@ export async function periodMetrics(db: DbLike, ctx: TenantContext, period: Peri
         attributedRevenue: num(sql`sum(case when ${conversions.affiliateId} is not null then ${conversions.amountMinor} - ${conversions.refundedAmountMinor} else 0 end)`),
       })
       .from(conversions)
-      .where(and(eq(conversions.tenantId, t), eq(conversions.isTest, false), inArray(conversions.status, VALID), gte(conversions.occurredAt, period.from), lte(conversions.occurredAt, period.to))),
+      .where(and(eq(conversions.tenantId, t), eq(conversions.isTest, false), eq(conversions.kind, "sale"), inArray(conversions.status, VALID), gte(conversions.occurredAt, period.from), lte(conversions.occurredAt, period.to))),
     db.select({ total: num(sql`sum(${commissions.amountMinor})`) }).from(commissions).where(and(eq(commissions.tenantId, t), eq(commissions.isTest, false), sql`${commissions.status} not in ('reversed', 'void')`, gte(commissions.createdAt, period.from), lte(commissions.createdAt, period.to))),
     db.select({ n: count() }).from(affiliates).where(and(eq(affiliates.tenantId, t), gte(affiliates.createdAt, period.from), lte(affiliates.createdAt, period.to))),
   ]);
@@ -178,9 +178,9 @@ export async function funnel(db: DbLike, ctx: TenantContext, period: Period) {
     db
       .select({ n: count(), attributed: num(sql`sum(case when ${conversions.affiliateId} is not null then 1 else 0 end)`), approved: num(sql`sum(case when ${conversions.status} = 'approved' then 1 else 0 end)`), refunded: num(sql`sum(case when ${conversions.status} = 'refunded' then 1 else 0 end)`) })
       .from(conversions)
-      .where(and(eq(conversions.tenantId, t), eq(conversions.isTest, false), inArray(conversions.status, VALID), gte(conversions.occurredAt, period.from), lte(conversions.occurredAt, period.to))),
-    db.select({ n: count() }).from(conversions).where(and(eq(conversions.tenantId, t), eq(conversions.isTest, false), inArray(conversions.status, VALID), eq(conversions.attributionSource, "link"), gte(conversions.occurredAt, period.from), lte(conversions.occurredAt, period.to))),
-    db.select({ n: count() }).from(conversions).where(and(eq(conversions.tenantId, t), eq(conversions.isTest, false), inArray(conversions.status, VALID), eq(conversions.attributionSource, "coupon"), gte(conversions.occurredAt, period.from), lte(conversions.occurredAt, period.to))),
+      .where(and(eq(conversions.tenantId, t), eq(conversions.isTest, false), eq(conversions.kind, "sale"), inArray(conversions.status, VALID), gte(conversions.occurredAt, period.from), lte(conversions.occurredAt, period.to))),
+    db.select({ n: count() }).from(conversions).where(and(eq(conversions.tenantId, t), eq(conversions.isTest, false), eq(conversions.kind, "sale"), inArray(conversions.status, VALID), eq(conversions.attributionSource, "link"), gte(conversions.occurredAt, period.from), lte(conversions.occurredAt, period.to))),
+    db.select({ n: count() }).from(conversions).where(and(eq(conversions.tenantId, t), eq(conversions.isTest, false), eq(conversions.kind, "sale"), inArray(conversions.status, VALID), eq(conversions.attributionSource, "coupon"), gte(conversions.occurredAt, period.from), lte(conversions.occurredAt, period.to))),
   ]);
   const stages = [
     { key: "clicks", label: "Affiliate clicks", value: clk!.n },
@@ -210,7 +210,7 @@ export async function byGroup(db: DbLike, ctx: TenantContext, period: Period) {
     db
       .select({ affiliateId: conversions.affiliateId, n: count(), revenue: num(sql`sum(${conversions.amountMinor} - ${conversions.refundedAmountMinor})`) })
       .from(conversions)
-      .where(and(eq(conversions.tenantId, t), eq(conversions.isTest, false), inArray(conversions.status, VALID), inArray(conversions.affiliateId, affiliateIds), gte(conversions.occurredAt, period.from), lte(conversions.occurredAt, period.to)))
+      .where(and(eq(conversions.tenantId, t), eq(conversions.isTest, false), eq(conversions.kind, "sale"), inArray(conversions.status, VALID), inArray(conversions.affiliateId, affiliateIds), gte(conversions.occurredAt, period.from), lte(conversions.occurredAt, period.to)))
       .groupBy(conversions.affiliateId),
     db
       .select({ affiliateId: commissions.affiliateId, total: num(sql`sum(${commissions.amountMinor})`) })

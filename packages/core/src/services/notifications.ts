@@ -31,6 +31,7 @@ export interface Category {
 export const CATEGORIES: readonly Category[] = [
   { key: "applications", audience: "merchant", label: "Applications", description: "New affiliate applications and program joins", roles: ["owner", "admin", "marketing"], email: false },
   { key: "sales", audience: "merchant", label: "Sales", description: "Attributed sales, refunds and cancellations", roles: ["owner", "admin", "marketing"], email: false },
+  { key: "leads", audience: "merchant", label: "Leads", description: "New leads waiting to be qualified", roles: ["owner", "admin", "marketing"], email: false },
   { key: "disputes", audience: "merchant", label: "Disputes", description: "Disputes opened, replied to or withdrawn by affiliates", roles: ["owner", "admin"], email: false },
   { key: "payouts", audience: "merchant", label: "Payouts", description: "Provider payouts that failed", roles: ["owner", "admin"], email: false },
   { key: "tasks", audience: "merchant", label: "Tasks", description: "Tasks created by automation, disputes, webhooks and data requests", roles: ["owner", "admin", "marketing"], email: false },
@@ -106,6 +107,13 @@ async function draftsFor(db: DbLike, event: DomainEvent): Promise<{ merchant: Dr
     case "affiliate.reactivated":
       return { merchant: null, affiliate: { category: "account", title: "Your account is active again", link: "/portal" } };
     case "conversion.created": {
+      if (d.kind === "lead") {
+        const prog = programId ? program : null;
+        return {
+          merchant: { category: "leads", title: affiliateId ? `New lead via ${name}` : "New lead recorded", body: prog ? `${prog.name} · waiting to be qualified` : "Waiting to be qualified", link: "/app/leads" },
+          affiliate: affiliateId && d.commissionId ? { category: "earnings", title: "A lead was attributed to you", body: "Your commission goes into the holding period once the merchant qualifies it.", link: "/portal/leads" } : null,
+        };
+      }
       const offerId = d.offerId as string | undefined;
       const offer = offerId ? await db.query.offers.findFirst({ where: and(eq(offers.id, offerId), eq(offers.tenantId, event.tenantId)) }) : null;
       const what = `${amount}${offer ? ` · ${offer.name}` : ""}`;

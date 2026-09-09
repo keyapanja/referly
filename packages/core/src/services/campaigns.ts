@@ -296,7 +296,7 @@ export async function evaluateBonus(db: DbLike, ctx: TenantContext, campaign: Ca
   const [agg] = await db
     .select({ n: count(), revenue: sql<number>`coalesce(sum(${conversions.amountMinor} - ${conversions.refundedAmountMinor}), 0)` })
     .from(conversions)
-    .where(and(eq(conversions.tenantId, ctx.tenantId), eq(conversions.campaignId, campaign.id), eq(conversions.affiliateId, affiliateId), sql`${conversions.status} not in ('cancelled', 'reversed')`, eq(conversions.isTest, false)));
+    .where(and(eq(conversions.tenantId, ctx.tenantId), eq(conversions.campaignId, campaign.id), eq(conversions.affiliateId, affiliateId), sql`${conversions.status} not in ('cancelled', 'reversed')`, eq(conversions.isTest, false), eq(conversions.kind, "sale")));
   const value = rule.metric === "conversions" ? agg!.n : Number(agg!.revenue);
   if (value < rule.threshold) return null;
   const entry = await writeLedger(db, ctx, { affiliateId, type: "adjustment", amountMinor: rule.bonusMinor, currency, reason: `campaign bonus: ${campaign.name}` });
@@ -330,7 +330,7 @@ export async function campaignPerformance(db: DbLike, ctx: TenantContext, campai
     db
       .select({ n: count(), revenue: sql<number>`coalesce(sum(${conversions.amountMinor} - ${conversions.refundedAmountMinor}), 0)` })
       .from(conversions)
-      .where(and(eq(conversions.tenantId, ctx.tenantId), eq(conversions.campaignId, campaignId), sql`${conversions.status} not in ('cancelled', 'reversed')`, eq(conversions.isTest, false))),
+      .where(and(eq(conversions.tenantId, ctx.tenantId), eq(conversions.campaignId, campaignId), sql`${conversions.status} not in ('cancelled', 'reversed')`, eq(conversions.isTest, false), eq(conversions.kind, "sale"))),
     db
       .select({ total: sql<number>`coalesce(sum(${commissions.amountMinor}), 0)` })
       .from(commissions)
@@ -400,7 +400,7 @@ export async function listCampaignsForAffiliate(db: DbLike, ctx: TenantContext, 
       const [agg] = await db
         .select({ n: count(), revenue: sql<number>`coalesce(sum(${conversions.amountMinor} - ${conversions.refundedAmountMinor}), 0)` })
         .from(conversions)
-        .where(and(eq(conversions.tenantId, ctx.tenantId), eq(conversions.campaignId, r.campaign.id), eq(conversions.affiliateId, affiliateId), sql`${conversions.status} not in ('cancelled', 'reversed')`, eq(conversions.isTest, false)));
+        .where(and(eq(conversions.tenantId, ctx.tenantId), eq(conversions.campaignId, r.campaign.id), eq(conversions.affiliateId, affiliateId), sql`${conversions.status} not in ('cancelled', 'reversed')`, eq(conversions.isTest, false), eq(conversions.kind, "sale")));
       progress = { metric: r.campaign.bonusRule.metric, value: r.campaign.bonusRule.metric === "conversions" ? agg!.n : Number(agg!.revenue), threshold: r.campaign.bonusRule.threshold, bonusMinor: r.campaign.bonusRule.bonusMinor, awarded: !!r.participant.bonusAwardedAt };
     }
     out.push({

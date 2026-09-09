@@ -97,7 +97,7 @@ export function createHandlers(deps: WorkerDeps): Record<string, jobs.JobHandler
   }
 
   async function sendBuiltInNotification(db: DbLike, ctx: TenantContext, event: eventsMod.DomainEvent, transports: messaging.Transports): Promise<void> {
-      const templateKey = NOTIFICATION_RULES[event.type];
+      const templateKey = event.type === "conversion.created" && event.data.kind === "lead" ? "lead_recorded" : NOTIFICATION_RULES[event.type];
       if (!templateKey) return;
       const tenant = await tenantsSvc.getTenant(db, ctx);
       const affiliateId = (event.data.affiliateId as string | undefined) ?? (event.entityType === "affiliate" ? event.entityId : undefined);
@@ -115,7 +115,7 @@ export function createHandlers(deps: WorkerDeps): Record<string, jobs.JobHandler
       const program = programId ? await db.query.programs.findFirst({ where: eq(programsTable.id, programId) }) : null;
       const offerId = event.data.offerId as string | undefined;
       const offer = offerId ? await db.query.offers.findFirst({ where: eq(offersTable.id, offerId) }) : null;
-      const amountMinor = event.data.amountMinor as number | undefined;
+      const amountMinor = (event.data.kind === "lead" ? event.data.commissionMinor : event.data.amountMinor) as number | undefined;
 
       await messaging.sendNotification(db, ctx, transports, {
         key: templateKey,

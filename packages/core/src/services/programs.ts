@@ -33,6 +33,10 @@ export const createProgramSchema = z
     termsText: z.string().max(20000).default(""),
     offerIds: z.array(z.string()).default([]),
     testMode: z.boolean().default(false),
+    leadsEnabled: z.boolean().default(false),
+    leadCommissionMinor: z.number().int().min(0).default(0),
+    leadApproval: z.enum(["manual", "auto"]).default("manual"),
+    leadDedupeDays: z.number().int().min(0).max(365).default(90),
   })
   .superRefine((v, ctx) => {
     if (v.commissionModel === "percentage" && v.commissionPercent === undefined)
@@ -68,6 +72,11 @@ export async function createProgram(db: DbLike, ctx: TenantContext, rawInput: Cr
       termsText: input.termsText,
       joinToken: newToken(12),
       testMode: input.testMode,
+      leadsEnabled: input.leadsEnabled,
+      leadCommissionMinor: input.leadCommissionMinor,
+      leadApproval: input.leadApproval,
+      leadDedupeDays: input.leadDedupeDays,
+      leadCaptureToken: input.leadsEnabled ? newToken(16) : null,
       createdAt: ctx.now(),
       updatedAt: ctx.now(),
     })
@@ -93,6 +102,10 @@ export const updateProgramSchema = z.object({
   /** Changing terms bumps termsVersion; affiliates must re-accept (PROG-09, AFF-05). */
   termsText: z.string().max(20000).optional(),
   testMode: z.boolean().optional(),
+  leadsEnabled: z.boolean().optional(),
+  leadCommissionMinor: z.number().int().min(0).optional(),
+  leadApproval: z.enum(["manual", "auto"]).optional(),
+  leadDedupeDays: z.number().int().min(0).max(365).optional(),
 });
 
 /**
@@ -107,6 +120,7 @@ export async function updateProgram(db: DbLike, ctx: TenantContext, programId: s
   const { commissionPercent, termsText, ...rest } = input;
   const patch: Partial<Program> = { ...rest, updatedAt: ctx.now() };
   if (commissionPercent !== undefined) patch.commissionRateBps = percentToBps(commissionPercent);
+  if (input.leadsEnabled && !before.leadCaptureToken) patch.leadCaptureToken = newToken(16);
   if (termsText !== undefined && termsText !== before.termsText) {
     patch.termsText = termsText;
     patch.termsVersion = before.termsVersion + 1;

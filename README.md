@@ -46,6 +46,10 @@ npm run test:postgres    # the same suites against a real Postgres (embedded ser
 npm run typecheck
 ```
 
+## Leads (pay-per-lead)
+
+Programs can pay a fixed amount per qualified lead alongside, or instead of, sale commissions. Leads arrive through `POST /v1/leads` (API key), the Leads page, or a per-program capture endpoint `POST /capture/<token>` that a form on your own site can post to (JSON or form fields; forward the `ref` query parameter from the landing page so the lead is attributed; add `redirect` for a thank-you page). Merchants qualify or disqualify leads on the Leads page; duplicates inside the program's dedupe window earn nothing. Affiliates see lead status and commission in the portal, never the contact details.
+
 ## Notifications
 
 Domain events reach people three ways: email (always, per the built-in rules and automation), SMS/WhatsApp (opt-in), and the in-app notification centre. The bell in the sidebar shows the unread count; the Notifications page lists them, links to the record and holds per-person category preferences. Merchant endpoints live under `/v1/notifications` (list, unread count, mark read, preferences); affiliates use `/portal/notifications`.

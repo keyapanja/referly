@@ -72,6 +72,7 @@ export interface TenantRetention {
   webhookDeliveriesDays?: number | null;
   automationRunsDays?: number | null;
   notificationsDays?: number | null;
+  leadsDays?: number | null;
 }
 
 export interface TenantBranding {
@@ -190,6 +191,14 @@ export const programs = pgTable(
     commissionModel: text("commission_model").notNull().default("percentage"), // percentage | fixed
     commissionRateBps: integer("commission_rate_bps").notNull().default(0),
     commissionFixedMinor: money("commission_fixed_minor").notNull().default(0),
+    /** Pay-per-lead terms: leads are accepted for this program, paid a fixed amount once qualified. */
+    leadsEnabled: boolean("leads_enabled").notNull().default(false),
+    leadCommissionMinor: money("lead_commission_minor").notNull().default(0),
+    leadApproval: text("lead_approval").notNull().default("manual"), // manual | auto
+    /** A second lead with the same email inside this window is recorded as a duplicate and earns nothing. */
+    leadDedupeDays: integer("lead_dedupe_days").notNull().default(90),
+    /** Public capture endpoint token for merchant-site forms; set when leads are enabled. */
+    leadCaptureToken: text("lead_capture_token").unique(),
     commissionBasis: text("commission_basis").notNull().default("gross"), // gross | net | eligible
     attributionModel: text("attribution_model").notNull().default("last_touch"), // last_touch | first_touch
     attributionWindowDays: integer("attribution_window_days").notNull().default(30),
@@ -361,12 +370,44 @@ export const clicks = pgTable(
 // Conversions, attribution, commissions, ledger, payouts
 // ---------------------------------------------------------------------------
 
+/**
+ * Lead intake: the contact behind a conversion of kind `lead`. Contact fields are the
+ * merchant's customer data and are blanked by retention once the lead is settled and old.
+ */
+export const leads = pgTable(
+  "leads",
+  {
+    id: id(),
+    tenantId: tenantRef(),
+    conversionId: text("conversion_id").notNull().references(() => conversions.id).unique(),
+    programId: text("program_id").references(() => programs.id),
+    affiliateId: text("affiliate_id").references(() => affiliates.id),
+    name: text("name"),
+    email: text("email"),
+    phone: text("phone"),
+    company: text("company"),
+    fields: jsonb("fields").$type<Record<string, string>>().notNull().default({}),
+    landingUrl: text("landing_url"),
+    /** null while pending; qualified | disqualified | duplicate once settled. */
+    disposition: text("disposition"),
+    dispositionNote: text("disposition_note"),
+    disposedAt: ts("disposed_at"),
+    /** Contact details blanked by retention. */
+    erasedAt: ts("erased_at"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index("leads_tenant_created_idx").on(t.tenantId, t.createdAt), index("leads_tenant_email_idx").on(t.tenantId, t.programId, t.email)],
+);
+
 export const conversions = pgTable(
   "conversions",
   {
     id: id(),
     tenantId: tenantRef(),
-    source: text("source").notNull(), // webhook | api | manual | stripe | shopify | import
+    source: text("source").notNull(), // webhook | api | manual | stripe | shopify | import | form
+    /** `sale` (money changed hands) or `lead` (a signup, booking or enquiry the merchant may qualify later). */
+    kind: text("kind").notNull().default("sale"),
     externalOrderId: text("external_order_id").notNull(),
     offerId: text("offer_id").references(() => offers.id),
     customerRef: text("customer_ref"),
@@ -1009,6 +1050,7 @@ export const schema = {
   webhookDeliveries,
   maintenanceRuns,
   notifications,
+  leads,
 };
 
 export type Tenant = typeof tenants.$inferSelect;
@@ -1049,3 +1091,4 @@ export type AuditLog = typeof auditLogs.$inferSelect;
 export type Job = typeof jobs.$inferSelect;
 export type MaintenanceRun = typeof maintenanceRuns.$inferSelect;
 export type Notification = typeof notifications.$inferSelect;
+export type Lead = typeof leads.$inferSelect;

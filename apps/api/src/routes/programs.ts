@@ -17,7 +17,8 @@ export function programRoutes() {
     const program = await programs.getProgram(db, c.get("ctx"), c.req.param("id"));
     const offers = await programs.listProgramOffers(db, c.get("ctx"), program.id);
     const { webUrl } = c.get("deps").config;
-    return c.json({ program, offers, joinUrl: `${webUrl}/join/${program.joinToken}` });
+    const { baseUrl } = c.get("deps").config;
+    return c.json({ program, offers, joinUrl: `${webUrl}/join/${program.joinToken}`, captureUrl: program.leadsEnabled && program.leadCaptureToken ? `${baseUrl}/capture/${program.leadCaptureToken}` : null });
   });
   r.patch("/:id", async (c) => {
     const body = await c.req.json();

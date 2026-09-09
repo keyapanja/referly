@@ -133,6 +133,7 @@ export async function performanceBefore(db: DbLike, ctx: TenantContext, args: { 
     .where(
       and(
         eq(conversions.tenantId, ctx.tenantId),
+        eq(conversions.kind, "sale"),
         eq(conversions.programId, args.programId),
         eq(conversions.affiliateId, args.affiliateId),
         eq(conversions.isTest, false),

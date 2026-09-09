@@ -30,7 +30,7 @@ export async function overview(db: DbLike, ctx: TenantContext, period: Period) {
       attributedRevenueMinor: num(sql`sum(case when ${conversions.affiliateId} is not null then ${conversions.amountMinor} - ${conversions.refundedAmountMinor} else 0 end)`),
     })
     .from(conversions)
-    .where(and(eq(conversions.tenantId, t), eq(conversions.isTest, false), inArray(conversions.status, VALID_CONVERSION), inPeriod(conversions.occurredAt)));
+    .where(and(eq(conversions.tenantId, t), eq(conversions.isTest, false), eq(conversions.kind, "sale"), inArray(conversions.status, VALID_CONVERSION), inPeriod(conversions.occurredAt)));
 
   const [clk] = await db
     .select({ clicks: count() })
@@ -126,7 +126,7 @@ export async function byOffer(db: DbLike, ctx: TenantContext, period: Period, li
     .from(offers)
     .leftJoin(
       conversions,
-      and(eq(conversions.offerId, offers.id), eq(conversions.isTest, false), inArray(conversions.status, VALID_CONVERSION), gte(conversions.occurredAt, period.from), lte(conversions.occurredAt, period.to)),
+      and(eq(conversions.offerId, offers.id), eq(conversions.isTest, false), eq(conversions.kind, "sale"), inArray(conversions.status, VALID_CONVERSION), gte(conversions.occurredAt, period.from), lte(conversions.occurredAt, period.to)),
     )
     .leftJoin(commissions, eq(commissions.conversionId, conversions.id))
     .where(eq(offers.tenantId, t))
@@ -151,7 +151,7 @@ export async function byProgram(db: DbLike, ctx: TenantContext, period: Period) 
     .from(programs)
     .leftJoin(
       conversions,
-      and(eq(conversions.programId, programs.id), eq(conversions.isTest, false), inArray(conversions.status, VALID_CONVERSION), gte(conversions.occurredAt, period.from), lte(conversions.occurredAt, period.to)),
+      and(eq(conversions.programId, programs.id), eq(conversions.isTest, false), eq(conversions.kind, "sale"), inArray(conversions.status, VALID_CONVERSION), gte(conversions.occurredAt, period.from), lte(conversions.occurredAt, period.to)),
     )
     .leftJoin(commissions, eq(commissions.conversionId, conversions.id))
     .where(eq(programs.tenantId, t))
@@ -171,6 +171,6 @@ export async function bySource(db: DbLike, ctx: TenantContext, period: Period) {
   return db
     .select({ source: conversions.attributionSource, conversions: count(), revenueMinor: num(sql`sum(${conversions.amountMinor} - ${conversions.refundedAmountMinor})`) })
     .from(conversions)
-    .where(and(eq(conversions.tenantId, ctx.tenantId), eq(conversions.isTest, false), inArray(conversions.status, VALID_CONVERSION), gte(conversions.occurredAt, period.from), lte(conversions.occurredAt, period.to)))
+    .where(and(eq(conversions.tenantId, ctx.tenantId), eq(conversions.isTest, false), eq(conversions.kind, "sale"), inArray(conversions.status, VALID_CONVERSION), gte(conversions.occurredAt, period.from), lte(conversions.occurredAt, period.to)))
     .groupBy(conversions.attributionSource);
 }

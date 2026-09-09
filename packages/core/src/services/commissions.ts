@@ -141,8 +141,10 @@ export async function createCommissionForConversion(tx: Tx, ctx: TenantContext, 
       : Promise.resolve(null),
     tx.query.affiliatePrograms.findFirst({ where: and(eq(affiliatePrograms.affiliateId, args.affiliateId), eq(affiliatePrograms.programId, args.program.id)) }),
   ]);
-  const tier = await resolveTier(tx, ctx, { programId: args.program.id, affiliateId: args.affiliateId, at: args.conversion.occurredAt, excludeConversionId: args.conversion.id });
-  const rate = resolveRate(args.program, programOffer, membership, args.campaign, tier);
+  // Leads earn the program's fixed lead amount; tiers, overrides and campaigns are sale terms.
+  const isLead = args.conversion.kind === "lead";
+  const tier = isLead ? null : await resolveTier(tx, ctx, { programId: args.program.id, affiliateId: args.affiliateId, at: args.conversion.occurredAt, excludeConversionId: args.conversion.id });
+  const rate = isLead ? ({ model: "fixed", rateBps: null, fixedMinor: args.program.leadsEnabled ? args.program.leadCommissionMinor : 0, overrideSource: "lead" } as unknown as RateResolution) : resolveRate(args.program, programOffer, membership, args.campaign, tier);
   const { amountMinor, basis } = computeCommission(args.conversion, args.program, rate);
   const payableAt = new Date(args.conversion.occurredAt.getTime() + args.program.holdingDays * 86_400_000);
   const [row] = await tx

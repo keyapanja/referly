@@ -35,6 +35,7 @@ const MERCHANT_NAV: { section: string; items: NavItem[] }[] = [
     section: "Money",
     items: [
       ["/app/conversions", "Conversions", "receipt"],
+      ["/app/leads", "Leads", "inbox"],
       ["/app/commissions", "Commissions", "percent"],
       ["/app/payouts", "Payouts", "banknote"],
       ["/app/disputes", "Disputes", "alert"],
@@ -66,6 +67,7 @@ const PORTAL_NAV: { section: string; items: NavItem[] }[] = [
     section: "Earnings",
     items: [
       ["/portal/conversions", "Conversions", "receipt"],
+      ["/portal/leads", "Leads", "inbox"],
       ["/portal/earnings", "Earnings", "percent"],
       ["/portal/payouts", "Payouts", "wallet"],
       ["/portal/disputes", "Disputes", "alert"],

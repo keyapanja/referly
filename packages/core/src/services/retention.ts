@@ -5,6 +5,7 @@ import { attributions, auditLogs, authTokens, automationRuns, clicks, exports, j
 import { type TenantContext, require as requirePerm } from "../context";
 import { writeAudit } from "./audit";
 import { getTenant } from "./tenants";
+import { countOldLeadContacts, eraseOldLeadContacts } from "./leads";
 
 /**
  * Data retention. Operational records grow without bound and most of them carry personal
@@ -15,7 +16,7 @@ import { getTenant } from "./tenants";
  * Financial records (conversions, commissions, ledger, payouts) are never pruned: they are
  * the books. Clicks that an attribution points at are kept for as long as the attribution.
  */
-export const RETENTION_CATEGORIES = ["clicksDays", "messageLogsDays", "auditLogsDays", "webhookDeliveriesDays", "automationRunsDays", "notificationsDays"] as const;
+export const RETENTION_CATEGORIES = ["clicksDays", "messageLogsDays", "auditLogsDays", "webhookDeliveriesDays", "automationRunsDays", "notificationsDays", "leadsDays"] as const;
 export type RetentionCategory = (typeof RETENTION_CATEGORIES)[number];
 export type RetentionPolicy = Record<RetentionCategory, number>;
 
@@ -26,6 +27,7 @@ export const RETENTION_DEFAULTS: RetentionPolicy = {
   webhookDeliveriesDays: 90,
   automationRunsDays: 180,
   notificationsDays: 180,
+  leadsDays: 365,
 };
 
 /** Inclusive [min, max] in days a workspace may choose. */
@@ -36,6 +38,7 @@ export const RETENTION_BOUNDS: Record<RetentionCategory, [number, number]> = {
   webhookDeliveriesDays: [7, 365],
   automationRunsDays: [30, 1095],
   notificationsDays: [30, 730],
+  leadsDays: [30, 1095],
 };
 
 export const RETENTION_LABELS: Record<RetentionCategory, string> = {
@@ -45,6 +48,7 @@ export const RETENTION_LABELS: Record<RetentionCategory, string> = {
   webhookDeliveriesDays: "Webhook deliveries (inbound and outbound)",
   automationRunsDays: "Automation run history",
   notificationsDays: "In-app notifications",
+  leadsDays: "Lead contact details (settled leads; the lead record stays)",
 };
 
 const dayField = (cat: RetentionCategory) => z.number().int().min(RETENTION_BOUNDS[cat][0]).max(RETENTION_BOUNDS[cat][1]).nullable().optional();
@@ -56,6 +60,7 @@ export const retentionSchema = z
     webhookDeliveriesDays: dayField("webhookDeliveriesDays"),
     automationRunsDays: dayField("automationRunsDays"),
     notificationsDays: dayField("notificationsDays"),
+    leadsDays: dayField("leadsDays"),
   })
   .strict();
 
@@ -97,7 +102,7 @@ const daysAgo = (now: Date, days: number) => new Date(now.getTime() - days * 86_
 export async function previewPrune(db: DbLike, ctx: TenantContext, policy: RetentionPolicy, now = ctx.now()): Promise<Record<RetentionCategory, number>> {
   const t = ctx.tenantId;
   const n = (rows: { n: number }[]) => rows[0]?.n ?? 0;
-  const [clk, msg, aud, whIn, whOut, runs, ntf] = await Promise.all([
+  const [clk, msg, aud, whIn, whOut, runs, ntf, lds] = await Promise.all([
     db.select({ n: count() }).from(clicks).where(and(eq(clicks.tenantId, t), lt(clicks.occurredAt, daysAgo(now, policy.clicksDays)), notInArray(clicks.id, db.select({ id: attributions.clickId }).from(attributions).where(and(eq(attributions.tenantId, t), sql`${attributions.clickId} is not null`))))),
     db.select({ n: count() }).from(messageLogs).where(and(eq(messageLogs.tenantId, t), lt(messageLogs.createdAt, daysAgo(now, policy.messageLogsDays)))),
     db.select({ n: count() }).from(auditLogs).where(and(eq(auditLogs.tenantId, t), lt(auditLogs.createdAt, daysAgo(now, policy.auditLogsDays)))),
@@ -105,8 +110,9 @@ export async function previewPrune(db: DbLike, ctx: TenantContext, policy: Reten
     db.select({ n: count() }).from(webhookOutboundDeliveries).where(and(eq(webhookOutboundDeliveries.tenantId, t), lt(webhookOutboundDeliveries.createdAt, daysAgo(now, policy.webhookDeliveriesDays)), inArray(webhookOutboundDeliveries.status, ["delivered", "dead", "failed"]))),
     db.select({ n: count() }).from(automationRuns).where(and(eq(automationRuns.tenantId, t), lt(automationRuns.createdAt, daysAgo(now, policy.automationRunsDays)))),
     db.select({ n: count() }).from(notifications).where(and(eq(notifications.tenantId, t), lt(notifications.createdAt, daysAgo(now, policy.notificationsDays)))),
+    countOldLeadContacts(db, t, daysAgo(now, policy.leadsDays)),
   ]);
-  return { clicksDays: n(clk), messageLogsDays: n(msg), auditLogsDays: n(aud), webhookDeliveriesDays: n(whIn) + n(whOut), automationRunsDays: n(runs), notificationsDays: n(ntf) };
+  return { clicksDays: n(clk), messageLogsDays: n(msg), auditLogsDays: n(aud), webhookDeliveriesDays: n(whIn) + n(whOut), automationRunsDays: n(runs), notificationsDays: n(ntf), leadsDays: lds };
 }
 
 export interface RetentionView {
@@ -159,7 +165,8 @@ export async function pruneTenant(db: DbLike, ctx: TenantContext, policy: Retent
   );
   const runs = affected(await db.delete(automationRuns).where(and(eq(automationRuns.tenantId, t), lt(automationRuns.createdAt, daysAgo(now, policy.automationRunsDays)))));
   const ntf = affected(await db.delete(notifications).where(and(eq(notifications.tenantId, t), lt(notifications.createdAt, daysAgo(now, policy.notificationsDays)))));
-  const counts = { clicksDays: clk, messageLogsDays: msg, auditLogsDays: aud, webhookDeliveriesDays: whIn + whOut, automationRunsDays: runs, notificationsDays: ntf };
+  const lds = await eraseOldLeadContacts(db, t, daysAgo(now, policy.leadsDays));
+  const counts = { clicksDays: clk, messageLogsDays: msg, auditLogsDays: aud, webhookDeliveriesDays: whIn + whOut, automationRunsDays: runs, notificationsDays: ntf, leadsDays: lds };
   if (Object.values(counts).some((v) => v > 0)) await writeAudit(db, ctx, { entityType: "tenant", entityId: t, action: "retention_pruned", after: { deleted: counts, policy } });
   return counts;
 }

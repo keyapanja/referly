@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { z } from "zod";
-import { affiliates, commissions, conversions, offers, payouts, tenants, tracking, programs as programsSvc, assets, campaigns, tiers, integrations, disputes, auth, privacy, forbidden, type Affiliate } from "@referly/core";
+import { affiliates, commissions, conversions, offers, payouts, tenants, tracking, programs as programsSvc, assets, campaigns, tiers, integrations, disputes, auth, privacy, leads as leadsSvc, forbidden, type Affiliate } from "@referly/core";
 import { requireAffiliatePrincipal, SESSION_COOKIE, type AppEnv } from "../lib/auth";
 import { getCookie } from "hono/cookie";
 import { publicTenant } from "./auth";
@@ -108,6 +108,7 @@ export function portalRoutes() {
 
   r.get("/conversions", async (c) => c.json({ conversions: await conversions.listConversions(c.get("deps").db, c.get("ctx"), { affiliateId: requireAffiliatePrincipal(c) }) }));
   r.get("/commissions", async (c) => c.json({ commissions: await commissions.listCommissions(c.get("deps").db, c.get("ctx"), { affiliateId: requireAffiliatePrincipal(c) }) }));
+  r.get("/leads", async (c) => c.json({ leads: await leadsSvc.listLeadsForAffiliate(c.get("deps").db, c.get("ctx"), requireAffiliatePrincipal(c)) }));
   r.get("/earnings", async (c) => {
     const affiliateId = requireAffiliatePrincipal(c);
     const q = c.req.query();

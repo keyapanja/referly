@@ -39,6 +39,7 @@ export const TEMPLATE_KEYS = [
   "affiliate_approved",
   "affiliate_rejected",
   "conversion_recorded",
+  "lead_recorded",
   "commission_approved",
   "commission_reversed",
   "payout_paid",
@@ -57,7 +58,7 @@ export type TemplateChannel = (typeof TEMPLATE_CHANNELS)[number];
 const SECRET_LINK_KEYS: TemplateKey[] = ["verify_email", "password_reset", "affiliate_invite"];
 
 /** Account emails carry links that must never go over a text channel. */
-const TEXT_TEMPLATE_KEYS: TemplateKey[] = ["affiliate_invite", "affiliate_approved", "affiliate_rejected", "conversion_recorded", "commission_approved", "commission_reversed", "payout_paid", "campaign_launched", "policy_updated", "dispute_update"];
+const TEXT_TEMPLATE_KEYS: TemplateKey[] = ["affiliate_invite", "affiliate_approved", "affiliate_rejected", "conversion_recorded", "lead_recorded", "commission_approved", "commission_reversed", "payout_paid", "campaign_launched", "policy_updated", "dispute_update"];
 
 type Tone = "friendly" | "professional" | "concise" | "warm" | "formal";
 
@@ -92,6 +93,7 @@ export function defaultTemplates(tone: Tone): Array<{ key: TemplateKey; subject:
     { key: "affiliate_approved", subject: "You're approved for {{program_name}}", body: `${g}\n\nYou're approved to promote {{program_name}}. Sign in to your portal to get your links: {{portal_url}}\n\n${s}` },
     { key: "affiliate_rejected", subject: "Update on your application to {{program_name}}", body: `${g}\n\nWe are not able to approve your application to {{program_name}} at this time.\n\n${s}` },
     { key: "conversion_recorded", subject: "New sale attributed to you", body: `${g}\n\nA sale of {{amount}} {{currency}} for {{offer_name}} was attributed to you. Commission is pending until the holding period ends.\n\n${s}` },
+    { key: "lead_recorded", subject: "New lead attributed to you", body: `${g}\n\nA lead for {{program_name}} came in through your link. Once {{business_name}} qualifies it, your commission of {{amount}} {{currency}} goes into the holding period.\n\n${s}` },
     { key: "commission_approved", subject: "Commission approved", body: `${g}\n\nYour commission of {{amount}} {{currency}} has been approved.\n\n${s}` },
     { key: "commission_reversed", subject: "Commission adjusted", body: `${g}\n\nA commission of {{amount}} {{currency}} was reversed. Reason: {{reason}}\n\n${s}` },
     { key: "payout_paid", subject: "Payout sent", body: `${g}\n\nWe sent your payout of {{amount}} {{currency}} on {{payout_date}}.\n\n${s}` },
@@ -111,6 +113,7 @@ export function defaultTextTemplates(tone: Tone): Array<{ key: TemplateKey; subj
     { key: "affiliate_approved", subject: "Approved", body: `${g}you're approved for {{program_name}}. Get your links: {{portal_url}}` },
     { key: "affiliate_rejected", subject: "Application update", body: `${g}we couldn't approve your application to {{program_name}} this time. — {{business_name}}` },
     { key: "conversion_recorded", subject: "New sale", body: `${g}a sale of {{amount}} {{currency}} for {{offer_name}} was attributed to you. — {{business_name}}` },
+    { key: "lead_recorded", subject: "New lead", body: `${g}a lead for {{program_name}} came in through your link. — {{business_name}}` },
     { key: "commission_approved", subject: "Commission approved", body: `${g}your commission of {{amount}} {{currency}} is approved. — {{business_name}}` },
     { key: "commission_reversed", subject: "Commission adjusted", body: `${g}a commission of {{amount}} {{currency}} was reversed: {{reason}}. — {{business_name}}` },
     { key: "payout_paid", subject: "Payout sent", body: `${g}we sent your payout of {{amount}} {{currency}} on {{payout_date}}. — {{business_name}}` },

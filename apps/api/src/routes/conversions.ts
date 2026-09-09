@@ -26,7 +26,8 @@ export function conversionRoutes() {
     const body = await c.req.json();
     const principal = c.get("principal");
     const source = body.source ?? (principal.kind === "api_key" ? "webhook" : "manual");
-    const input = { ...body, source };
+    // Leads go through /v1/leads; this endpoint records sales whatever the body says.
+    const input = { ...body, source, kind: "sale" };
     const deliveryId = newId("webhookDelivery");
     await db.insert(webhookDeliveries).values({
       id: deliveryId,

@@ -138,7 +138,7 @@ describe("notification centre over HTTP", () => {
     expect(member.status).toBe(201);
     const maxToken = (await call("/v1/auth/login", { method: "POST", json: { email: "max@notify.co", password: "marketing123" } })).body.token;
     const prefs = await call("/v1/notifications/preferences", { token: maxToken });
-    expect(prefs.body.categories.map((c: any) => c.key)).toEqual(["applications", "sales", "tasks"]);
+    expect(prefs.body.categories.map((c: any) => c.key)).toEqual(["applications", "sales", "leads", "tasks"]);
     await call("/v1/notifications/preferences", { method: "PATCH", token: maxToken, json: { sales: { inApp: false } } });
     expect((await call("/v1/notifications/preferences", { token: ownerToken })).body.prefs).toEqual({});
     expect((await call("/v1/notifications/preferences", { token: maxToken })).body.prefs).toEqual({ sales: { inApp: false } });
