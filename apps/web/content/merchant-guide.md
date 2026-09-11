@@ -99,7 +99,9 @@ Everything for this lives on the **Website tracking** page in the sidebar.
 
 The script loads asynchronously, weighs about 4 KB, has no dependencies, and never blocks or breaks the page: if the API is unreachable, it silently does nothing.
 
-Shopify and WooCommerce need one extra piece to report orders, and the page shows that too, in the platform's own language: a Liquid block for Shopify's order status page, a PHP hook for WooCommerce. See 6.5.
+**On WordPress, install the Referly plugin instead of pasting code.** Choose WordPress on the page, click **Download the plugin**, and install it in WordPress under Plugins, Add New Plugin, Upload Plugin. Then click **Create connection key**, and paste the key in WordPress under Settings, Referly. The plugin adds the tracking code to every page and reports each paid WooCommerce order from your server, FunnelKit checkouts included, so a customer who closes the tab at an upsell or during a payment redirect is still counted. Refunds you make in WooCommerce follow automatically. Nothing goes on your thank-you page, so skip 6.5.
+
+Shopify needs one extra piece to report orders: a Liquid block for its order status page, which the page shows. See 6.5.
 
 ### 6.2 Lock it to your domains
 
@@ -125,7 +127,7 @@ The first argument is the event name (up to 80 characters), the second an option
 
 ### 6.5 Report orders from the thank-you page (optional)
 
-Switch on **Accept orders reported from my thank-you page** (it needs at least one domain first), then use the code the page shows for your platform. Shopify and WooCommerce fill in the order values for you; on any other platform it is this, with your own values:
+Switch on **Accept orders reported from my thank-you page** (it needs at least one domain first), then use the code the page shows for your platform. Shopify fills in the order values for you. On WordPress with WooCommerce, skip this and leave the switch off: the Referly plugin from 6.1 reports orders from your server instead, and doing both would count each order twice. On any other platform it is this, with your own values:
 
 ```html
 <script>

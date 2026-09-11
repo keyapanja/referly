@@ -1,4 +1,5 @@
 import { installSnippet } from "./snippet";
+import { WORDPRESS_PLUGIN_PATH } from "./wordpress";
 
 /**
  * Copy-and-paste install instructions per website platform (TRK-09). Merchants overwhelmingly
@@ -17,14 +18,24 @@ export interface PlatformSnippet {
   note?: string;
 }
 
+/** A platform where a plugin replaces the pasting: install it, connect it, done. */
+export interface PlatformPlugin {
+  downloadUrl: string;
+  /** What the plugin takes care of, in the merchant's words. */
+  covers: string[];
+  steps: string[];
+}
+
 export interface PlatformGuide {
   id: string;
   name: string;
   /** One line naming the place the tracking code lives on this platform. */
   summary: string;
   install: PlatformSnippet;
-  /** Reporting the order from the confirmation page. Absent where the platform cannot do it. */
+  /** Reporting the order from the confirmation page. Absent where the platform cannot do it, or a plugin does it. */
   order?: PlatformSnippet;
+  /** Where a plugin does the whole job, `install` becomes the fallback for sites that cannot install it. */
+  plugin?: PlatformPlugin;
 }
 
 export const PLATFORM_IDS = ["custom", "wordpress", "shopify", "webflow", "wix-squarespace", "gtm", "react"] as const;
@@ -64,38 +75,30 @@ export function platformGuides(baseUrl: string, siteKey: string, opts: { consent
     {
       id: "wordpress",
       name: "WordPress",
-      summary: "A header-scripts plugin, or header.php in your theme.",
-      install: {
-        title: "Every page",
+      summary: "Install the Referly plugin and paste one key. No code to paste.",
+      plugin: {
+        downloadUrl: `${base}${WORDPRESS_PLUGIN_PATH}`,
+        covers: [
+          "Adds the tracking code to every page, FunnelKit and other page-builder pages included.",
+          "Reports paid WooCommerce orders from your server, so a closed tab or an abandoned upsell never loses a sale.",
+          "Sends refunds you make in WooCommerce, so the commission is reduced or reversed automatically.",
+        ],
         steps: [
-          "Easiest: install the free WPCode plugin, then Code Snippets, Header & Footer, and paste this into Header.",
-          "Or, in the theme editor, open header.php and paste it before </head>. Use a child theme, or a theme update will wipe it.",
-          "Save, then open your site in a private window.",
+          "Download the plugin with the button below.",
+          "In WordPress, open Plugins, then Add New Plugin, then Upload Plugin. Choose the file, click Install Now, then Activate.",
+          "Click Create connection key below. In WordPress, open Settings, then Referly, paste the key, and click Connect.",
+          "Open your site in a private window. The status at the top of this page turns to Receiving within a few seconds.",
+        ],
+      },
+      install: {
+        title: "Paste the code instead",
+        steps: [
+          "Only if you cannot install plugins. Install the free WPCode plugin, then Code Snippets, Header & Footer, and paste this into Header.",
+          "Or paste it into header.php of a child theme, before </head>.",
+          "This covers tracking only: without the plugin, WooCommerce orders are not reported automatically.",
         ],
         language: "html",
         code: tag,
-      },
-      order: {
-        title: "WooCommerce order confirmation",
-        steps: ["Add this to your child theme's functions.php, or as a PHP snippet in WPCode.", "It runs on the thank-you page and fills in the real order values."],
-        language: "php",
-        code: `add_action('woocommerce_thankyou', function ($order_id) {
-  $order = wc_get_order($order_id);
-  if (!$order) {
-    return;
-  }
-  ?>
-  <script>
-    referly('convert', {
-      orderId: <?php echo json_encode($order->get_order_number()); ?>,
-      amount: <?php echo json_encode((float) $order->get_total()); ?>,
-      currency: <?php echo json_encode($order->get_currency()); ?>,
-      email: <?php echo json_encode($order->get_billing_email()); ?>
-    });
-  </script>
-  <?php
-});`,
-        note: "Without WooCommerce, put the plain JavaScript version on whatever page confirms a purchase.",
       },
     },
     {

@@ -26,6 +26,7 @@ import { portalRoutes } from "./routes/portal";
 import { notificationRoutes } from "./routes/notifications";
 import { leadRoutes } from "./routes/leads";
 import { journeyRoutes } from "./routes/journeys";
+import { connectionRoutes } from "./routes/connection";
 import { messageRoutes } from "./routes/messages";
 import { analyticsRoutes } from "./routes/analytics";
 import { assetRoutes } from "./routes/assets";
@@ -204,6 +205,7 @@ export function createApp(rawDeps: AppDeps & { db: Db }) {
   app.use("/v1/auth/login", rateLimit({ name: "auth-account", limit: Math.max(rl.auth, 20), windowMs: 15 * 60_000, keyOf: accountKey }));
   app.use("/v1/auth/forgot-password", rateLimit({ name: "auth-account", limit: 5, windowMs: 15 * 60_000, keyOf: accountKey }));
   app.use("/files/*", rateLimit({ name: "files", limit: rl.redirect * 2, windowMs: 60_000 }));
+  app.use("/wordpress/*", rateLimit({ name: "downloads", limit: rl.public, windowMs: 10 * 60_000 }));
 
   // Uploaded files (local storage only; S3 serves its own objects). Keys are unguessable and tenant-scoped.
   // Files share the API origin with the session cookie, so nothing served here may run script:
@@ -243,6 +245,7 @@ export function createApp(rawDeps: AppDeps & { db: Db }) {
   app.route("/v1/notifications", notificationRoutes("merchant"));
   app.route("/v1/leads", leadRoutes());
   app.route("/v1/journeys", journeyRoutes());
+  app.route("/v1/connection", connectionRoutes());
   app.route("/portal/notifications", notificationRoutes("portal"));
   app.route("/v1/offers", offerRoutes());
   app.route("/v1/programs", programRoutes());

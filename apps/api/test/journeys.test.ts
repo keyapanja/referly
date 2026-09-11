@@ -281,12 +281,13 @@ describe("per-platform install instructions", () => {
     }
   });
 
-  it("gives each platform the order code in its own language, and omits it where the platform cannot", () => {
+  it("gives each platform the order code in its own language, omits it where the platform cannot, and leaves WordPress to the plugin", () => {
     const byId = Object.fromEntries(platformGuides(BASE_URL, SITE).map((g) => [g.id, g]));
-    // WooCommerce: a PHP hook that reads the real order
-    expect(byId.wordpress!.order!.language).toBe("php");
-    expect(byId.wordpress!.order!.code).toContain("woocommerce_thankyou");
-    expect(byId.wordpress!.order!.code).toContain("$order->get_order_number()");
+    // WordPress: the plugin prints the tracking code and reports WooCommerce orders from the server
+    expect(byId.wordpress!.order).toBeUndefined();
+    expect(byId.wordpress!.plugin!.downloadUrl).toBe(`${BASE_URL}/wordpress/referly.zip`);
+    expect(byId.wordpress!.plugin!.steps.length).toBeGreaterThan(2);
+    expect(byId.wordpress!.plugin!.covers.join(" ")).toContain("WooCommerce");
     // Shopify: Liquid on the order status page, using the exact cents value, and self-contained
     expect(byId.shopify!.order!.code).toContain("{{ checkout.order_number | json }}");
     expect(byId.shopify!.order!.code).toContain("amountMinor: {{ checkout.total_price }}");

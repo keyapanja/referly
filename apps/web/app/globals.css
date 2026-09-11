@@ -1774,3 +1774,24 @@ ol.install-steps li {
   color: var(--muted);
   font-size: 13px;
 }
+
+/* Website tracking: platforms with a plugin */
+.plugin-covers {
+  margin: 4px 0 12px;
+  padding-left: 20px;
+}
+.plugin-covers li {
+  margin: 4px 0;
+}
+details.fallback {
+  margin-top: 18px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+details.fallback summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+details.fallback[open] summary {
+  margin-bottom: 10px;
+}

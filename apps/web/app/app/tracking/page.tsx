@@ -15,12 +15,18 @@ interface PlatformSnippet {
   code: string;
   note?: string;
 }
+interface PlatformPlugin {
+  downloadUrl: string;
+  covers: string[];
+  steps: string[];
+}
 interface PlatformGuide {
   id: string;
   name: string;
   summary: string;
   install: PlatformSnippet;
   order?: PlatformSnippet;
+  plugin?: PlatformPlugin;
 }
 
 function Steps({ snippet }: { snippet: PlatformSnippet }) {
@@ -33,6 +39,62 @@ function Steps({ snippet }: { snippet: PlatformSnippet }) {
       </ol>
       <CodeBlock code={snippet.code} language={snippet.language} />
       {snippet.note ? <p className="muted small">{snippet.note}</p> : null}
+    </>
+  );
+}
+
+/**
+ * Platforms with a plugin (WordPress): download it, create a connection key, paste the key in the
+ * plugin. The plugin prints the tracking code and reports orders from the server, so nothing is
+ * pasted into the site. The manual code stays available for sites that cannot install plugins.
+ */
+function PluginSetup({ guide }: { guide: PlatformGuide }) {
+  const { busy, error, run } = useAction();
+  const [key, setKey] = useState<string | null>(null);
+  const plugin = guide.plugin!;
+  return (
+    <>
+      <p className="platform-summary">{guide.summary}</p>
+      <ul className="plugin-covers">
+        {plugin.covers.map((c, i) => (
+          <li key={i}>{c}</li>
+        ))}
+      </ul>
+      <h3>Set it up</h3>
+      <ol className="install-steps">
+        {plugin.steps.map((s, i) => (
+          <li key={i}>{s}</li>
+        ))}
+      </ol>
+      <div className="actions">
+        <a className="btn primary" href={plugin.downloadUrl}>
+          Download the plugin
+        </a>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={async () => {
+            const res = await run(() => api<any>("/v1/tenant/tracking/wordpress", { method: "POST" }));
+            if (res) setKey(res.connectionKey);
+          }}
+        >
+          Create connection key
+        </button>
+      </div>
+      <Alert kind="error">{error}</Alert>
+      {key ? (
+        <>
+          <CodeBlock code={key} label="connection key" />
+          <p className="muted small">Shown once. Paste it in WordPress under Settings, Referly. Each click makes a new key; revoke the ones you no longer use under Settings, Integrations.</p>
+        </>
+      ) : null}
+      <p className="muted small">
+        The plugin reports orders itself. Leave &ldquo;Accept orders reported from my thank-you page&rdquo; off, add nothing to your thank-you page, and remove any Referly code you pasted into your theme or a snippets plugin before.
+      </p>
+      <details className="fallback">
+        <summary>Can&apos;t install plugins? Paste the code instead</summary>
+        <Steps snippet={guide.install} />
+      </details>
     </>
   );
 }
@@ -136,7 +198,9 @@ export default function TrackingPage() {
             </button>
           ))}
         </div>
-        {current ? (
+        {current?.plugin ? (
+          <PluginSetup guide={current} />
+        ) : current ? (
           <>
             <p className="platform-summary">{current.summary}</p>
             <h3>{current.install.title}</h3>

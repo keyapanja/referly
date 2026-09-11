@@ -8,6 +8,7 @@ import { scopeRequest } from "../lib/rls";
 import { leads as leadsSvc, journeys, conversions as conversionsSvc, webhookDeliveries as deliveriesTable } from "@referly/core";
 import { publicTenant } from "./auth";
 import { SNIPPET_JS } from "../snippet";
+import { wordpressPlugin, WORDPRESS_PLUGIN_PATH } from "../wordpress";
 
 export const CLICK_COOKIE = "referly_clicks";
 const MAX_COOKIE_TOKENS = 10;
@@ -167,6 +168,17 @@ export function publicRoutes() {
   // ---------------------------------------------------------------------------
   // Website tracking snippet (TRK-09)
   // ---------------------------------------------------------------------------
+
+  /** The WordPress plugin as an installable zip. The same bytes for a given version. */
+  r.get(WORDPRESS_PLUGIN_PATH, (c) => {
+    const { zip, version } = wordpressPlugin();
+    return c.body(new Uint8Array(zip), 200, {
+      "content-type": "application/zip",
+      "content-disposition": 'attachment; filename="referly.zip"',
+      "cache-control": "public, max-age=3600",
+      "x-plugin-version": version,
+    });
+  });
 
   /** The snippet itself. Cacheable; the site key travels in the script tag, not in the file. */
   r.get("/referly.js", (c) => c.text(SNIPPET_JS, 200, { "content-type": "application/javascript; charset=utf-8", "cache-control": "public, max-age=3600" }));

@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { tenants, auth, audit, account, plans, integrations, retention, journeys, MERCHANT_ROLES, API_KEY_SCOPES, forbidden } from "@referly/core";
 import { installSnippet, SNIPPET_EXAMPLES } from "../snippet";
+import { connectionKey } from "../wordpress";
 import { platformGuides } from "../platforms";
 import { getCookie } from "hono/cookie";
 import { requireMerchantPrincipal, SESSION_COOKIE, type AppEnv } from "../lib/auth";
@@ -116,6 +117,17 @@ export function tenantRoutes() {
   r.post("/tracking/enable", async (c) => {
     await journeys.enableTracking(c.get("deps").db, c.get("ctx"));
     return c.json(await trackingView(c));
+  });
+  /**
+   * WordPress plugin: one string the merchant pastes into the plugin, holding the API address and
+   * a new key that can only report conversions. Switches website tracking on if it is off. Shown once.
+   */
+  r.post("/tracking/wordpress", async (c) => {
+    const { db, config } = c.get("deps");
+    const ctx = c.get("ctx");
+    await journeys.enableTracking(db, ctx);
+    const { apiKey, secret } = await auth.createApiKey(db, ctx, { name: "WordPress plugin", scopes: ["conversions.write"] });
+    return c.json({ connectionKey: connectionKey(config.baseUrl, secret), apiKey: { id: apiKey.id, name: apiKey.name, prefix: apiKey.prefix } }, 201);
   });
   r.post("/tracking/rotate", async (c) => {
     await journeys.rotateSiteKey(c.get("deps").db, c.get("ctx"));
