@@ -179,4 +179,6 @@ Run `node scripts/check-deploy.mjs` first: it detects most of these from outside
 | Emails never arrive | Check `EMAIL_FROM` uses a domain you have verified with your provider, or for Gmail that it is the signed-in account. |
 | The API stops on first boot with a permission error about a role | The database user cannot create roles. Use the default `postgres` user Coolify created. |
 | `/metrics` answers without a token | `NODE_ENV=production` is missing on the API, which also skips the start-up safety checks. |
+| The API address shows the Referly login page, or `/health` returns 404 | That resource was built from the web Dockerfile. Set its Dockerfile Location to `/apps/api/Dockerfile` and redeploy. |
+| The log shows Next.js starting on port 4000, or the API on 3000 | Dockerfile Location and Ports Exposes disagree. Coolify passes Ports Exposes into the container as `PORT`: use 4000 with the API Dockerfile and 3000 with the web one. |
 | Certificates are never issued | Ports 80 and 443 are closed in the provider's firewall, or the DNS record does not point at the server yet. |
