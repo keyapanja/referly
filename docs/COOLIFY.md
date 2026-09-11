@@ -47,6 +47,13 @@ Point two records at the server before you deploy, so certificate issuing succee
 
 Both must sit under **one** registrable domain. The browser session is an httpOnly, SameSite=Lax cookie set by the API, so `app.example.com` and `api.example.com` work, while two unrelated domains cannot sign anyone in.
 
+**If your DNS is on Cloudflare:**
+
+- Set the API record to **DNS only**, the grey cloud. Behind Cloudflare's proxy the API sees Cloudflare's addresses instead of your visitors', which merges everyone's rate limits and empties the click checks, and Cloudflare's bot protection can block checkout integrations and provider callbacks. With DNS only, Coolify issues the certificate itself.
+- The web app can stay proxied. It makes no decisions based on visitor addresses.
+- A proxied name must sit one level under your domain, such as `app.example.com`. Cloudflare's free certificate covers `*.example.com` but not `api.app.example.com`, so a proxied two-level name fails before it reaches your server. Naming the API `api-app.example.com` rather than `api.app.example.com` keeps the option of proxying it later.
+- Cloudflare turns the proxy on by default for new records. Check the API record's cloud is grey before its first deploy.
+
 ## 3. Postgres
 
 In your Coolify project: **New Resource**, **Database**, **PostgreSQL 16**. Give it a name, let Coolify generate the password, and deploy it.
@@ -182,3 +189,5 @@ Run `node scripts/check-deploy.mjs` first: it detects most of these from outside
 | The API address shows the Referly login page, or `/health` returns 404 | That resource was built from the web Dockerfile. Set its Dockerfile Location to `/apps/api/Dockerfile` and redeploy. |
 | The log shows Next.js starting on port 4000, or the API on 3000 | Dockerfile Location and Ports Exposes disagree. Coolify passes Ports Exposes into the container as `PORT`: use 4000 with the API Dockerfile and 3000 with the web one. |
 | Certificates are never issued | Ports 80 and 443 are closed in the provider's firewall, or the DNS record does not point at the server yet. |
+| The browser rejects the certificate and it is named TRAEFIK DEFAULT CERT | The real certificate is not issued yet. It normally arrives within a minute of the first healthy deploy; if not, confirm the record points straight at the server and redeploy. |
+| HTTPS to the API fails during the handshake, before any page loads | The record is proxied by Cloudflare and the name is two levels deep. Make the record DNS only, or use a one-level name. |
