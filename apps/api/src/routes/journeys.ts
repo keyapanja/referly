@@ -16,7 +16,7 @@ export function journeyRoutes() {
     const { db } = c.get("deps");
     const ctx = c.get("ctx");
     const [sessions, summary] = await Promise.all([
-      journeys.listSessions(db, ctx, { days, affiliateId: q.affiliateId || undefined, attributed: q.attributed === "0" ? false : true, converted: q.converted === "1", limit: q.limit ? Number(q.limit) : undefined }),
+      journeys.listSessions(db, ctx, { days, affiliateId: q.affiliateId || undefined, converted: q.converted === "1", limit: q.limit ? Number(q.limit) : undefined }),
       journeys.journeySummary(db, ctx, days),
     ]);
     return c.json({ sessions, summary });

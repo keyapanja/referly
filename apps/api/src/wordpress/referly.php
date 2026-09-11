@@ -1,8 +1,8 @@
 <?php
 /**
  * Plugin Name:       Referly
- * Description:       Connects this site to Referly. Adds the tracking code to every page and reports paid WooCommerce orders, FunnelKit checkouts included, with refunds following automatically.
- * Version:           1.0.0
+ * Description:       Connects this site to Referly. Adds the tracking code to every page and reports paid WooCommerce orders that came through an affiliate, FunnelKit checkouts included, with refunds following automatically.
+ * Version:           1.1.0
  * Requires at least: 6.0
  * Requires PHP:      7.4
  * Author:            Referly
@@ -206,7 +206,7 @@ final class Referly_Connector {
 				? esc_html( 'On every page' . ( 'wait' === ( $c['consent_mode'] ?? '' ) ? ', waiting for cookie consent.' : '.' ) )
 				: esc_html( 'Off. Turn on website tracking in Referly, then click Refresh below.' ),
 			'Orders'        => class_exists( 'WooCommerce' )
-				? esc_html( 'Paid WooCommerce orders are reported automatically, and refunds follow. Nothing goes on your checkout or thank-you page.' )
+				? esc_html( 'Paid WooCommerce orders that came through an affiliate are reported automatically, and refunds follow. Other orders are never sent.' )
 				: esc_html( 'WooCommerce is not active, so only the tracking code runs.' ),
 			'Last order'    => is_array( $last )
 				? esc_html( ( ! empty( $last['ok'] ) ? 'Order ' : 'Problem with order ' ) . ( $last['order'] ?? '' ) . ', ' . self::when( $last['at'] ?? 0 ) . '. ' . ( $last['message'] ?? '' ) )
@@ -328,6 +328,11 @@ final class Referly_Connector {
 		}
 		// A payment made in the customer's own browser, such as a separate upsell order, still carries the cookies.
 		self::capture_visit( $order );
+		// Only orders that came through an affiliate are sent: an affiliate click from the tracking code,
+		// or a coupon code, which Referly checks against its affiliates' codes. Other orders never leave the store.
+		if ( ! $order->get_meta( '_referly_ref' ) && ! $order->get_meta( '_referly_vid' ) && ! $order->get_coupon_codes() ) {
+			return;
+		}
 		$order->update_meta_data( '_referly_queued', time() );
 		$order->save_meta_data();
 		WC()->queue()->add( self::REPORT, array( $order_id, 1 ), 'referly' );
@@ -370,7 +375,14 @@ final class Referly_Connector {
 		$res  = wp_remote_post( $c['api'] . '/v1/conversions', self::request( $c, $body ) );
 		$code = is_wp_error( $res ) ? 0 : (int) wp_remote_retrieve_response_code( $res );
 		if ( 200 === $code || 201 === $code ) {
-			$data       = json_decode( wp_remote_retrieve_body( $res ), true );
+			$data = json_decode( wp_remote_retrieve_body( $res ), true );
+			if ( is_array( $data ) && array_key_exists( 'recorded', $data ) && false === $data['recorded'] ) {
+				// The coupon was not an affiliate's: Referly keeps nothing for this order.
+				$message = 'No affiliate matched, so this order is not tracked.';
+				$order->add_order_note( 'Referly: ' . $message );
+				update_option( self::LAST_REPORT, array( 'at' => time(), 'order' => $order->get_order_number(), 'ok' => true, 'message' => $message ), false );
+				return;
+			}
 			$conversion = ( is_array( $data ) && isset( $data['conversion'] ) && is_array( $data['conversion'] ) ) ? $data['conversion'] : array();
 			$order->update_meta_data( '_referly_conversion_id', (string) ( $conversion['id'] ?? '' ) );
 			$order->save_meta_data();

@@ -84,7 +84,7 @@ describe("leads over HTTP", () => {
     clickToken = new URL(redirect.headers.get("location")!).searchParams.get("ref")!;
     expect(clickToken).toBeTruthy();
     // a kind of lead cannot be smuggled through the sales endpoint
-    const smuggled = await call("/v1/conversions", { method: "POST", token: apiKey, json: { externalOrderId: "s-1", offerId, amountMinor: 100, kind: "lead" } });
+    const smuggled = await call("/v1/conversions", { method: "POST", token: apiKey, json: { externalOrderId: "s-1", offerId, amountMinor: 100, kind: "lead", clickToken } });
     expect(smuggled.status).toBe(201);
     expect(smuggled.body.conversion.kind).toBe("sale");
   });

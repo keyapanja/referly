@@ -84,13 +84,24 @@ describe("notification centre over HTTP", () => {
   });
 
   it("a sale through the API key notifies the owner and the affiliate; opening one marks it read", async () => {
-    const sale = await call("/v1/conversions", { method: "POST", token: apiKey, json: { source: "webhook", externalOrderId: "n-1", offerId, amountMinor: 30_000, currency: "USD", customerRef: "c1" } });
+    // an order nobody sent is acknowledged and not recorded, so nobody hears about it
+    const stray = await call("/v1/conversions", { method: "POST", token: apiKey, json: { source: "webhook", externalOrderId: "n-0", offerId, amountMinor: 5_000, currency: "USD" } });
+    expect(stray.status).toBe(200);
+    expect(stray.body).toMatchObject({ recorded: false, reason: "no_affiliate", conversion: null });
+    const link = await call("/portal/links", { method: "POST", token: affiliateToken, json: { programId, offerId } });
+    const redirect = await app.request(`${BASE}/r/${link.body.link.token}`, { redirect: "manual" });
+    const clickToken = new URL(redirect.headers.get("location")!).searchParams.get("ref")!;
+    const sale = await call("/v1/conversions", { method: "POST", token: apiKey, json: { source: "webhook", externalOrderId: "n-1", offerId, amountMinor: 30_000, currency: "USD", customerRef: "c1", clickToken } });
     expect(sale.status).toBe(201);
-    // no click, so unattributed: the team hears about it, the affiliate does not
+    expect(sale.body.recorded).toBe(true);
+    // the affiliate's sale: the team and the affiliate both hear about it
     await runOnce(workerDeps());
     const owner = await call("/v1/notifications?unread=1", { token: ownerToken });
-    expect(owner.body.notifications.map((n: any) => n.title)).toContain("Unattributed sale recorded");
-    expect((await call("/portal/notifications/unread-count", { token: affiliateToken })).body.unread).toBe(1);
+    const titles: string[] = owner.body.notifications.map((n: any) => n.title);
+    expect(titles.some((t) => t.startsWith("Sale attributed to"))).toBe(true);
+    expect(titles).not.toContain("Unattributed sale recorded");
+    expect((await call("/portal/notifications/unread-count", { token: affiliateToken })).body.unread).toBe(2);
+    expect((await call("/portal/notifications/read", { method: "POST", token: affiliateToken, json: { all: true } })).body.unread).toBe(0);
 
     const read = await call("/v1/notifications/read", { method: "POST", token: ownerToken, json: { ids: [owner.body.notifications[0].id] } });
     expect(read.body).toEqual({ marked: 1, unread: owner.body.unread - 1 });

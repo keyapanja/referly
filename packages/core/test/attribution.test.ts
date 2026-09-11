@@ -85,14 +85,16 @@ describe("attribution rules (PRD s11)", () => {
     expect(res.commission?.amountMinor).toBe(10_000);
   });
 
-  it("expired attribution window yields no commission", async () => {
+  it("an expired attribution window leaves nobody to claim the sale, so it is not recorded", async () => {
     const alice = await createActiveAffiliate(db, ws, "Alice");
     const { token } = await clickFor(db, ws, alice, clock);
     clock.advanceDays(31);
-    const res = await conversions.recordConversion(db, ws.ctx, { source: "webhook", externalOrderId: "ord-expired", offerId: ws.offer.id, amountMinor: 100_000, clickToken: token });
-    expect(res.conversion.affiliateId).toBeNull();
-    expect(res.conversion.attributionSource).toBe("none");
-    expect(res.commission).toBeNull();
+    await expect(conversions.recordConversion(db, ws.ctx, { source: "webhook", externalOrderId: "ord-expired", offerId: ws.offer.id, amountMinor: 100_000, clickToken: token })).rejects.toBeInstanceOf(conversions.NoAffiliateError);
+    expect((await conversions.listConversions(db, ws.ctx)).some((c) => c.externalOrderId === "ord-expired")).toBe(false);
+  });
+
+  it("a sale typed in by hand that matches no affiliate is refused with a reason", async () => {
+    await expect(conversions.recordConversion(db, ws.ctx, { source: "manual", externalOrderId: "ord-manual", offerId: ws.offer.id, amountMinor: 1_000, couponCode: "NOBODY" })).rejects.toThrow(/no affiliate matches this order/);
   });
 
   it("expired click is skipped but a valid coupon still attributes", async () => {

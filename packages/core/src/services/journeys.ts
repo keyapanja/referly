@@ -201,7 +201,7 @@ export interface IngestResult {
   /** When the ref resolved: how long the snippet should keep it, from the program's attribution window. */
   ref: { ttlSeconds: number } | null;
   /** Set when the batch was refused: the workspace requires consent and the batch did not carry it. */
-  dropped?: "consent_required";
+  dropped?: "consent_required" | "no_affiliate";
 }
 
 export interface IngestOptions {
@@ -262,6 +262,8 @@ export async function ingestEvents(db: DbLike, ctx: TenantContext, rawInput: Ing
   if (opts.consentRequired && input.consent !== "granted") return { accepted: 0, attributed: false, ref: null, dropped: "consent_required" };
   const now = ctx.now();
   const click = await resolveClick(db, ctx, input.ref, input.visitorId);
+  // Only visitors an affiliate sent are recorded; anyone else is not Referly's business.
+  if (!click) return { accepted: 0, attributed: false, ref: null, dropped: "no_affiliate" };
   const rows = input.events.map((e) => ({
     id: newId("journeyEvent"),
     tenantId: ctx.tenantId,
@@ -305,6 +307,7 @@ export async function visitorClickTokens(db: DbLike, ctx: TenantContext, visitor
  * (a checkout that forwarded `ref` still lands on the journey). No visitor, no row.
  */
 export async function linkConversion(db: DbLike, ctx: TenantContext, input: { conversion: Conversion; visitorId?: string | null; clickId?: string | null }): Promise<JourneyEvent | null> {
+  if (!input.conversion.affiliateId) return null;
   let visitorId = input.visitorId ?? null;
   let sessionId: string | null = null;
   let consentState = "not_required";
@@ -368,23 +371,26 @@ export interface JourneySession {
   landingPath: string | null;
   landingUrl: string | null;
   referrer: string | null;
+  /** Total of the sales on this visit, in minor units, and their currency. */
+  saleMinor: number;
+  currency: string | null;
   /** browsing | engaged (custom events) | lead | converted */
   outcome: "browsing" | "engaged" | "lead" | "converted";
 }
 
 export interface JourneySummary {
-  sessions: number;
-  attributedSessions: number;
-  convertedSessions: number;
-  pageViews: number;
+  /** Visits from affiliate links. */
+  visits: number;
+  /** Visits that ended in a purchase. */
+  sales: number;
+  /** Visits that ended in a sign-up but no purchase. */
+  leads: number;
 }
 
 export interface SessionFilter {
   /** Look-back in days; default 30. */
   days?: number;
   affiliateId?: string;
-  /** Only sessions that arrived through an affiliate link (default true). */
-  attributed?: boolean;
   /** Only sessions with a sale or lead on them. */
   converted?: boolean;
   limit?: number;
@@ -406,6 +412,8 @@ function sessionGrouping(db: DbLike, tenantId: string, since: Date) {
       landingPath: sql<string | null>`(array_agg(${journeyEvents.path} order by ${journeyEvents.occurredAt}, ${journeyEvents.seq}))[1]`.as("landing_path"),
       landingUrl: sql<string | null>`(array_agg(${journeyEvents.url} order by ${journeyEvents.occurredAt}, ${journeyEvents.seq}))[1]`.as("landing_url"),
       referrer: sql<string | null>`(array_agg(${journeyEvents.referrer} order by ${journeyEvents.occurredAt}, ${journeyEvents.seq}))[1]`.as("referrer"),
+      saleMinor: sql<number>`coalesce(sum((${journeyEvents.properties}->>'amountMinor')::bigint) filter (where ${journeyEvents.type} = 'conversion'), 0)`.mapWith(Number).as("sale_minor"),
+      currency: sql<string | null>`max(${journeyEvents.properties}->>'currency') filter (where ${journeyEvents.type} = 'conversion')`.as("currency"),
     })
     .from(journeyEvents)
     .where(and(eq(journeyEvents.tenantId, tenantId), gte(journeyEvents.occurredAt, since)))
@@ -427,7 +435,7 @@ export async function listSessions(db: DbLike, ctx: TenantContext, filter: Sessi
   const s = sessionGrouping(db, ctx.tenantId, since);
   const conditions = [
     filter.affiliateId ? eq(s.affiliateId, filter.affiliateId) : undefined,
-    filter.attributed === false ? undefined : isNotNull(s.affiliateId),
+    isNotNull(s.affiliateId),
     filter.converted ? sql`${s.conversions} + ${s.leads} > 0` : undefined,
   ];
   const rows = await db
@@ -448,13 +456,13 @@ export async function journeySummary(db: DbLike, ctx: TenantContext, days = 30):
   const s = sessionGrouping(db, ctx.tenantId, since);
   const [row] = await db
     .select({
-      sessions: sql<number>`count(*)`.mapWith(Number),
-      attributedSessions: sql<number>`count(*) filter (where ${s.affiliateId} is not null)`.mapWith(Number),
-      convertedSessions: sql<number>`count(*) filter (where ${s.conversions} + ${s.leads} > 0)`.mapWith(Number),
-      pageViews: sql<number>`coalesce(sum(${s.pages}), 0)`.mapWith(Number),
+      visits: sql<number>`count(*)`.mapWith(Number),
+      sales: sql<number>`count(*) filter (where ${s.conversions} > 0)`.mapWith(Number),
+      leads: sql<number>`count(*) filter (where ${s.leads} > 0 and ${s.conversions} = 0)`.mapWith(Number),
     })
-    .from(s);
-  return row ?? { sessions: 0, attributedSessions: 0, convertedSessions: 0, pageViews: 0 };
+    .from(s)
+    .where(isNotNull(s.affiliateId));
+  return row ?? { visits: 0, sales: 0, leads: 0 };
 }
 
 /** Every event of one session, in order. */

@@ -126,7 +126,7 @@ export default function ConversionDetail() {
         <div className="card">
           <h2>Website journey</h2>
           <p className="muted">
-            What this buyer did on your site before and after the order, recorded by the site snippet. Visitor <span className="mono">{journey.visitorId}</span>. <Link href="/app/journeys">All journeys</Link>
+            What this buyer did on your site before buying. <Link href="/app/journeys">All journeys</Link>
           </p>
           <JourneyTimeline events={journey.events} />
         </div>

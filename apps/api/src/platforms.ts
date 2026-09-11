@@ -80,7 +80,7 @@ export function platformGuides(baseUrl: string, siteKey: string, opts: { consent
         downloadUrl: `${base}${WORDPRESS_PLUGIN_PATH}`,
         covers: [
           "Adds the tracking code to every page, FunnelKit and other page-builder pages included.",
-          "Reports paid WooCommerce orders from your server, so a closed tab or an abandoned upsell never loses a sale.",
+          "Reports paid WooCommerce orders that came through an affiliate, from your server, so a closed tab or an abandoned upsell never loses a sale. Other orders are never sent.",
           "Sends refunds you make in WooCommerce, so the commission is reduced or reversed automatically.",
         ],
         steps: [

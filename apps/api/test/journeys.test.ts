@@ -148,7 +148,7 @@ describe("website tracking over HTTP", () => {
     const order = { visitorId: visitor, sessionId: "s_browser_session1", orderId: "WEB-1", amount: 129, currency: "usd", email: "buyer@example.com", url: "https://shop.acme.test/thanks?order=WEB-1" };
     const first = await beacon(`/t/${siteKey}/convert`, order);
     expect(first.status).toBe(201);
-    expect(first.body).toEqual({ ok: true, conversionId: expect.stringMatching(/^cnv_/), duplicate: false, attributed: true });
+    expect(first.body).toEqual({ ok: true, recorded: true, conversionId: expect.stringMatching(/^cnv_/), duplicate: false, attributed: true });
     const again = await beacon(`/t/${siteKey}/convert`, order);
     expect(again.status).toBe(200);
     expect(again.body).toMatchObject({ conversionId: first.body.conversionId, duplicate: true });
@@ -193,7 +193,7 @@ describe("website tracking over HTTP", () => {
     const list = await call("/v1/journeys?days=30", { token: ownerToken });
     expect(list.status).toBe(200);
     // the server-side sale (SRV-1) landed on the visitor's newer session, so both visits converted
-    expect(list.body.summary).toEqual({ sessions: 2, attributedSessions: 2, convertedSessions: 2, pageViews: 3 });
+    expect(list.body.summary).toEqual({ visits: 2, sales: 2, leads: 0 });
     const first = list.body.sessions.find((s: any) => s.sessionId === "s_browser_session1");
     expect(first).toMatchObject({ visitorId: visitor, affiliateId, affiliateName: "Pat Partner", pages: 2, events: 1, conversions: 4, outcome: "converted", landingPath: `/course?ref=${clickToken}`, referrer: "https://pat.blog/review" });
     expect((await call("/v1/journeys?converted=1", { token: ownerToken })).body.sessions.map((s: any) => s.sessionId).sort()).toEqual(["s_browser_session1", "s_browser_session2"]);
@@ -214,9 +214,10 @@ describe("website tracking over HTTP", () => {
     const enabled = await call("/v1/tenant/tracking/enable", { method: "POST", token: other.body.token });
     const otherKey = enabled.body.siteKey;
     const res = await beacon(`/t/${otherKey}/events`, { visitorId: visitor, sessionId: "s_browser_session1", ref: clickToken, events: [{ type: "page_view", url: "https://other.test/" }] });
-    expect(res.body).toEqual({ ok: true, accepted: 1, ref: null }); // the click belongs to Acme: not resolvable here
-    expect((await call("/v1/journeys?attributed=0", { token: other.body.token })).body.sessions[0]).toMatchObject({ affiliateId: null, pages: 1 });
-    expect((await call("/v1/journeys", { token: ownerToken })).body.summary.sessions).toBe(2);
+    // the click belongs to Acme, so for this workspace nobody sent the visitor and nothing is kept
+    expect(res.body).toEqual({ ok: true, accepted: 0, ref: null, dropped: "no_affiliate" });
+    expect((await call("/v1/journeys", { token: other.body.token })).body.sessions).toEqual([]);
+    expect((await call("/v1/journeys", { token: ownerToken })).body.summary.visits).toBe(2);
     const rotated = await call("/v1/tenant/tracking/rotate", { method: "POST", token: ownerToken });
     expect(rotated.body.siteKey).not.toBe(siteKey);
     expect((await beacon(`/t/${siteKey}/events`, { visitorId: visitor, sessionId: "s_browser_session2", events: [{ type: "page_view" }] })).status).toBe(404);
@@ -225,7 +226,7 @@ describe("website tracking over HTTP", () => {
 });
 
 describe("consent mode over HTTP", () => {
-  it("the install snippet carries data-consent, the API drops batches without consent, and orders keep working without the visitor id", async () => {
+  it("the snippet code carries data-consent, visits wait for consent, and orders before consent still count by click but stay off the journey", async () => {
     const signup = await call("/v1/auth/signup", { method: "POST", json: { name: "EU Shop", slug: "eu-shop", currency: "EUR", owner: { name: "Eva", email: "eva@eu.test", password: "supersecret1" } } });
     const token = signup.body.token;
     const on = await call("/v1/tenant/tracking/enable", { method: "POST", token });
@@ -236,19 +237,36 @@ describe("consent mode over HTTP", () => {
     expect(saved.body.install).toContain(`data-site="${on.body.siteKey}" data-consent="wait"`);
     expect(saved.body.examples.consent).toContain("referly('consent'");
     const key = on.body.siteKey;
-    const batch = { visitorId: "v_eu_browser_0001", sessionId: "s_eu_browser_0001", events: [{ type: "page_view", url: "https://eu.test/" }] };
-    const dropped = await beacon(`/t/${key}/events`, batch, "https://eu.test");
-    expect(dropped.status).toBe(200);
-    expect(dropped.body).toEqual({ ok: true, accepted: 0, ref: null, dropped: "consent_required" });
-    const kept = await beacon(`/t/${key}/events`, { ...batch, consent: "granted" }, "https://eu.test");
-    expect(kept.body).toEqual({ ok: true, accepted: 1, ref: null });
+
+    // an affiliate sends a visitor
+    const offer = await call("/v1/offers", { method: "POST", token, json: { name: "Kit", priceMinor: 1_000, salesUrl: "https://eu.test/kit" } });
+    await call(`/v1/offers/${offer.body.offer.id}/status`, { method: "POST", token, json: { status: "active" } });
+    const program = await call("/v1/programs", { method: "POST", token, json: { name: "EU partners", commissionModel: "percentage", commissionPercent: 10, holdingDays: 0, attributionWindowDays: 30, refundPolicy: "full", offerIds: [offer.body.offer.id], approvalMode: "auto", termsText: "Be nice." } });
+    await call(`/v1/programs/${program.body.program.id}/status`, { method: "POST", token, json: { status: "active" } });
+    const invite = await call("/v1/affiliates/invites", { method: "POST", token, json: { programId: program.body.program.id, email: "eli@partner.eu", name: "Eli" } });
+    const accept = await call(`/invite/${invite.body.invite.token}/accept`, { method: "POST", json: { name: "Eli Partner", password: "partnerpass1", acceptTerms: true } });
+    const link = await call("/portal/links", { method: "POST", token: accept.body.token, json: { programId: program.body.program.id, offerId: offer.body.offer.id } });
+    const redirect = await app.request(`${BASE}/r/${link.body.link.token}`, { redirect: "manual" });
+    const ref = new URL(redirect.headers.get("location")!).searchParams.get("ref")!;
+
+    const batch = { visitorId: "v_eu_browser_0001", sessionId: "s_eu_browser_0001", ref, events: [{ type: "page_view", url: "https://eu.test/" }] };
+    expect((await beacon(`/t/${key}/events`, batch, "https://eu.test")).body).toEqual({ ok: true, accepted: 0, ref: null, dropped: "consent_required" });
+    expect((await beacon(`/t/${key}/events`, { ...batch, consent: "granted" }, "https://eu.test")).body).toEqual({ ok: true, accepted: 1, ref: { ttlSeconds: 30 * 86_400 } });
     const events = await call(`/v1/journeys/visitors/${batch.visitorId}`, { token });
     expect(events.body.events.map((e: any) => e.consentState)).toEqual(["granted"]);
-    // an order before consent is recorded without the visitor id; with consent it lands on the journey
-    const anon = await beacon(`/t/${key}/convert`, { visitorId: batch.visitorId, sessionId: batch.sessionId, consent: "pending", orderId: "EU-1", amount: 10 }, "https://eu.test");
-    expect(anon.status).toBe(201);
-    expect(anon.body.attributed).toBe(false);
+
+    // someone who never consents still counts by their own click; the visitor id stays in the browser and no journey is kept
+    const neverConsented = new URL((await app.request(`${BASE}/r/${link.body.link.token}`, { redirect: "manual" })).headers.get("location")!).searchParams.get("ref")!;
+    const byClick = await beacon(`/t/${key}/convert`, { visitorId: "v_eu_never_consent1", sessionId: "s_eu_never_consent1", consent: "pending", ref: neverConsented, orderId: "EU-1", amount: 10 }, "https://eu.test");
+    expect(byClick.status).toBe(201);
+    expect(byClick.body).toMatchObject({ recorded: true, attributed: true });
     expect((await call(`/v1/journeys/visitors/${batch.visitorId}`, { token })).body.events.length).toBe(1);
+    expect((await call("/v1/journeys/visitors/v_eu_never_consent1", { token })).body.events).toEqual([]);
+    // an order no affiliate can claim is acknowledged and not kept
+    const nobody = await beacon(`/t/${key}/convert`, { consent: "pending", orderId: "EU-0", amount: 10 }, "https://eu.test");
+    expect(nobody.status).toBe(200);
+    expect(nobody.body).toEqual({ ok: true, recorded: false, reason: "no_affiliate" });
+    // with consent it lands on the journey
     const consented = await beacon(`/t/${key}/convert`, { visitorId: batch.visitorId, sessionId: batch.sessionId, consent: "granted", orderId: "EU-2", amount: 10 }, "https://eu.test");
     expect(consented.status).toBe(201);
     expect((await call(`/v1/journeys/visitors/${batch.visitorId}`, { token })).body.events.map((e: any) => [e.type, e.consentState])).toEqual([["page_view", "granted"], ["conversion", "granted"]]);

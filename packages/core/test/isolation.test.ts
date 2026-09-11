@@ -55,13 +55,15 @@ describe("tenant isolation (PRD s15, s17)", () => {
     await tracking.createCouponCode(db, a.ctx, { affiliateId: aliceA.id, programId: a.program.id, code: "CROSS" });
     const res = await resolveAttribution(db, b.ctx, { offerId: b.offer.id, occurredAt: clock.now(), clickTokens: [token], couponCode: "CROSS" });
     expect(res.decision).toBeNull();
-    const recorded = await conversions.recordConversion(db, b.ctx, { source: "api", externalOrderId: "iso-3", offerId: b.offer.id, amountMinor: 1000, clickToken: token, couponCode: "CROSS" });
-    expect(recorded.conversion.affiliateId).toBeNull();
+    // tenant A's evidence gives nobody in tenant B a claim, so tenant B keeps no record at all
+    await expect(conversions.recordConversion(db, b.ctx, { source: "api", externalOrderId: "iso-3", offerId: b.offer.id, amountMinor: 1000, clickToken: token, couponCode: "CROSS" })).rejects.toBeInstanceOf(conversions.NoAffiliateError);
   });
 
   it("idempotency keys are scoped per tenant", async () => {
-    const x = await conversions.recordConversion(db, a.ctx, { source: "webhook", externalOrderId: "same-id", amountMinor: 100 });
-    const y = await conversions.recordConversion(db, b.ctx, { source: "webhook", externalOrderId: "same-id", amountMinor: 100 });
+    const clickA = await clickFor(db, a, await createActiveAffiliate(db, a, "Ann"), clock);
+    const clickB = await clickFor(db, b, await createActiveAffiliate(db, b, "Ben"), clock);
+    const x = await conversions.recordConversion(db, a.ctx, { source: "webhook", externalOrderId: "same-id", amountMinor: 100, clickToken: clickA.token });
+    const y = await conversions.recordConversion(db, b.ctx, { source: "webhook", externalOrderId: "same-id", amountMinor: 100, clickToken: clickB.token });
     expect(x.conversion.id).not.toBe(y.conversion.id);
     expect(y.duplicate).toBe(false);
   });

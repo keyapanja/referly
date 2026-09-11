@@ -250,8 +250,12 @@ export function publicRoutes() {
         metadata: { url: input.url, sessionId: input.sessionId, origin: c.req.header("origin") ?? null },
       });
       await db.update(deliveriesTable).set({ status: result.duplicate ? "duplicate" : "processed", resultEntityType: "conversion", resultEntityId: result.conversion.id, processedAt: ctx.now() }).where(eq(deliveriesTable.id, deliveryId));
-      return c.json({ ok: true, conversionId: result.conversion.id, duplicate: result.duplicate, attributed: !!result.conversion.affiliateId }, result.duplicate ? 200 : 201);
+      return c.json({ ok: true, recorded: true, conversionId: result.conversion.id, duplicate: result.duplicate, attributed: !!result.conversion.affiliateId }, result.duplicate ? 200 : 201);
     } catch (err) {
+      if (err instanceof conversionsSvc.NoAffiliateError) {
+        await db.update(deliveriesTable).set({ status: "skipped", error: err.message, processedAt: ctx.now() }).where(eq(deliveriesTable.id, deliveryId));
+        return c.json({ ok: true, recorded: false, reason: "no_affiliate" }, 200);
+      }
       await db.update(deliveriesTable).set({ status: "failed", error: err instanceof Error ? err.message : String(err), processedAt: ctx.now() }).where(eq(deliveriesTable.id, deliveryId));
       throw err;
     }

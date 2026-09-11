@@ -110,6 +110,9 @@ describe("WordPress plugin", () => {
     expect(php).toContain(`'referly_vid' => '/${journeys.VISITOR_ID.source}/'`);
     expect(php).toContain("'referly_ref' =>");
     expect(php).toContain("rfly1_");
+    // orders without an affiliate click or coupon never leave the store, and a skipped answer is understood
+    expect(php).toContain("! $order->get_coupon_codes()");
+    expect(php).toContain("'recorded'");
     // the connection key format the PHP parses is the one the API mints
     expect(parseConnectionKey(connectionKey("https://api.example.com/", "rk_live_abc123"))).toEqual({ api: "https://api.example.com", key: "rk_live_abc123" });
     expect(parseConnectionKey("rfly1_not-json")).toBeNull();
@@ -181,6 +184,7 @@ describe("WordPress plugin", () => {
     const order = { source: "woocommerce", externalOrderId: "1042", amountMinor: 11_800, netAmountMinor: 10_000, currency: "USD", customerEmail: "buyer@example.com", clickToken, visitorId: "vWooVisitor000000001", occurredAt: "2026-09-11T10:03:00+00:00" };
     const first = await call("/v1/conversions", { method: "POST", token: pluginKey, json: order });
     expect(first.status).toBe(201);
+    expect(first.body.recorded).toBe(true);
     expect(first.body.conversion).toMatchObject({ source: "woocommerce", externalOrderId: "1042", affiliateId, amountMinor: 11_800, netAmountMinor: 10_000, currency: "USD" });
     expect(first.body.commission.amountMinor).toBeGreaterThan(0);
 
@@ -192,5 +196,12 @@ describe("WordPress plugin", () => {
     const refund = await call(`/v1/conversions/${first.body.conversion.id}/refund`, { method: "POST", token: pluginKey, json: { amountMinor: 11_800, reason: "Refunded in WooCommerce" } });
     expect(refund.status).toBe(200);
     expect(refund.body.conversion.refundedAmountMinor).toBe(11_800);
+
+    // an order no affiliate can claim is acknowledged, not stored, and never reaches the affiliate
+    const stray = await call("/v1/conversions", { method: "POST", token: pluginKey, json: { source: "woocommerce", externalOrderId: "1043", amountMinor: 5_000, currency: "USD" } });
+    expect(stray.status).toBe(200);
+    expect(stray.body).toMatchObject({ recorded: false, reason: "no_affiliate", conversion: null });
+    const list = await call("/v1/conversions?limit=50", { token: ownerToken });
+    expect(list.body.conversions.some((c: any) => c.externalOrderId === "1043")).toBe(false);
   });
 });

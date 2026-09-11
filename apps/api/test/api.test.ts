@@ -264,8 +264,12 @@ describe("MVP acceptance over HTTP", () => {
     expect((await call(`/v1/conversions/${conversionId}/refund`, { method: "POST", token: t, json: { reason: "steal" } })).status).toBe(404);
     expect((await call("/v1/conversions", { token: t })).body.conversions).toHaveLength(0);
     // a click token from tenant 1 does not attribute in tenant 2
+    // the first tenant's click gives nobody in this tenant a claim. From a signed-in user this is a hand-entered
+    // sale, which is refused with a reason; either way nothing is kept
     const cross = await call("/v1/conversions", { method: "POST", token: t, json: { externalOrderId: "X-1", amountMinor: 100, clickToken } });
-    expect(cross.body.conversion.affiliateId).toBeNull();
+    expect(cross.status).toBe(400);
+    expect(JSON.stringify(cross.body)).toMatch(/no affiliate matches this order/);
+    expect((await call("/v1/conversions", { token: t })).body.conversions).toHaveLength(0);
   });
 
   it("Application flow: public join page and self-serve application with manual approval", async () => {

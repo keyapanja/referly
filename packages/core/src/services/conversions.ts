@@ -21,6 +21,19 @@ export const CONVERSION_SOURCES = ["webhook", "api", "manual", "stripe", "shopif
 export const CONVERSION_KINDS = ["sale", "lead"] as const;
 export type ConversionKind = (typeof CONVERSION_KINDS)[number];
 
+/**
+ * Referly only keeps sales an affiliate can claim. Thrown for a sale with no eligible click,
+ * visitor or coupon: nothing is stored, and the API answers `recorded: false`, so integrations can
+ * send every order and let Referly decide. Leads are not affected.
+ */
+export class NoAffiliateError extends Error {
+  readonly code = "no_affiliate";
+  constructor() {
+    super("no affiliate can claim this order, so it is not recorded");
+    this.name = "NoAffiliateError";
+  }
+}
+
 export const recordConversionSchema = z.object({
   source: z.enum(CONVERSION_SOURCES).default("api"),
   /** `lead` rows are created through the leads service; the API's conversion endpoint only records sales. */
@@ -95,6 +108,12 @@ export async function recordConversion(db: DbLike, ctx: TenantContext, rawInput:
         manualReason = input.reason;
       } else {
         decision = (await resolveAttribution(tx, ctx, { offerId: input.offerId ?? null, occurredAt, clickTokens, couponCode: input.couponCode ?? null })).decision;
+      }
+      // Only sales that came through an affiliate are kept. Typed in by hand, a sale nobody can claim
+      // is refused so the merchant can pick the affiliate; from an integration it is dropped quietly.
+      if (!decision && input.kind === "sale") {
+        if (input.source === "manual") throw validation("no affiliate matches this order: choose the affiliate, or use a coupon code that belongs to one");
+        throw new NoAffiliateError();
       }
 
       const campaign = decision ? await findLiveCampaign(tx, ctx, { programId: decision.programId, affiliateId: decision.affiliateId, offerId: input.offerId ?? null, at: occurredAt }) : null;

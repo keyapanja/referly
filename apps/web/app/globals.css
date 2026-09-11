@@ -1795,3 +1795,34 @@ details.fallback summary {
 details.fallback[open] summary {
   margin-bottom: 10px;
 }
+
+/* A visitor's journey as a plain list of steps */
+.journey-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.journey-steps li {
+  display: grid;
+  grid-template-columns: 180px minmax(0, 1fr);
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
+.journey-steps li:last-child {
+  border-bottom: 0;
+}
+.journey-steps .when {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.journey-steps .what {
+  overflow-wrap: anywhere;
+}
+@media (max-width: 640px) {
+  .journey-steps li {
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
+}

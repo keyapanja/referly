@@ -113,7 +113,7 @@ On the same page, under **Lock it to your domains**, enter your website's hostna
 - **A visitor id** (first party, one year) and a **session id** (a new one after 30 minutes of inactivity).
 - **Page views**: URL, path, title and the referrer of the landing page, including route changes in single-page apps.
 
-Visitors who did not come through an affiliate link are recorded too, but the Journeys page hides them unless you switch to "All visitors", which is there for comparison. No names, emails or IP addresses are stored by the snippet.
+Visitors who did not come through an affiliate link are not tracked at all: for them the snippet writes no cookie and sends nothing. No names, emails or IP addresses are stored by the snippet.
 
 ### 6.4 Send your own events
 
@@ -123,11 +123,11 @@ Anywhere on your site, after the snippet:
 <script>referly('track', 'add_to_cart', { sku: 'SKU-123', value: 49 });</script>
 ```
 
-The first argument is the event name (up to 80 characters), the second an optional object of simple properties (strings, numbers, booleans; nested values are stringified, 2 KB per event). Typical events: `add_to_cart`, `checkout_started`, `signup_started`, `demo_booked`, `video_watched`. They show on the journey timeline and count as "engaged" on the Journeys page. Calls made before the script has loaded are queued and sent once it has.
+The first argument is the event name (up to 80 characters), the second an optional object of simple properties (strings, numbers, booleans; nested values are stringified, 2 KB per event). Typical events: `add_to_cart`, `checkout_started`, `signup_started`, `demo_booked`, `video_watched`. They show as steps in the visitor's journey. Calls made before the script has loaded are queued and sent once it has.
 
 ### 6.5 Report orders from the thank-you page (optional)
 
-Switch on **Accept orders reported from my thank-you page** (it needs at least one domain first), then use the code the page shows for your platform. Shopify fills in the order values for you. On WordPress with WooCommerce, skip this and leave the switch off: the Referly plugin from 6.1 reports orders from your server instead, and doing both would count each order twice. On any other platform it is this, with your own values:
+Switch on **Accept orders reported from my thank-you page** (it needs at least one domain first), then use the code the page shows for your platform. Shopify fills in the order values for you. On WordPress with WooCommerce, skip this and leave the switch off: the Referly plugin from 6.1 reports orders from your server instead. Referly recognises an order number it has already seen, so nothing is counted twice, but there is no reason to send the same order two ways. On any other platform it is this, with your own values:
 
 ```html
 <script>
@@ -178,14 +178,14 @@ The snippet fills them in on load and again on submit, so the lead is attributed
 
 ### 6.9 Reading the journeys
 
-**Journeys** (main navigation) lists every visit that came through an affiliate link: when it started, the affiliate, the landing page, pages and events, the outcome (browsing, engaged, lead, converted) and last activity. Filter by affiliate, show converted visits only, or all visitors for comparison; pick the last 7, 30 or 90 days. **View journey** opens the visitor's whole history across visits as a timeline. The same timeline appears on each conversion page under "Website journey", so a disputed or surprising sale can be checked against what the buyer actually did.
+**Journeys** (main navigation) lists every visit that came through an affiliate link: when it happened, which affiliate sent it, and the result: bought, with the amount, signed up, or no purchase. Choose an affiliate and the last 7, 30 or 90 days. **View** shows what that person did as a short list of steps: the pages they viewed, anything your site reported, and the purchase. The same steps appear on each sale's page under "Website journey", so a surprising sale can be checked against what the buyer actually did.
 
 ### 6.10 If nothing shows up
 
 - View the page source and confirm both script lines are present with your site key.
 - Open the browser console: a red request to `/t/<site key>/events` with a 404 means the key is wrong, the workspace is suspended, or the page's domain is not in your domain list.
 - Content blockers on your own machine can block the script; test in a private window.
-- Journeys only list visits that arrived through an affiliate link by default; switch to "All visitors" to confirm the snippet works before any affiliate has sent traffic.
+- Journeys only ever show visits that arrived through an affiliate link. To test, open one of your own affiliate links in a private window and browse from there.
 - Rotating the site key (bottom of the Website tracking page) invalidates the old snippet immediately; update the code on your site straight after.
 - With consent mode on, nothing is recorded until your banner reports consent: check `referly('consent')` in the console; `pending` means your banner never called it.
 
@@ -202,7 +202,9 @@ Journey events are kept for the period set under Settings → Data (90 days by d
 
 Repeating the same `externalOrderId` returns the original record and never double-pays. Every call is logged as a webhook delivery so you can debug integrations.
 
-**Manual** (Conversions → Record manually): order id, offer, amount, and either a coupon code or an explicit affiliate with a reason (audited).
+Referly only keeps sales that came through an affiliate. An order with no valid affiliate click and no affiliate's coupon code is answered with `recorded: false` and not stored, so you can send every order and let Referly decide.
+
+**Manual** (Conversions → Record manually): order id, offer, amount, and either a coupon code or an explicit affiliate with a reason (audited). A manual sale that matches no affiliate is refused, so pick the affiliate. This is also how you credit an affiliate for a sale their link missed.
 
 **Refunds and cancellations**: on the conversion page. A refund reduces or reverses the commission according to the program's refund policy; a cancellation voids it. Both are reflected in the affiliate's ledger.
 
@@ -259,7 +261,7 @@ A merchant can dispute a sale (fraud, refund, amount). An affiliate can claim a 
 ## 15. Analytics, journeys and exports
 
 
-Journeys: every visit that came through an affiliate link, with the landing page, pages viewed, custom events, and whether it ended in a sale or lead; open a row for the visitor's whole history across visits. Filter by affiliate, converted only, or all visitors (including direct traffic, for comparison). Needs the website tracking snippet (section 6).
+Journeys: every visit that came through an affiliate link, with the affiliate and whether it ended in a purchase; open one to see the steps. Needs the website tracking snippet (section 6).
 
 Analytics: clicks, sales, attributed revenue, commission and new affiliates over time with comparison to the previous period; the click → attributed → approved funnel; breakdowns by affiliate, offer, program, campaign, group and attribution source. Exports build in the background (affiliates, conversions, commissions, payouts, ledger, clicks as CSV; the whole workspace as JSON lines) and stay downloadable for 7 days.
 

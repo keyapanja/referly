@@ -40,8 +40,13 @@ export function conversionRoutes() {
     try {
       const result = await conversions.recordConversion(db, ctx, input);
       await db.update(webhookDeliveries).set({ status: result.duplicate ? "duplicate" : "processed", resultEntityType: "conversion", resultEntityId: result.conversion.id, processedAt: ctx.now() }).where(eqId(deliveryId));
-      return c.json(result, result.duplicate ? 200 : 201);
+      return c.json({ ...result, recorded: true }, result.duplicate ? 200 : 201);
     } catch (err) {
+      // Only sales an affiliate can claim are kept. Anything else is acknowledged, so an integration can send every order.
+      if (err instanceof conversions.NoAffiliateError) {
+        await db.update(webhookDeliveries).set({ status: "skipped", error: err.message, processedAt: ctx.now() }).where(eqId(deliveryId));
+        return c.json({ recorded: false, reason: "no_affiliate", duplicate: false, conversion: null, attribution: null, commission: null }, 200);
+      }
       await db.update(webhookDeliveries).set({ status: "failed", error: err instanceof Error ? err.message : String(err), processedAt: ctx.now() }).where(eqId(deliveryId));
       throw err;
     }

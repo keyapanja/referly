@@ -10,6 +10,8 @@
  *  - fills hidden `ref` / `referly_visitor` inputs so lead forms carry the attribution;
  *  - can report an order from the thank-you page with `referly('convert', {...})` when the
  *    workspace has turned that on;
+ *  - stays silent for visitors who did not arrive through an affiliate link: no cookie is
+ *    written and nothing is sent, because Referly only tracks affiliate traffic;
  *  - with `data-consent="wait"` (EU sites) writes nothing and sends nothing until the page
  *    reports consent: `referly('consent', 'granted' | 'denied')`, a `referly:consent` DOM
  *    event, or Cookiebot / OneTrust callbacks, which are recognised automatically. Events that
@@ -20,7 +22,7 @@
  * sendBeacon can deliver the last batch when the page closes. Never blocks the page: every
  * failure is swallowed.
  */
-export const SNIPPET_VERSION = "2";
+export const SNIPPET_VERSION = "3";
 
 export const SNIPPET_JS = String.raw`/*! Referly site snippet v${SNIPPET_VERSION}. Records the affiliate journey on this site. */
 (function (w, d) {
@@ -70,21 +72,24 @@ export const SNIPPET_JS = String.raw`/*! Referly site snippet v${SNIPPET_VERSION
   if (ref && /^[A-Za-z0-9_-]{6,64}$/.test(ref)) persist(REF, ref, 90 * DAY);
   else ref = cookie(REF) || load(REF);
   // Visitor id: first party, one year. Session id: 30 minutes of inactivity.
+  // Only visitors who arrived through an affiliate link are tracked. Everyone else is left alone:
+  // no cookie is written and nothing is sent.
+  var active = !!ref;
   var vid = cookie(VID) || load(VID);
   if (!vid || !/^[A-Za-z0-9_-]{8,64}$/.test(vid)) vid = "v" + rand(20);
-  persist(VID, vid, 365 * DAY);
+  if (active) persist(VID, vid, 365 * DAY);
   var sid = null;
   try {
     var raw = sessionStorage.getItem(SID);
     if (raw) { var parts = raw.split("."); if (Date.now() - Number(parts[1]) < 30 * 60000) sid = parts[0]; }
   } catch (e) {}
   if (!sid) sid = "s" + rand(20);
-  function touch() { if (allowed()) try { sessionStorage.setItem(SID, sid + "." + Date.now()); } catch (e) {} }
+  function touch() { if (active && allowed()) try { sessionStorage.setItem(SID, sid + "." + Date.now()); } catch (e) {} }
   touch();
 
   var queue = [], timer = null;
   function send(useBeacon) {
-    if (!site || !api || !queue.length || !allowed()) return;
+    if (!site || !api || !queue.length || !active || !allowed()) return;
     var body = JSON.stringify({ visitorId: vid, sessionId: sid, ref: ref || undefined, consent: consentMode ? "granted" : "not_required", events: queue.splice(0, 50) });
     var url = api + "/t/" + site + "/events";
     var sent = false;
@@ -99,7 +104,7 @@ export const SNIPPET_JS = String.raw`/*! Referly site snippet v${SNIPPET_VERSION
   }
   function flushSoon() { if (timer) return; timer = setTimeout(function () { timer = null; send(false); }, 250); }
   function track(type, name, props) {
-    if (consentMode && consent === "denied") return;
+    if (!active || (consentMode && consent === "denied")) return;
     // While the banner is open, events wait in memory (bounded) and go out on grant.
     if (queue.length >= 50) queue.shift();
     queue.push({ type: type, name: name || undefined, url: location.href, title: d.title, referrer: d.referrer || undefined, properties: props && typeof props === "object" ? props : undefined, at: Date.now() });
@@ -108,15 +113,17 @@ export const SNIPPET_JS = String.raw`/*! Referly site snippet v${SNIPPET_VERSION
   }
   function convert(order) {
     if (!site || !api || !order || !w.fetch) return Promise.reject(new Error("referly: convert needs an order and a configured snippet"));
+    // An order from someone no affiliate sent is not Referly's to record, unless it carries a coupon code that may be an affiliate's.
+    if (!active && !order.couponCode) return Promise.resolve({ ok: true, recorded: false, reason: "no_affiliate" });
     // An order is contract data and always goes; the visitor id only travels with consent.
-    var body = JSON.stringify({ visitorId: allowed() ? vid : undefined, sessionId: allowed() ? sid : undefined, ref: ref || undefined, consent: consentMode ? consent : "not_required", orderId: order.orderId || order.id, amount: order.amount, amountMinor: order.amountMinor, currency: order.currency, email: order.email, couponCode: order.couponCode, offerId: order.offerId, url: location.href });
+    var body = JSON.stringify({ visitorId: active && allowed() ? vid : undefined, sessionId: active && allowed() ? sid : undefined, ref: ref || undefined, consent: consentMode ? consent : "not_required", orderId: order.orderId || order.id, amount: order.amount, amountMinor: order.amountMinor, currency: order.currency, email: order.email, couponCode: order.couponCode, offerId: order.offerId, url: location.href });
     return fetch(api + "/t/" + site + "/convert", { method: "POST", body: body, headers: { "content-type": "text/plain" }, keepalive: true, credentials: "omit", mode: "cors" }).then(function (r) { return r.json(); });
   }
   function fill(root) {
     var inputs = (root && root.querySelectorAll ? root : d).querySelectorAll('input[name="ref"], input[name="referly_ref"], input[data-referly="ref"], input[name="referly_visitor"], input[data-referly="visitor"]');
     for (var i = 0; i < inputs.length; i++) {
       var el = inputs[i];
-      if (el.name === "referly_visitor" || el.getAttribute("data-referly") === "visitor") el.value = allowed() ? vid : "";
+      if (el.name === "referly_visitor" || el.getAttribute("data-referly") === "visitor") el.value = active && allowed() ? vid : "";
       else if (ref && !el.value) el.value = ref;
     }
   }
@@ -126,8 +133,7 @@ export const SNIPPET_JS = String.raw`/*! Referly site snippet v${SNIPPET_VERSION
     // The decision itself is remembered so the next page does not wait again.
     setCookie(CONSENT, state, 180 * DAY); store(CONSENT, state);
     if (state === "granted") {
-      if (ref) persist(REF, ref, 90 * DAY);
-      persist(VID, vid, 365 * DAY);
+      if (active) { persist(REF, ref, 90 * DAY); persist(VID, vid, 365 * DAY); }
       touch(); fill(); send(false);
     } else {
       queue.length = 0;
@@ -146,8 +152,8 @@ export const SNIPPET_JS = String.raw`/*! Referly site snippet v${SNIPPET_VERSION
       case "convert": return convert(a[1]);
       case "consent": if (a[1]) setConsent(a[1]); return consent;
       case "ref": return ref;
-      case "visitor": return allowed() ? vid : null;
-      case "session": return allowed() ? sid : null;
+      case "visitor": return active && allowed() ? vid : null;
+      case "session": return active && allowed() ? sid : null;
       case "fill": fill(a[1]); break;
       case "flush": send(false); break;
     }
@@ -169,7 +175,15 @@ export const SNIPPET_JS = String.raw`/*! Referly site snippet v${SNIPPET_VERSION
   }
   if (auto) {
     var last = location.href;
-    function changed() { if (location.href !== last) { last = location.href; track("page_view"); fill(); } }
+    function changed() {
+      if (location.href === last) return;
+      last = location.href;
+      // A single-page app can reach an affiliate link after the first load; tracking starts from there.
+      var r = param("ref");
+      if (!active && r && /^[A-Za-z0-9_-]{6,64}$/.test(r)) { ref = r; active = true; persist(REF, ref, 90 * DAY); persist(VID, vid, 365 * DAY); touch(); }
+      track("page_view");
+      fill();
+    }
     var methods = ["pushState", "replaceState"];
     for (var m = 0; m < methods.length; m++) (function (name) {
       var orig = history[name];

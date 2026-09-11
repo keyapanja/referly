@@ -106,9 +106,9 @@ describe("journey ingest and attribution", () => {
     const [ev] = await journeys.sessionEvents(db, ws.ctx, visitor, "s_second_session_1");
     expect(ev!.affiliateId).toBe(aliceId);
     expect(ev!.occurredAt.getTime()).toBe(clock.now().getTime());
-    // a stranger with no ref is recorded, unattributed
+    // a visitor nobody sent is not recorded at all
     const stranger = await journeys.ingestEvents(db, systemContext(ws.tenant.id, clock.now), { visitorId: "v_stranger_000001", sessionId: "s_stranger_00001", ref: "not-a-token", events: [{ type: "page_view", url: "https://acme.example.com/" }] });
-    expect(stranger).toEqual({ accepted: 1, attributed: false, ref: null });
+    expect(stranger).toEqual({ accepted: 0, attributed: false, ref: null, dropped: "no_affiliate" });
     expect(await journeys.visitorClickTokens(db, ws.ctx, visitor)).toEqual([clickToken]);
     expect(await journeys.visitorClickTokens(db, ws.ctx, "v_stranger_000001")).toEqual([]);
   });
@@ -139,9 +139,8 @@ describe("journey ingest and attribution", () => {
     const journey = await journeys.journeyForConversion(db, ws.ctx, result.conversion.id, result.attribution?.clickId ?? null);
     expect(journey.visitorId).toBe(visitor);
     expect(journey.events.filter((e) => e.type === "conversion").map((e) => e.name)).toEqual(["J-100", "J-101"]);
-    // a sale with no evidence at all has no journey
-    const orphan = await conversions.recordConversion(db, ws.ctx, { source: "api", externalOrderId: "J-102", offerId: ws.offer.id, amountMinor: 1_000 });
-    expect(await journeys.journeyForConversion(db, ws.ctx, orphan.conversion.id, null)).toEqual({ visitorId: null, events: [] });
+    // a sale no affiliate can claim is not recorded, so it has no journey either
+    await expect(conversions.recordConversion(db, ws.ctx, { source: "api", externalOrderId: "J-102", offerId: ws.offer.id, amountMinor: 1_000 })).rejects.toBeInstanceOf(conversions.NoAffiliateError);
   });
 
   it("a lead captured with the visitor id is attributed the same way and shows as a lead on the journey", async () => {
@@ -158,22 +157,23 @@ describe("journey ingest and attribution", () => {
     expect(sessions[1]!).toMatchObject({ visitorId: visitor, affiliateId: aliceId, affiliateName: "Alice", pages: 2, events: 1, conversions: 0, leads: 0, landingPath: "/coaching?ref=" + clickToken + "&utm=x", referrer: "https://blog.partner.io/post", outcome: "engaged" });
     expect(sessions[0]!).toMatchObject({ sessionId: "s_second_session_1", pages: 1, conversions: 2, leads: 1, outcome: "converted" });
     expect(sessions[0]!.startedAt).toBeInstanceOf(Date);
+    expect(sessions[0]!).toMatchObject({ saleMinor: 60_000, currency: "USD" });
     // filters
     expect((await journeys.listSessions(db, ws.ctx, { converted: true })).map((s) => s.sessionId)).toEqual(["s_second_session_1"]);
     expect((await journeys.listSessions(db, ws.ctx, { affiliateId: "aff_nobody" })).length).toBe(0);
-    const all = await journeys.listSessions(db, ws.ctx, { attributed: false });
-    expect(all.some((s) => s.visitorId === "v_stranger_000001" && s.affiliateId === null && s.outcome === "browsing")).toBe(true);
-    expect(await journeys.journeySummary(db, ws.ctx, 30)).toEqual({ sessions: 3, attributedSessions: 2, convertedSessions: 1, pageViews: 4 });
+    // nobody else was recorded: every visit here came through an affiliate
+    expect(sessions.every((s) => s.affiliateId === aliceId)).toBe(true);
+    expect(await journeys.journeySummary(db, ws.ctx, 30)).toEqual({ visits: 2, sales: 1, leads: 0 });
     const tracking = await journeys.getTracking(db, ws.ctx);
     expect(tracking.lastEventHost).toBe("acme.example.com");
-    expect(tracking.visitors7d).toBe(2);
-    // a shorter window: only the visits of the last day (Alice's second visit and the stranger)
-    expect(await journeys.journeySummary(db, ws.ctx, 1)).toEqual({ sessions: 2, attributedSessions: 1, convertedSessions: 1, pageViews: 2 });
+    expect(tracking.visitors7d).toBe(1);
+    // a shorter window: only Alice's second visit, the one that bought
+    expect(await journeys.journeySummary(db, ws.ctx, 1)).toEqual({ visits: 1, sales: 1, leads: 0 });
   });
 
   it("another workspace sees nothing of these journeys, under RLS and through the service", async () => {
     const other = await createWorkspace(db, clock);
-    expect(await journeys.listSessions(db, other.ctx, { attributed: false })).toEqual([]);
+    expect(await journeys.listSessions(db, other.ctx)).toEqual([]);
     expect(await journeys.sessionEvents(db, other.ctx, visitor, "s_first_session_01")).toEqual([]);
     const scoped = await withTenantScope(db, other.tenant.id, (tx) => journeys.visitorEvents(tx, other.ctx, visitor));
     expect(scoped).toEqual([]);
@@ -203,11 +203,13 @@ describe("consent mode", () => {
     expect((await journeys.updateTracking(db, ws2.ctx, { consentMode: "wait" })).consentMode).toBe("wait");
     await expect(journeys.updateTracking(db, ws2.ctx, { consentMode: "maybe" as never })).rejects.toThrow();
     const ctx = systemContext(ws2.tenant.id, clock.now);
-    const batch = { visitorId: "v_eu_visitor_00001", sessionId: "s_eu_session_00001", events: [{ type: "page_view" as const, url: "https://acme.example.com/" }] };
+    const bea = await createActiveAffiliate(db, ws2, "Bea");
+    const { token } = await clickFor(db, ws2, bea, clock);
+    const batch = { visitorId: "v_eu_visitor_00001", sessionId: "s_eu_session_00001", ref: token, events: [{ type: "page_view" as const, url: "https://acme.example.com/" }] };
     expect(await journeys.ingestEvents(db, ctx, batch, { consentRequired: true })).toEqual({ accepted: 0, attributed: false, ref: null, dropped: "consent_required" });
     expect(await journeys.ingestEvents(db, ctx, { ...batch, consent: "not_required" }, { consentRequired: true })).toMatchObject({ accepted: 0, dropped: "consent_required" });
     expect(await journeys.visitorEvents(db, ws2.ctx, batch.visitorId)).toEqual([]);
-    expect(await journeys.ingestEvents(db, ctx, { ...batch, consent: "granted" }, { consentRequired: true })).toEqual({ accepted: 1, attributed: false, ref: null });
+    expect(await journeys.ingestEvents(db, ctx, { ...batch, consent: "granted" }, { consentRequired: true })).toEqual({ accepted: 1, attributed: true, ref: { ttlSeconds: 30 * 86_400 } });
     const [ev] = await journeys.visitorEvents(db, ws2.ctx, batch.visitorId);
     expect(ev!.consentState).toBe("granted");
     // without consent mode the flag is simply recorded as not required
