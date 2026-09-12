@@ -218,8 +218,9 @@ Referly only keeps sales that came through an affiliate. An order with no valid 
 
 
 - A commission is created **pending** with the amount fixed at that moment (the calculation basis is stored on it).
-- It becomes **payable** automatically when the holding period ends, unless the sale is refunded, cancelled or disputed. You can approve earlier from Commissions.
-- **Payouts**: create a draft batch for one affiliate or for everyone with a payable balance above the threshold. Pay it outside the platform and click "Record paid", or send it through Stripe Connect or PayPal from the batch. Affiliates set their payout method in the portal; Stripe Connect onboarding happens from there too.
+- It becomes **payable** automatically when the holding period ends, unless the sale is refunded, cancelled or disputed. Only payable money can go into a payout — until then the Commissions page shows the date it is held to.
+- **Pay now** (Commissions page) ends the holding period for one commission straight away, so you can pay it today. The sale must not be under dispute.
+- **Payouts**: "Waiting to be paid" lists every affiliate with what is payable today and what is still held, and until when. Create a draft batch from that row, or one for everyone with a payable balance above the threshold. Pay it outside the platform and click "Record paid", or send it through Stripe Connect or PayPal from the batch. Affiliates set their payout method in the portal; Stripe Connect onboarding happens from there too.
 - **Adjustments**: add or deduct an amount on an affiliate's balance with a reason (bonuses, clawbacks).
 - The **ledger** is append-only. Every credit, reversal, clawback, adjustment and payout is a line the affiliate can see and print as a statement.
 

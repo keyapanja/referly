@@ -30,6 +30,15 @@ export function payoutRoutes() {
   /** Provider-driven payouts: queue one draft, or every draft that can be automated. */
   r.post("/send-all", async (c) => c.json(await integrations.queueAllDraftPayouts(c.get("deps").db, c.get("ctx"))));
   r.post("/:id/send", async (c) => c.json({ payout: await integrations.queueProviderPayout(c.get("deps").db, c.get("ctx"), c.req.param("id")) }));
+  /** Per affiliate: what a batch would carry today, and what is still inside the holding period. */
+  r.get("/payable", async (c) => {
+    const { db } = c.get("deps");
+    const ctx = c.get("ctx");
+    const rows = await payouts.listPayableBalances(db, ctx);
+    const affs = await Promise.all([...new Set(rows.map((r) => r.affiliateId))].map((id) => affiliatesSvc.getAffiliate(db, ctx, id)));
+    const byId = new Map(affs.map((a) => [a.id, a]));
+    return c.json({ balances: rows.map((r) => ({ ...r, affiliateName: byId.get(r.affiliateId)?.name ?? null })) });
+  });
   r.get("/payable/:affiliateId", async (c) => c.json(await payouts.getPayableSummary(c.get("deps").db, c.get("ctx"), c.req.param("affiliateId"))));
   r.post("/", async (c) => c.json({ payout: await payouts.createPayoutBatch(c.get("deps").db, c.get("ctx"), await c.req.json()) }, 201));
   r.post("/batch-all", async (c) => c.json({ payouts: await payouts.createPayoutBatchesForAll(c.get("deps").db, c.get("ctx")) }, 201));

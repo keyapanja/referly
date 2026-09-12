@@ -20,7 +20,7 @@ function CommissionsList() {
     <>
       <PageHeader
         title="Commissions"
-        subtitle="Pending commissions become payable when the holding period ends."
+        subtitle="A commission is held until its program's holding period ends, then turns payable and can go into a payout. Pay now releases one early."
         actions={
           <>
             <select value={status} onChange={(e) => (window.location.search = e.target.value ? `?status=${e.target.value}` : "")}>
@@ -52,9 +52,14 @@ function CommissionsList() {
               header: "",
               cell: (c: any) => (
                 <span className="actions">
-                  {c.status === "pending" && (
-                    <button className="sm" disabled={busy} onClick={() => run(() => api(`/v1/commissions/${c.id}/approve`, { method: "POST", json: {} })).then(reload)}>
-                      Approve
+                  {["pending", "approved"].includes(c.status) && (
+                    <button
+                      className="sm"
+                      disabled={busy}
+                      title="Ends the holding period for this commission, so it can go into a payout today."
+                      onClick={() => run(() => api(`/v1/commissions/${c.id}/release`, { method: "POST", json: {} }), "Released: it can go into a payout now.").then(reload)}
+                    >
+                      Pay now
                     </button>
                   )}
                   {["pending", "approved", "payable"].includes(c.status) && (

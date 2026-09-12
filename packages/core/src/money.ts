@@ -47,6 +47,14 @@ export function proportion(amount: MinorUnits, part: number, whole: number): Min
   return divideHalfEven(amount * part, whole);
 }
 
+/** For messages people read: minor units as a major amount with two decimals, plus the currency code. */
+export function formatMinorUnits(amount: MinorUnits, currency?: string | null): string {
+  const sign = amount < 0 ? "-" : "";
+  const abs = Math.abs(amount);
+  const text = `${sign}${Math.floor(abs / 100)}.${String(abs % 100).padStart(2, "0")}`;
+  return currency ? `${text} ${currency}` : text;
+}
+
 export function percentToBps(percent: number): BasisPoints {
   const bps = Math.round(percent * 100);
   if (!Number.isFinite(bps) || bps < 0) throw new RangeError(`invalid percent ${percent}`);

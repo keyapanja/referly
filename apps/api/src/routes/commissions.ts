@@ -19,6 +19,11 @@ export function commissionRoutes() {
     const body = z.object({ reason: z.string().optional() }).parse(await c.req.json().catch(() => ({})));
     return c.json({ commission: await commissions.approveCommission(c.get("deps").db, c.get("ctx"), c.req.param("id"), body.reason) });
   });
+  /** "Pay this now": ends the holding period for one commission. */
+  r.post("/:id/release", async (c) => {
+    const body = z.object({ reason: z.string().optional() }).parse(await c.req.json().catch(() => ({})));
+    return c.json({ commission: await commissions.releaseCommission(c.get("deps").db, c.get("ctx"), c.req.param("id"), body.reason) });
+  });
   r.post("/:id/reverse", async (c) => {
     const { reason } = z.object({ reason: z.string().min(1) }).parse(await c.req.json());
     return c.json({ commission: await commissions.reverseCommission(c.get("deps").db, c.get("ctx"), c.req.param("id"), reason) });

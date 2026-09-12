@@ -200,6 +200,23 @@ export async function approveCommission(db: DbLike, ctx: TenantContext, commissi
 }
 
 /**
+ * "Pay this one now": ends the holding period for a single commission so it can go into a payout
+ * today. Same destination as the scheduled settlement below, reached by hand.
+ */
+export async function releaseCommission(db: DbLike, ctx: TenantContext, commissionId: string, reason?: string): Promise<Commission> {
+  requirePerm(ctx, "commissions.write");
+  const before = await getCommission(db, ctx, commissionId);
+  if (before.status === "payable") return before; // already released
+  if (before.isTest) throw validation("test commissions are never paid out");
+  const conversion = await db.query.conversions.findFirst({ where: and(eq(conversions.id, before.conversionId), eq(conversions.tenantId, ctx.tenantId)) });
+  if (conversion?.status === "disputed") throw validation("this sale is disputed: resolve the dispute before releasing its commission");
+  const now = ctx.now();
+  const after = await setStatus(db, ctx, before, "payable", { approvedAt: before.approvedAt ?? now, payableAt: now }, reason ?? "holding period ended by hand");
+  await emitEvent(db, ctx, "commission.payable", { type: "commission", id: commissionId }, { affiliateId: after.affiliateId, amountMinor: after.amountMinor, currency: after.currency, released: true });
+  return after;
+}
+
+/**
  * COMM-03 / journey F: once the holding period has elapsed, pending and approved commissions
  * become payable. Disputed conversions and test-mode commissions are held back. Idempotent;
  * run from the job worker.

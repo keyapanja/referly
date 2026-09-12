@@ -38,6 +38,45 @@ describe("commission lifecycle and payouts (PRD s12)", () => {
     expect(b).toMatchObject({ pendingMinor: 0, availableMinor: 2_000, reservedMinor: 0, paidMinor: 0 });
   });
 
+  it("explains what is held and until when, instead of just refusing the batch", async () => {
+    const holly = await createActiveAffiliate(db, ws, "Holly");
+    await sale(holly, "why-1", 10_000);
+    await expect(payouts.createPayoutBatch(db, ws.ctx, { affiliateId: holly.id })).rejects.toThrow(/nothing payable yet: 20\.00 USD is inside the holding period until \d{1,2} \w{3} \d{4}/);
+    const err = (await payouts.createPayoutBatch(db, ws.ctx, { affiliateId: holly.id }).catch((e) => e)) as DomainError;
+    expect(err.code).toBe("validation");
+    expect(err.details).toMatchObject({ heldMinor: 2_000, heldCount: 1, currency: "USD" });
+
+    const summary = await payouts.getPayableSummary(db, ws.ctx, holly.id);
+    expect(summary).toMatchObject({ totalMinor: 0, heldMinor: 2_000, heldCount: 1 });
+    const overview = (await payouts.listPayableBalances(db, ws.ctx)).find((b) => b.affiliateId === holly.id);
+    expect(overview).toMatchObject({ payableMinor: 0, heldMinor: 2_000, heldCount: 1, currency: "USD" });
+    expect(overview!.nextPayableAt?.getTime()).toBe(summary.nextPayableAt?.getTime());
+  });
+
+  it("pay now ends the holding period for one commission, so it can be batched today", async () => {
+    const ivan = await createActiveAffiliate(db, ws, "Ivan");
+    const early = await sale(ivan, "release-1", 10_000);
+    const later = await sale(ivan, "release-2", 5_000);
+    const released = await commissions.releaseCommission(db, ws.ctx, early.commission!.id, "paying this one by hand");
+    expect(released.status).toBe("payable");
+    expect(released.payableAt.getTime()).toBeLessThan(early.commission!.payableAt.getTime());
+    expect(released.payableAt.getTime()).toBeLessThanOrEqual(clock.now().getTime());
+    expect(await commissions.releaseCommission(db, ws.ctx, early.commission!.id)).toMatchObject({ status: "payable" }); // idempotent
+
+    const overview = (await payouts.listPayableBalances(db, ws.ctx)).find((b) => b.affiliateId === ivan.id);
+    expect(overview).toMatchObject({ payableMinor: 2_000, heldMinor: 1_000, heldCount: 1 });
+    const payout = await payouts.createPayoutBatch(db, ws.ctx, { affiliateId: ivan.id });
+    expect(payout.amountMinor).toBe(2_000);
+    expect((await commissions.getCommission(db, ws.ctx, later.commission!.id)).status).toBe("pending"); // the other one still waits
+  });
+
+  it("a disputed sale's commission cannot be released by hand", async () => {
+    const jo = await createActiveAffiliate(db, ws, "Jo");
+    const s = await sale(jo, "release-disputed", 10_000);
+    await conversions.disputeConversion(db, ws.ctx, s.conversion.id, "customer claims no referral");
+    await expect(commissions.releaseCommission(db, ws.ctx, s.commission!.id)).rejects.toThrow(/disputed/);
+  });
+
   it("disputed conversions are held back from settlement", async () => {
     const alice = await createActiveAffiliate(db, ws, "Alice");
     const s = await sale(alice, "dispute-1", 10_000);

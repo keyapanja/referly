@@ -201,11 +201,21 @@ describe("MVP acceptance over HTTP", () => {
     expect((await call("/v1/commissions", { token: ownerToken })).status).toBe(401);
     ownerToken = (await call("/v1/auth/login", { method: "POST", json: { email: "priya@coach.co", password: "supersecret1" } })).body.token;
     affiliateToken = (await call("/v1/auth/login", { method: "POST", json: { email: "sam@partner.io", password: "partnerpass1" } })).body.token;
+    // before settlement the money is held, and both the overview and the refusal say so
+    const waiting = await call("/v1/payouts/payable", { token: ownerToken });
+    expect(waiting.body.balances).toHaveLength(1);
+    expect(waiting.body.balances[0]).toMatchObject({ affiliateId, affiliateName: "Sam Partner", currency: "INR", payableMinor: 0, heldMinor: 500_000, heldCount: 1 });
+    const tooEarly = await call("/v1/payouts", { method: "POST", token: ownerToken, json: { affiliateId } });
+    expect(tooEarly.status).toBe(400);
+    expect(tooEarly.body.error.message).toContain("5000.00 INR");
+    expect(tooEarly.body.error.details).toMatchObject({ heldMinor: 500_000, heldCount: 1 });
+
     const settle = await call("/v1/commissions/settle", { method: "POST", token: ownerToken });
     expect(settle.body.settled.map((s: any) => s.id)).toContain(commissionId);
 
     const payable = await call(`/v1/payouts/payable/${affiliateId}`, { token: ownerToken });
     expect(payable.body.totalMinor).toBe(500_000);
+    expect((await call("/v1/payouts/payable", { token: ownerToken })).body.balances[0]).toMatchObject({ payableMinor: 500_000, heldMinor: 0 });
 
     const payout = await call("/v1/payouts", { method: "POST", token: ownerToken, json: { affiliateId } });
     expect(payout.status).toBe(201);
@@ -215,6 +225,11 @@ describe("MVP acceptance over HTTP", () => {
 
     const rec = await call(`/v1/payouts/${payout.body.payout.id}`, { token: ownerToken });
     expect(rec.body.reconciled).toBe(true);
+    expect((await call("/v1/payouts/payable", { token: ownerToken })).body.balances).toEqual([]);
+    // "Pay now" cannot touch money that has already left
+    const released = await call(`/v1/commissions/${commissionId}/release`, { method: "POST", token: ownerToken, json: {} });
+    expect(released.status).toBe(409);
+    expect(released.body.error.code).toBe("invalid_transition");
     const portalPayouts = await call("/portal/payouts", { token: affiliateToken });
     expect(portalPayouts.body.payouts[0]).toMatchObject({ status: "paid", externalReference: "NEFT-778" });
     const earnings = await call("/portal/earnings", { token: affiliateToken });
