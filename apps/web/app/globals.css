@@ -661,7 +661,7 @@ code {
 .card > h3 {
   margin: 4px 0 10px;
 }
-.card > p.muted {
+.card > h2 + p.muted {
   margin-top: -8px;
   margin-bottom: 14px;
 }
@@ -1776,6 +1776,10 @@ ol.install-steps li {
 }
 
 /* Website tracking: platforms with a plugin */
+/* A note under a row of buttons, clear of them: outranks the lift .muted.small applies. */
+.card > p.plugin-note {
+  margin-top: 12px;
+}
 .plugin-covers {
   margin: 4px 0 12px;
   padding-left: 20px;

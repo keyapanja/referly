@@ -85,10 +85,10 @@ function PluginSetup({ guide }: { guide: PlatformGuide }) {
       {key ? (
         <>
           <CodeBlock code={key} label="connection key" />
-          <p className="muted small">Shown once. Paste it in WordPress under Settings, Referly. Each click makes a new key; revoke the ones you no longer use under Settings, Integrations.</p>
+          <p className="muted small plugin-note">Shown once. Paste it in WordPress under Settings, Referly. Each click makes a new key; revoke the ones you no longer use under Settings, Integrations.</p>
         </>
       ) : null}
-      <p className="muted small">
+      <p className="muted small plugin-note">
         The plugin reports orders itself. Leave &ldquo;Accept orders reported from my thank-you page&rdquo; off, add nothing to your thank-you page, and remove any Referly code you pasted into your theme or a snippets plugin before.
       </p>
       <details className="fallback">
