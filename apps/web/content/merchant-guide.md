@@ -101,7 +101,9 @@ The script loads asynchronously, weighs about 4 KB, has no dependencies, and nev
 
 **On WordPress, install the Referly plugin instead of pasting code.** Choose WordPress on the page, click **Download the plugin**, and install it in WordPress under Plugins, Add New Plugin, Upload Plugin. Then click **Create connection key**, and paste the key in WordPress under Settings, Referly. The plugin adds the tracking code to every page and reports each paid WooCommerce order from your server, FunnelKit checkouts included, so a customer who closes the tab at an upsell or during a payment redirect is still counted. Refunds you make in WooCommerce follow automatically. Nothing goes on your thank-you page, so skip 6.5.
 
-Shopify needs one extra piece to report orders: a Liquid block for its order status page, which the page shows. See 6.5.
+**On Shopify, connect its webhooks.** Choose Shopify on the page: paste the tracking code in theme.liquid, then under **Connect orders** create three webhooks in Shopify (Settings, Notifications, Webhooks: Order payment, Refund create, Order cancellation) pointed at the address the page shows, and paste Shopify's signing secret. Paid orders, refunds and cancellations then arrive from Shopify's servers; the tracking code also notes the click on the customer's cart, so the order carries it whatever page they paid from, and an affiliate's discount code on the order attributes it too. The order status page block from 6.5 remains as a fallback for stores that cannot use webhooks.
+
+**Taking payments with Stripe Checkout or Payment Links?** Choose Stripe on the page. Install the tracking code on your site (from your builder's tab if the site is on WordPress, Webflow or similar), then under **Connect orders** add a webhook endpoint in Stripe for `checkout.session.completed`, `checkout.session.async_payment_succeeded`, `payment_intent.succeeded` and `charge.refunded`, and paste its signing secret. Payment Links on your pages pick up the click token by themselves; Checkout Sessions you create on your server pass it as `client_reference_id` or `metadata.referly_ref` (the page shows the line). Add a restricted key with read access to promotion codes if affiliates hand out Stripe promotion codes: the code the customer typed then attributes the sale. See 7.
 
 ### 6.2 Lock it to your domains
 
@@ -127,7 +129,7 @@ The first argument is the event name (up to 80 characters), the second an option
 
 ### 6.5 Report orders from the thank-you page (optional)
 
-Switch on **Accept orders reported from my thank-you page** (it needs at least one domain first), then use the code the page shows for your platform. Shopify fills in the order values for you. On WordPress with WooCommerce, skip this and leave the switch off: the Referly plugin from 6.1 reports orders from your server instead. Referly recognises an order number it has already seen, so nothing is counted twice, but there is no reason to send the same order two ways. On any other platform it is this, with your own values:
+Switch on **Accept orders reported from my thank-you page** (it needs at least one domain first), then use the code the page shows for your platform. On Shopify, Stripe and WordPress with WooCommerce, skip this and leave the switch off: their webhooks (or the plugin, from 6.1) report orders from the server instead, and the Shopify block is only a fallback for stores that cannot use webhooks. Referly recognises an order number it has already seen, so nothing is counted twice, but there is no reason to send the same order two ways. On any other platform it is this, with your own values:
 
 ```html
 <script>
@@ -203,6 +205,8 @@ Journey events are kept for the period set under Settings → Data (90 days by d
 Repeating the same `externalOrderId` returns the original record and never double-pays. Every call is logged as a webhook delivery so you can debug integrations.
 
 Referly only keeps sales that came through an affiliate. An order with no valid affiliate click and no affiliate's coupon code is answered with `recorded: false` and not stored, so you can send every order and let Referly decide.
+
+**Shopify and Stripe** (recommended on those platforms): connect their webhooks from the Website tracking page (section 6.1). Shopify's Order payment, Refund create and Order cancellation events, and Stripe's Checkout Session, PaymentIntent and charge.refunded events, are verified against the signing secret you pasted, mapped onto the same intake as the API, and logged under **Recent events** on that page with what Referly did with each: recorded, duplicate, skipped (no affiliate), refunded, cancelled or ignored, with the reason. A Shopify order is attributed by the click the tracking code put on the cart, the `ref` on the landing URL Shopify recorded, or an affiliate's discount code; a Stripe payment by `client_reference_id`, `metadata.referly_ref` or `metadata.referly_vid`, or a promotion code looked up with your restricted key. Refunds reduce or reverse the commission by the program's refund policy; a Shopify cancellation voids it. Each event is processed once, and an order the status page already reported is recognised as the same sale.
 
 **Manual** (Conversions → Record manually): order id, offer, amount, and either a coupon code or an explicit affiliate with a reason (audited). A manual sale that matches no affiliate is refused, so pick the affiliate. This is also how you credit an affiliate for a sale their link missed.
 

@@ -12,6 +12,7 @@ import { getAffiliate, setPayoutProfile } from "./affiliates";
 import { getPayout, markPayoutFailed, markPayoutPaid, listPayouts } from "./payouts";
 import { PAYOUT_PROVIDER_IDS, PROVIDER_FOR_METHOD, createPayoutProvider, type PayoutProvider, type PayoutProviderFactory, type PayoutProviderId, type ProviderCredentials, type ProviderOptions } from "./payoutProviders";
 import { TEXT_PROVIDER_IDS, createTextProvider, E164_RE, type TextCredentials, type TextProvider, type TextProviderFactory, type TextProviderId, type TextProviderOptions } from "./textProviders";
+import type { OrderSourceId } from "./orderSources";
 
 /**
  * Tenant integrations: per-merchant payout provider credentials, stored encrypted, and the
@@ -32,7 +33,7 @@ export const credentialsSchema = {
     .refine((c) => c.fromSms || c.fromWhatsApp, { message: "add an SMS sender, a WhatsApp sender, or both" }),
 } as const;
 
-export type IntegrationProviderId = PayoutProviderId | TextProviderId;
+export type IntegrationProviderId = PayoutProviderId | TextProviderId | OrderSourceId;
 
 export interface IntegrationDeps {
   factory?: PayoutProviderFactory;

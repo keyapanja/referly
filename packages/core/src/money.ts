@@ -47,6 +47,16 @@ export function proportion(amount: MinorUnits, part: number, whole: number): Min
   return divideHalfEven(amount * part, whole);
 }
 
+/** Currencies whose minor unit is the unit itself (Stripe and Shopify send these without decimals). */
+export const ZERO_DECIMAL_CURRENCIES = new Set(["BIF", "CLP", "DJF", "GNF", "ISK", "JPY", "KMF", "KRW", "MGA", "PYG", "RWF", "UGX", "VND", "VUV", "XAF", "XOF", "XPF"]);
+
+/** A major-unit amount as sent by shops and payment processors ("129.00", 129) in minor units, by currency. */
+export function toMinorUnits(amount: number | string, currency: string): MinorUnits {
+  const n = typeof amount === "number" ? amount : Number(String(amount).trim());
+  if (!Number.isFinite(n)) throw new RangeError(`amount must be a number, got ${String(amount)}`);
+  return Math.round(n * (ZERO_DECIMAL_CURRENCIES.has(currency.toUpperCase()) ? 1 : 100));
+}
+
 /** For messages people read: minor units as a major amount with two decimals, plus the currency code. */
 export function formatMinorUnits(amount: MinorUnits, currency?: string | null): string {
   const sign = amount < 0 ? "-" : "";

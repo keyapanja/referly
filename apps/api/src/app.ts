@@ -7,7 +7,7 @@ import { log as rootLog, type Logger } from "./lib/log";
 import { httpDuration, httpRequests, renderMetrics, routeLabel } from "./lib/metrics";
 import { createErrorReporter, type ErrorReporter } from "./lib/report";
 import { clientIp } from "./lib/ratelimit";
-import type { Db, DbLike, integrations, Lookup, retention } from "@referly/core";
+import type { Db, DbLike, integrations, Lookup, orderSources, retention } from "@referly/core";
 import type { BackupConfig } from "./backup";
 import type { messaging } from "@referly/core";
 import { errorHandler } from "./lib/errors";
@@ -63,6 +63,8 @@ export interface AppConfig {
 
 /** JSON bodies are small; only the multipart upload route may carry a real file. */
 const JSON_BODY_LIMIT = 256 * 1024;
+/** A Shopify order with many line items runs long; its webhooks get more room. */
+const HOOK_BODY_LIMIT = 1024 * 1024;
 
 export interface AppDeps {
   /** Root connection at construction; inside a request this is the request's transaction. */
@@ -78,6 +80,8 @@ export interface AppDeps {
   webhookLookup?: Lookup;
   /** Text (SMS/WhatsApp) provider construction and platform fallback. */
   text?: integrations.TextDeps;
+  /** Stripe lookups made while handling its webhooks (promotion codes); tests inject a stub fetch. */
+  orderSources?: orderSources.OrderSourceDeps;
   /** Unhandled-error sink (logs, and posts to ERROR_REPORT_URL when configured). */
   reporter?: ErrorReporter;
   log?: Logger;
@@ -94,7 +98,7 @@ export function createApp(rawDeps: AppDeps & { db: Db }) {
   if (deps.config.trustedProxyHops !== undefined) setTrustedProxyHops(deps.config.trustedProxyHops);
   app.use("*", secureHeaders({ xFrameOptions: "DENY", referrerPolicy: "no-referrer", strictTransportSecurity: deps.config.cookieSecure ? "max-age=31536000; includeSubDomains" : false, crossOriginResourcePolicy: false, crossOriginOpenerPolicy: false, xXssProtection: false }));
   app.use("*", async (c, next) => {
-    const max = c.req.path === "/v1/assets/upload" ? MAX_UPLOAD_BYTES + 64 * 1024 : JSON_BODY_LIMIT;
+    const max = c.req.path === "/v1/assets/upload" ? MAX_UPLOAD_BYTES + 64 * 1024 : c.req.path.startsWith("/hooks/") ? HOOK_BODY_LIMIT : JSON_BODY_LIMIT;
     return bodyLimit({ maxSize: max, onError: (ctx) => ctx.json({ error: { code: "payload_too_large", message: `request body exceeds ${max} bytes` } }, 413) })(c, next);
   });
   // Lead capture is called from merchants' own sites: any origin, no credentials. Registered before the

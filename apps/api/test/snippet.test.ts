@@ -10,7 +10,7 @@ import { SNIPPET_JS } from "../src/snippet";
  */
 const SITE = "site_abcdefghijklmnopqrstuvwx";
 
-function browser(url: string, opts: { cookie?: string; attrs?: Record<string, string> } = {}) {
+function browser(url: string, opts: { cookie?: string; attrs?: Record<string, string>; shopify?: boolean; links?: { href: string }[] } = {}) {
   const requests: { url: string; body: any }[] = [];
   const timers: (() => void)[] = [];
   const local = new Map<string, string>();
@@ -20,6 +20,14 @@ function browser(url: string, opts: { cookie?: string; attrs?: Record<string, st
   const attrs: Record<string, string> = { "data-site": SITE, ...(opts.attrs ?? {}) };
   const script = { src: "https://api.test/referly.js", getAttribute: (n: string) => attrs[n] ?? null };
   const noop = () => {};
+  const anchor = (href: string) => {
+    const el: any = { tagName: "A", attrs: { href } as Record<string, string>, parentNode: null };
+    el.getAttribute = (n: string) => el.attrs[n] ?? null;
+    el.setAttribute = (n: string, v: string) => void (el.attrs[n] = v);
+    return el;
+  };
+  const links = (opts.links ?? []).map((l) => anchor(l.href));
+  const listeners: Record<string, ((e: any) => void)[]> = {};
   const document = {
     currentScript: script,
     title: "Course",
@@ -27,8 +35,8 @@ function browser(url: string, opts: { cookie?: string; attrs?: Record<string, st
     readyState: "complete",
     visibilityState: "visible",
     getElementsByTagName: () => [script],
-    querySelectorAll: () => [],
-    addEventListener: noop,
+    querySelectorAll: (selector: string) => (selector.indexOf("buy.stripe.com") !== -1 ? links : []),
+    addEventListener: (name: string, fn: (e: any) => void) => void (listeners[name] = [...(listeners[name] ?? []), fn]),
     get cookie() {
       return jar;
     },
@@ -42,14 +50,15 @@ function browser(url: string, opts: { cookie?: string; attrs?: Record<string, st
   };
   const storage = (m: Map<string, string>) => ({ getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => void m.set(k, String(v)), removeItem: (k: string) => void m.delete(k) });
   const window: any = {
+    Shopify: opts.shopify ? { shop: "acme.myshopify.com" } : undefined,
     document,
     location: { href: u.href, search: u.search, protocol: u.protocol },
     history: { pushState: noop, replaceState: noop },
     navigator: {},
     crypto: { getRandomValues: (a: Uint8Array) => a.map((_, i) => (i * 37 + 11) & 255) },
     addEventListener: noop,
-    fetch: (to: string, init: { body: string }) => {
-      requests.push({ url: to, body: JSON.parse(init.body) });
+    fetch: (to: string, init: { body: string; credentials?: string }) => {
+      requests.push({ url: to, body: JSON.parse(init.body), credentials: init.credentials });
       return Promise.resolve({ ok: true, json: async () => ({ ok: true, ref: null }) });
     },
   };
@@ -70,6 +79,10 @@ function browser(url: string, opts: { cookie?: string; attrs?: Record<string, st
     requests,
     cookies: () => jar,
     local,
+    links,
+    /** Click something inside an element, as the browser would dispatch it to the document's capture listeners. */
+    click: (target: any) => (listeners.click ?? []).forEach((fn) => fn({ target })),
+    anchor,
     /** Run the batching timer, as the browser would a moment later. */
     flush: () => {
       while (timers.length) timers.shift()!();
@@ -115,6 +128,42 @@ describe("website snippet in a browser", () => {
     expect(b.requests[0]!.body).toMatchObject({ orderId: "1003", couponCode: "SAM20" });
     expect(b.requests[0]!.body.visitorId).toBeUndefined();
     expect(b.cookies()).toBe("");
+  });
+
+  it("on a Shopify storefront, puts the click token and visitor id on the cart once, so the order webhook carries them", async () => {
+    const b = browser("https://acme.myshopify.com/products/course?ref=clickTOKEN1234", { shopify: true });
+    b.flush();
+    const cart = b.requests.find((r) => r.url === "/cart/update.js");
+    expect(cart).toBeDefined();
+    expect(cart!.credentials).toBe("same-origin");
+    expect(cart!.body).toEqual({ attributes: { referly_ref: "clickTOKEN1234", referly_vid: b.referly("visitor") } });
+    // events still go to the API as before
+    expect(b.requests.find((r) => r.url.endsWith("/events"))!.body.ref).toBe("clickTOKEN1234");
+    // the next page in the same session does not repeat the cart call
+    await Promise.resolve();
+    expect(b.requests.filter((r) => r.url === "/cart/update.js")).toHaveLength(1);
+
+    const nobody = browser("https://acme.myshopify.com/products/course", { shopify: true });
+    nobody.flush();
+    expect(nobody.requests).toEqual([]);
+  });
+
+  it("appends the click token to Stripe Payment Links as client_reference_id, on the page and on links rendered later", () => {
+    const links = [{ href: "https://buy.stripe.com/abc123" }, { href: "https://buy.stripe.com/def456?locale=en" }, { href: "https://buy.stripe.com/ghi?client_reference_id=mine" }, { href: "https://example.com/pricing" }];
+    const b = browser("https://example.com/pricing?ref=clickTOKEN1234", { links });
+    expect(b.links.map((l: any) => l.getAttribute("href"))).toEqual([
+      "https://buy.stripe.com/abc123?client_reference_id=clickTOKEN1234",
+      "https://buy.stripe.com/def456?locale=en&client_reference_id=clickTOKEN1234",
+      "https://buy.stripe.com/ghi?client_reference_id=mine",
+      "https://example.com/pricing",
+    ]);
+    const late = b.anchor("https://buy.stripe.com/late999");
+    const inner = { tagName: "SPAN", parentNode: late };
+    b.click(inner);
+    expect(late.getAttribute("href")).toBe("https://buy.stripe.com/late999?client_reference_id=clickTOKEN1234");
+
+    const nobody = browser("https://example.com/pricing", { links: [{ href: "https://buy.stripe.com/abc123" }] });
+    expect(nobody.links[0].getAttribute("href")).toBe("https://buy.stripe.com/abc123");
   });
 
   it("in consent mode, waits for the banner before storing or sending anything, even for an affiliate's visitor", () => {

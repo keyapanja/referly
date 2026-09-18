@@ -26,19 +26,35 @@ export interface PlatformPlugin {
   steps: string[];
 }
 
+/**
+ * A shop or payment processor that reports orders through its own webhooks: the merchant points
+ * them at Referly and pastes the signing secret. The connect form is built from `fields`.
+ */
+export interface PlatformOrderSource {
+  provider: "shopify" | "stripe";
+  /** What connecting it takes care of, in the merchant's words. */
+  covers: string[];
+  steps: string[];
+  fields: { key: string; label: string; help: string; secret: boolean; required: boolean; placeholder?: string }[];
+  /** Code the merchant adds so the click token reaches the processor, where that is needed. */
+  passing?: PlatformSnippet[];
+}
+
 export interface PlatformGuide {
   id: string;
   name: string;
   /** One line naming the place the tracking code lives on this platform. */
   summary: string;
   install: PlatformSnippet;
-  /** Reporting the order from the confirmation page. Absent where the platform cannot do it, or a plugin does it. */
+  /** Reporting the order from the confirmation page. Absent where the platform cannot do it, or a plugin does it; a fallback where webhooks do it. */
   order?: PlatformSnippet;
   /** Where a plugin does the whole job, `install` becomes the fallback for sites that cannot install it. */
   plugin?: PlatformPlugin;
+  /** Where the platform's own webhooks report orders, `order` becomes the fallback for merchants who cannot use them. */
+  orderSource?: PlatformOrderSource;
 }
 
-export const PLATFORM_IDS = ["custom", "wordpress", "shopify", "webflow", "wix-squarespace", "gtm", "react"] as const;
+export const PLATFORM_IDS = ["custom", "wordpress", "shopify", "stripe", "webflow", "wix-squarespace", "gtm", "react"] as const;
 export type PlatformId = (typeof PLATFORM_IDS)[number];
 
 export function platformGuides(baseUrl: string, siteKey: string, opts: { consentMode?: "off" | "wait" } = {}): PlatformGuide[] {
@@ -104,12 +120,31 @@ export function platformGuides(baseUrl: string, siteKey: string, opts: { consent
     {
       id: "shopify",
       name: "Shopify",
-      summary: "theme.liquid for tracking, checkout settings for orders.",
+      summary: "theme.liquid for tracking; Shopify's own webhooks for orders.",
       install: {
         title: "Every page",
-        steps: ["Online Store, Themes, then the three-dot menu, Edit code.", "Open Layout, theme.liquid.", "Paste this immediately before </head> and save."],
+        steps: ["Online Store, Themes, then the three-dot menu, Edit code.", "Open Layout, theme.liquid.", "Paste this immediately before </head> and save.", "The code also notes the click on the customer's cart, so the order Shopify reports carries it."],
         language: "html",
         code: tag,
+      },
+      orderSource: {
+        provider: "shopify",
+        covers: [
+          "Records every paid order that came through an affiliate, from Shopify's servers, so nothing depends on the customer reaching the thank-you page.",
+          "Reads the discount code on the order, so an affiliate's code attributes the sale even without a link click.",
+          "Refunds and cancellations you make in Shopify reduce, reverse or void the commission by themselves.",
+        ],
+        steps: [
+          "In Shopify, open Settings, then Notifications, then Webhooks (at the bottom of the page).",
+          "Click Create webhook. Event: Order payment. Format: JSON. URL: the webhook address below. Save.",
+          "Create two more with the same address: Refund create, and Order cancellation.",
+          "Copy the signing secret shown under the list (\"All your webhooks will be signed with…\") into the form below and click Connect.",
+          "Place a test order through an affiliate link: it shows under Recent events within a few seconds.",
+        ],
+        fields: [
+          { key: "webhookSecret", label: "Webhook signing secret", help: "Shown under Settings, Notifications, Webhooks: \"All your webhooks will be signed with…\"", secret: true, required: true },
+          { key: "shopDomain", label: "Store domain (optional)", help: "When set, events from any other store are refused.", secret: false, required: false, placeholder: "my-store.myshopify.com" },
+        ],
       },
       order: {
         title: "Order status page",
@@ -118,7 +153,7 @@ export function platformGuides(baseUrl: string, siteKey: string, opts: { consent
         code: `${tag}
 <script>
   referly('convert', {
-    orderId: {{ checkout.order_number | json }},
+    orderId: {{ checkout.order_name | json }},
     amountMinor: {{ checkout.total_price }},
     currency: {{ checkout.currency | json }},
     email: {{ checkout.email | json }}{% if checkout.discount_applications.size > 0 %},
@@ -126,6 +161,64 @@ export function platformGuides(baseUrl: string, siteKey: string, opts: { consent
   });
 </script>`,
         note: "The tracking code is repeated here because the order status page is served outside your theme. amountMinor is Shopify's own cents value, so nothing is lost to rounding.",
+      },
+    },
+    {
+      id: "stripe",
+      name: "Stripe Checkout or Payment Links",
+      summary: "Tracking code on your site; Stripe's own webhooks for payments.",
+      install: {
+        title: "Every page",
+        steps: [
+          "Paste this immediately before </head> on every page of the site that leads to your Stripe checkout. If the site is built on WordPress, Webflow or another builder, do this step from that tab and come back here for payments.",
+          "Payment Links on those pages carry the click token by themselves once the code is in place; Checkout Sessions you create on your server pass it in one line, shown below.",
+        ],
+        language: "html",
+        code: tag,
+      },
+      orderSource: {
+        provider: "stripe",
+        covers: [
+          "Records every successful Checkout Session or payment that came through an affiliate, from Stripe's servers.",
+          "Payment Links on your pages pick up the click token automatically; Checkout Sessions you create on your server pass it in one line.",
+          "Refunds you make in Stripe reduce or reverse the commission by themselves.",
+          "With a restricted key, a promotion code the customer typed attributes the sale to the affiliate whose code it is.",
+        ],
+        steps: [
+          "In the Stripe dashboard, open Developers, then Webhooks, then Add destination (older dashboards: Add endpoint).",
+          "Endpoint URL: the webhook address below. Events: checkout.session.completed, checkout.session.async_payment_succeeded, payment_intent.succeeded and charge.refunded. Save.",
+          "Open the endpoint, click Reveal under Signing secret, and paste it below.",
+          "Optional: under Developers, API keys, create a restricted key with read access to Promotion codes and Coupons and paste it too, so promotion codes attribute sales.",
+          "Click Connect, then make a test payment through an affiliate link: it shows under Recent events.",
+        ],
+        fields: [
+          { key: "webhookSecret", label: "Webhook signing secret", help: "Starts with whsec_. Shown on the endpoint under Signing secret, Reveal.", secret: true, required: true, placeholder: "whsec_…" },
+          { key: "secretKey", label: "Restricted key (optional)", help: "Starts with rk_live_. Only needed for promotion-code attribution; read access to Promotion codes and Coupons is enough.", secret: true, required: false, placeholder: "rk_live_…" },
+        ],
+        passing: [
+          {
+            title: "Checkout Sessions created on your server",
+            steps: ["Where you create the session, pass the click token and visitor id from the snippet's first-party cookies. Node shown; they are ordinary cookies in any language."],
+            language: "js",
+            code: `// referly_ref and referly_vid are first-party cookies the tracking code keeps for affiliate visitors.
+const session = await stripe.checkout.sessions.create({
+  mode: "payment",
+  line_items: [{ price: "price_123", quantity: 1 }],
+  success_url: "https://example.com/thanks",
+  cancel_url: "https://example.com/cart",
+  client_reference_id: req.cookies.referly_ref || undefined,
+  metadata: { referly_ref: req.cookies.referly_ref || "", referly_vid: req.cookies.referly_vid || "" },
+});`,
+            note: "Either client_reference_id or metadata.referly_ref is enough; sending both costs nothing. Custom Payment Element flows put the same two keys in the PaymentIntent's metadata.",
+          },
+          {
+            title: "Payment Links",
+            steps: ["Nothing to do. For visitors who came through an affiliate link, the tracking code appends the click token to every buy.stripe.com link on the page."],
+            language: "html",
+            code: `<a href="https://buy.stripe.com/xxxx">Buy now</a>
+<!-- an affiliate visitor's click goes to …?client_reference_id=<click token> -->`,
+          },
+        ],
       },
     },
     {

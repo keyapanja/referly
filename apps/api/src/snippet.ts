@@ -10,6 +10,9 @@
  *  - fills hidden `ref` / `referly_visitor` inputs so lead forms carry the attribution;
  *  - can report an order from the thank-you page with `referly('convert', {...})` when the
  *    workspace has turned that on;
+ *  - on a Shopify storefront, puts the click token and visitor id on the cart as attributes, so
+ *    the order Shopify sends through its webhook carries them; on any page, appends the click
+ *    token to Stripe Payment Links as `client_reference_id`, so Stripe's webhook carries it;
  *  - stays silent for visitors who did not arrive through an affiliate link: no cookie is
  *    written and nothing is sent, because Referly only tracks affiliate traffic;
  *  - with `data-consent="wait"` (EU sites) writes nothing and sends nothing until the page
@@ -22,7 +25,7 @@
  * sendBeacon can deliver the last batch when the page closes. Never blocks the page: every
  * failure is swallowed.
  */
-export const SNIPPET_VERSION = "3";
+export const SNIPPET_VERSION = "4";
 
 export const SNIPPET_JS = String.raw`/*! Referly site snippet v${SNIPPET_VERSION}. Records the affiliate journey on this site. */
 (function (w, d) {
@@ -87,6 +90,24 @@ export const SNIPPET_JS = String.raw`/*! Referly site snippet v${SNIPPET_VERSION
   function touch() { if (active && allowed()) try { sessionStorage.setItem(SID, sid + "." + Date.now()); } catch (e) {} }
   touch();
 
+  // Shopify: the click token and visitor id go on the cart as attributes, so the order Shopify
+  // sends to Referly carries them whatever page the customer paid from.
+  function shopifyCart() {
+    if (!active || !allowed() || !w.Shopify || !w.fetch) return;
+    try { if (sessionStorage.getItem("referly_cart") === ref) return; } catch (e) {}
+    fetch("/cart/update.js", { method: "POST", headers: { "content-type": "application/json" }, credentials: "same-origin", body: JSON.stringify({ attributes: { referly_ref: ref, referly_vid: vid } }) })
+      .then(function (r) { if (r && r.ok) try { sessionStorage.setItem("referly_cart", ref); } catch (e) {} })
+      .catch(function () {});
+  }
+  shopifyCart();
+  // Stripe Payment Links: an affiliate visitor's link carries the click token as client_reference_id.
+  function stripeLink(a) {
+    if (!active || !allowed() || !a || !a.getAttribute) return;
+    var href = a.getAttribute("href") || "";
+    if (!/buy\.stripe\.com\//.test(href) || href.indexOf("client_reference_id=") !== -1) return;
+    a.setAttribute("href", href + (href.indexOf("?") === -1 ? "?" : "&") + "client_reference_id=" + encodeURIComponent(ref));
+  }
+
   var queue = [], timer = null;
   function send(useBeacon) {
     if (!site || !api || !queue.length || !active || !allowed()) return;
@@ -126,6 +147,8 @@ export const SNIPPET_JS = String.raw`/*! Referly site snippet v${SNIPPET_VERSION
       if (el.name === "referly_visitor" || el.getAttribute("data-referly") === "visitor") el.value = active && allowed() ? vid : "";
       else if (ref && !el.value) el.value = ref;
     }
+    var links = (root && root.querySelectorAll ? root : d).querySelectorAll('a[href*="buy.stripe.com/"]');
+    for (var k = 0; k < links.length; k++) stripeLink(links[k]);
   }
   function setConsent(state) {
     if (!consentMode || (state !== "granted" && state !== "denied")) return;
@@ -134,7 +157,7 @@ export const SNIPPET_JS = String.raw`/*! Referly site snippet v${SNIPPET_VERSION
     setCookie(CONSENT, state, 180 * DAY); store(CONSENT, state);
     if (state === "granted") {
       if (active) { persist(REF, ref, 90 * DAY); persist(VID, vid, 365 * DAY); }
-      touch(); fill(); send(false);
+      touch(); shopifyCart(); fill(); send(false);
     } else {
       queue.length = 0;
       forget(REF); forget(VID);
@@ -180,7 +203,7 @@ export const SNIPPET_JS = String.raw`/*! Referly site snippet v${SNIPPET_VERSION
       last = location.href;
       // A single-page app can reach an affiliate link after the first load; tracking starts from there.
       var r = param("ref");
-      if (!active && r && /^[A-Za-z0-9_-]{6,64}$/.test(r)) { ref = r; active = true; persist(REF, ref, 90 * DAY); persist(VID, vid, 365 * DAY); touch(); }
+      if (!active && r && /^[A-Za-z0-9_-]{6,64}$/.test(r)) { ref = r; active = true; persist(REF, ref, 90 * DAY); persist(VID, vid, 365 * DAY); touch(); shopifyCart(); }
       track("page_view");
       fill();
     }
@@ -193,6 +216,8 @@ export const SNIPPET_JS = String.raw`/*! Referly site snippet v${SNIPPET_VERSION
     w.addEventListener("popstate", changed);
     if (d.readyState === "loading") d.addEventListener("DOMContentLoaded", function () { fill(); }); else fill();
     d.addEventListener("submit", function (e) { if (e.target && e.target.querySelectorAll) fill(e.target); }, true);
+    // Links rendered after load (a cart drawer, a React page) are fixed up as they are clicked.
+    d.addEventListener("click", function (e) { var t = e.target; while (t && t.tagName !== "A") t = t.parentNode; if (t) stripeLink(t); }, true);
   }
   w.addEventListener("pagehide", function () { send(true); });
   d.addEventListener("visibilitychange", function () { if (d.visibilityState === "hidden") send(true); });

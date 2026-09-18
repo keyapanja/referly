@@ -1130,6 +1130,7 @@ export type Campaign = typeof campaigns.$inferSelect;
 export type Task = typeof tasks.$inferSelect;
 export type AffiliateGroup = typeof affiliateGroups.$inferSelect;
 export type TenantIntegration = typeof tenantIntegrations.$inferSelect;
+export type WebhookDelivery = typeof webhookDeliveries.$inferSelect;
 export type Dispute = typeof disputes.$inferSelect;
 export type WebhookSubscription = typeof webhookSubscriptions.$inferSelect;
 export type WebhookOutboundDelivery = typeof webhookOutboundDeliveries.$inferSelect;

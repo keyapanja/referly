@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { useAction, useApi } from "@/lib/hooks";
 import { dateTime } from "@/lib/format";
-import { Alert, Field, Loading, PageHeader, Stat } from "@/components/ui";
+import { Alert, Badge, Field, Loading, PageHeader, PasswordInput, Stat, Table } from "@/components/ui";
 import { CodeBlock } from "@/components/code-block";
 
 interface PlatformSnippet {
@@ -20,6 +20,13 @@ interface PlatformPlugin {
   covers: string[];
   steps: string[];
 }
+interface PlatformOrderSource {
+  provider: "shopify" | "stripe";
+  covers: string[];
+  steps: string[];
+  fields: { key: string; label: string; help: string; secret: boolean; required: boolean; placeholder?: string }[];
+  passing?: PlatformSnippet[];
+}
 interface PlatformGuide {
   id: string;
   name: string;
@@ -27,6 +34,7 @@ interface PlatformGuide {
   install: PlatformSnippet;
   order?: PlatformSnippet;
   plugin?: PlatformPlugin;
+  orderSource?: PlatformOrderSource;
 }
 
 function Steps({ snippet }: { snippet: PlatformSnippet }) {
@@ -100,11 +108,117 @@ function PluginSetup({ guide }: { guide: PlatformGuide }) {
 }
 
 /**
+ * Shops and processors with their own webhooks (Shopify, Stripe): point them at the address
+ * shown, paste one secret, and orders arrive from their servers. Recent events list what came in
+ * and what Referly did with each, so a wrong secret or an order nobody sent is visible right here.
+ */
+function OrderSourceSetup({ guide, sources, reload, pixel }: { guide: PlatformGuide; sources: any; reload: () => void; pixel: boolean }) {
+  const src = guide.orderSource!;
+  const state = sources?.sources?.find((s: any) => s.provider === src.provider);
+  const label = src.provider === "shopify" ? "Shopify" : "Stripe";
+  const { busy, error, success, run } = useAction();
+  const [values, setValues] = useState<Record<string, string>>({});
+  return (
+    <>
+      <ul className="plugin-covers">
+        {src.covers.map((c, i) => (
+          <li key={i}>{c}</li>
+        ))}
+      </ul>
+      <h3>Set it up</h3>
+      <ol className="install-steps">
+        {src.steps.map((s, i) => (
+          <li key={i}>{s}</li>
+        ))}
+      </ol>
+      <CodeBlock code={state?.hookUrl ?? "…"} label="webhook address" />
+      {state?.connected ? (
+        <div className="source-status">
+          <Badge value="connected" />
+          <span className="mono muted">{state.hint}</span>
+          <span className="muted">{state.lastEventAt ? `last event ${dateTime(state.lastEventAt)}` : "waiting for the first event"}</span>
+          <button
+            type="button"
+            className="sm danger"
+            disabled={busy}
+            onClick={() => {
+              if (window.confirm(`Disconnect ${label}? Its webhooks are refused until you connect it again.`)) run(() => api(`/v1/tenant/integrations/${src.provider}`, { method: "DELETE" }), `${label} disconnected.`).then(reload);
+            }}
+          >
+            Disconnect
+          </button>
+        </div>
+      ) : (
+        <form
+          className="source-form"
+          onSubmit={async (e) => {
+            e.preventDefault();
+            const ok = await run(() => api(`/v1/tenant/integrations/${src.provider}`, { method: "POST", json: { credentials: values } }), `${label} connected. Make a test order through an affiliate link: it appears under Recent events.`);
+            if (ok) {
+              setValues({});
+              reload();
+            }
+          }}
+        >
+          {src.fields.map((f) => (
+            <Field key={f.key} label={f.label} help={f.help}>
+              {f.secret ? (
+                <PasswordInput value={values[f.key] ?? ""} onChange={(e) => setValues({ ...values, [f.key]: e.target.value })} placeholder={f.placeholder} required={f.required} />
+              ) : (
+                <input value={values[f.key] ?? ""} onChange={(e) => setValues({ ...values, [f.key]: e.target.value })} placeholder={f.placeholder} required={f.required} />
+              )}
+            </Field>
+          ))}
+          <button className="sm primary" disabled={busy}>
+            Connect {label}
+          </button>
+        </form>
+      )}
+      <Alert kind="error">{error}</Alert>
+      <Alert kind="success">{success}</Alert>
+      {state?.connected ? (
+        <>
+          <h3>Recent events</h3>
+          <Table
+            rows={state.recent}
+            keyOf={(d: any) => d.id}
+            empty="Nothing has arrived yet. Place an order through an affiliate link, or check the webhook address and secret."
+            columns={[
+              { header: "When", cell: (d: any) => dateTime(d.receivedAt) },
+              { header: "Event", cell: (d: any) => <span className="mono">{d.summary}</span> },
+              { header: "Result", cell: (d: any) => <Badge value={d.action ?? d.status} /> },
+              { header: "", cell: (d: any) => (d.conversionId ? <Link href={`/app/conversions/${d.conversionId}`}>Open sale</Link> : <span className="muted">{d.reason ?? ""}</span>) },
+            ]}
+          />
+        </>
+      ) : null}
+      {src.passing?.map((p, i) => (
+        <div key={i}>
+          <h3>{p.title}</h3>
+          <Steps snippet={p} />
+        </div>
+      ))}
+      {guide.order ? (
+        <details className="fallback">
+          <summary>Can&apos;t use webhooks? Report from the order status page instead</summary>
+          <p className="muted small">
+            {pixel ? "" : "Switch on “Accept orders reported from my thank-you page” in step 2 first. "}
+            This sends the order from the customer&apos;s browser, which is less sturdy than webhooks; use it only when webhooks are not available to you.
+          </p>
+          <Steps snippet={guide.order} />
+        </details>
+      ) : null}
+    </>
+  );
+}
+
+/**
  * Website tracking setup. Its own page rather than a settings card, because the useful part is
  * the per-platform instructions: pick where your site is built and copy what is shown.
  */
 export default function TrackingPage() {
   const { data, error, reload } = useApi<any>("/v1/tenant/tracking");
+  const { data: sources, reload: reloadSources } = useApi<any>(data?.enabled ? "/v1/tenant/integrations/order-sources" : null);
   const { busy, error: actionError, success, run } = useAction();
   const [platform, setPlatform] = useState<string>("custom");
   const [domains, setDomains] = useState<string | null>(null);
@@ -190,7 +304,7 @@ export default function TrackingPage() {
 
       <div className="card">
         <h2>1. Install on your site</h2>
-        <p className="muted">Pick where your site is built. The code already carries your site key, so copy it as it is.</p>
+        <p className="muted">Pick where your site is built, or how you take payments. The code already carries your site key, so copy it as it is.</p>
         <div className="platform-picker" role="tablist" aria-label="Website platform">
           {platforms.map((p) => (
             <button key={p.id} role="tab" aria-selected={current?.id === p.id} className={current?.id === p.id ? "active" : ""} onClick={() => choosePlatform(p.id)}>
@@ -245,7 +359,17 @@ export default function TrackingPage() {
         </form>
       </div>
 
-      {current?.order ? (
+      {current?.orderSource ? (
+        <div className="card">
+          <h2>3. Connect orders</h2>
+          <p className="muted">
+            {current.orderSource.provider === "shopify"
+              ? "Shopify tells Referly about paid orders, refunds and cancellations itself. Nothing to add to your checkout."
+              : "Stripe tells Referly about successful payments and refunds itself. Nothing to add to your thank-you page."}
+          </p>
+          <OrderSourceSetup guide={current} sources={sources} reload={reloadSources} pixel={pixel} />
+        </div>
+      ) : current?.order ? (
         <div className="card">
           <h2>3. Report orders (optional)</h2>
           <p className="muted">

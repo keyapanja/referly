@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { z } from "zod";
-import { tenants, auth, audit, account, plans, integrations, retention, journeys, MERCHANT_ROLES, API_KEY_SCOPES, forbidden } from "@referly/core";
+import { tenants, auth, audit, account, plans, integrations, retention, journeys, orderSources, MERCHANT_ROLES, API_KEY_SCOPES, forbidden } from "@referly/core";
 import { installSnippet, SNIPPET_EXAMPLES } from "../snippet";
 import { connectionKey } from "../wordpress";
 import { platformGuides } from "../platforms";
@@ -46,18 +46,27 @@ export function tenantRoutes() {
 
   /** Payout providers (PRD s14): credentials are verified with the provider and stored encrypted. */
   r.get("/integrations", async (c) => c.json({ integrations: await integrations.listIntegrations(c.get("deps").db, c.get("ctx")), providers: integrations.PROVIDER_FOR_METHOD }));
+  /** Shopify and Stripe order sources: connection state, where to point their webhooks, and what arrived lately. */
+  r.get("/integrations/order-sources", async (c) => {
+    const { db, config } = c.get("deps");
+    const ctx = c.get("ctx");
+    const sources = await orderSources.orderSourcesView(db, ctx);
+    return c.json({ sources: sources.map((s) => ({ ...s, hookUrl: orderSources.orderSourceHookUrl(config.baseUrl, s.provider, ctx.tenantId) })) });
+  });
   r.post("/integrations/:provider", async (c) => {
     const { credentials } = z.object({ credentials: z.record(z.string(), z.unknown()) }).parse(await c.req.json());
     const provider = c.req.param("provider");
-    const row =
-      provider === "twilio"
+    const row = orderSources.isOrderSource(provider)
+      ? await orderSources.connectOrderSource(c.get("deps").db, c.get("ctx"), provider, credentials)
+      : provider === "twilio"
         ? await integrations.connectTextProvider(c.get("deps").db, c.get("ctx"), provider, credentials, c.get("deps").text)
         : await integrations.connectPayoutProvider(c.get("deps").db, c.get("ctx"), provider as integrations.PayoutProviderId, credentials, c.get("deps").payoutProviders);
     return c.json({ integration: integrations.publicIntegration(row) }, 201);
   });
   r.delete("/integrations/:provider", async (c) => {
     const provider = c.req.param("provider");
-    if (provider === "twilio") await integrations.disconnectTextProvider(c.get("deps").db, c.get("ctx"), provider);
+    if (orderSources.isOrderSource(provider)) await orderSources.disconnectOrderSource(c.get("deps").db, c.get("ctx"), provider);
+    else if (provider === "twilio") await integrations.disconnectTextProvider(c.get("deps").db, c.get("ctx"), provider);
     else await integrations.disconnectPayoutProvider(c.get("deps").db, c.get("ctx"), provider as integrations.PayoutProviderId);
     return c.json({ ok: true });
   });

@@ -1787,6 +1787,16 @@ ol.install-steps li {
 .plugin-covers li {
   margin: 4px 0;
 }
+.source-status {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 10px 0 14px;
+}
+.source-form {
+  margin-top: 12px;
+}
 details.fallback {
   margin-top: 18px;
   padding-top: 12px;

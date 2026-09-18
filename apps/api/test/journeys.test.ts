@@ -307,7 +307,14 @@ describe("per-platform install instructions", () => {
     expect(byId.wordpress!.plugin!.steps.length).toBeGreaterThan(2);
     expect(byId.wordpress!.plugin!.covers.join(" ")).toContain("WooCommerce");
     // Shopify: Liquid on the order status page, using the exact cents value, and self-contained
-    expect(byId.shopify!.order!.code).toContain("{{ checkout.order_number | json }}");
+    expect(byId.shopify!.order!.code).toContain("{{ checkout.order_name | json }}");
+    // Shopify and Stripe report orders through their own webhooks; the connect form is described, never a secret
+    expect(byId.shopify!.orderSource).toMatchObject({ provider: "shopify" });
+    expect(byId.shopify!.orderSource!.fields.map((f) => f.key)).toEqual(["webhookSecret", "shopDomain"]);
+    expect(byId.stripe!.orderSource).toMatchObject({ provider: "stripe" });
+    expect(byId.stripe!.orderSource!.passing!.map((p) => p.title)).toEqual(["Checkout Sessions created on your server", "Payment Links"]);
+    expect(byId.stripe!.order).toBeUndefined();
+    for (const guide of Object.values(byId)) for (const p of guide!.orderSource?.passing ?? []) expect(p.code, guide!.id).not.toContain("${");
     expect(byId.shopify!.order!.code).toContain("amountMinor: {{ checkout.total_price }}");
     expect(byId.shopify!.order!.code).toContain(SITE);
     // Wix and Squarespace have no order hook, so no order block is offered

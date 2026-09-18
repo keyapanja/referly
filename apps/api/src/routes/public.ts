@@ -2,7 +2,8 @@ import { Hono, type Context } from "hono";
 import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { getCookie, setCookie } from "hono/cookie";
-import { tracking, programs, affiliates, auth, tenants, systemContext, notFound, validation, offers, integrations, messaging, textProviders, webhookDeliveries, newId } from "@referly/core";
+import { createHash } from "node:crypto";
+import { tracking, programs, affiliates, auth, tenants, systemContext, notFound, validation, unauthenticated, offers, integrations, messaging, textProviders, webhookDeliveries, newId, orderSources, toMinorUnits } from "@referly/core";
 import { setSessionCookie, type AppEnv } from "../lib/auth";
 import { scopeRequest } from "../lib/rls";
 import { leads as leadsSvc, journeys, conversions as conversionsSvc, webhookDeliveries as deliveriesTable } from "@referly/core";
@@ -28,11 +29,6 @@ const pixelOrderSchema = z.object({
   consent: z.string().max(20).optional(),
   url: z.string().max(2000).optional(),
 });
-
-const ZERO_DECIMAL = new Set(["JPY", "KRW", "VND", "CLP", "ISK", "UGX", "XAF", "XOF", "PYG", "RWF"]);
-function toMinor(amount: number, currency: string): number {
-  return Math.round(amount * (ZERO_DECIMAL.has(currency.toUpperCase()) ? 1 : 100));
-}
 
 /**
  * Unauthenticated endpoints. Tenant is always derived from an opaque token in the URL
@@ -93,6 +89,68 @@ export function publicRoutes() {
     if (["STOP", "STOPALL", "UNSUBSCRIBE", "CANCEL", "END", "QUIT"].includes(word)) await affiliates.setTextOptOutByPhone(c.get("deps").db, systemContext(tenantId, c.get("now")), from, true);
     else if (["START", "UNSTOP", "YES"].includes(word)) await affiliates.setTextOptOutByPhone(c.get("deps").db, systemContext(tenantId, c.get("now")), from, false);
     return c.text('<?xml version="1.0" encoding="UTF-8"?><Response></Response>', 200, { "content-type": "text/xml" });
+  });
+
+  /**
+   * Order sources: Shopify and Stripe post their own webhooks here. The tenant is in the path;
+   * a request counts only if it carries a valid signature for that workspace's secret. Each
+   * event is processed once, keyed on the sender's event id, so a retry is answered without a
+   * second look, and every event is logged with what Referly did with it.
+   */
+  type HookPath = "/hooks/shopify/:tenantId" | "/hooks/stripe/:tenantId";
+  async function orderSourceRequest<P extends orderSources.OrderSourceId>(c: Context<AppEnv, HookPath>, provider: P) {
+    const tenantId = c.req.param("tenantId");
+    const { db } = c.get("deps");
+    // One answer for "no such workspace" and "not connected": nothing to enumerate.
+    const tenant = await tenants.getTenant(db, systemContext(tenantId, c.get("now"))).catch(() => null);
+    if (!tenant || tenant.status !== "active") throw notFound("hook");
+    await scopeRequest(c, tenantId);
+    const ctx = systemContext(tenantId, c.get("now"));
+    const creds = await orderSources.orderSourceCredentials(db, ctx, provider);
+    if (!creds) throw notFound("hook");
+    return { ctx, creds, raw: await c.req.text() };
+  }
+  function hookJson(raw: string): Record<string, unknown> {
+    try {
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("not an object");
+      return parsed as Record<string, unknown>;
+    } catch {
+      throw validation("body must be a JSON object");
+    }
+  }
+  async function processOrderSourceEvent(c: Context<AppEnv, HookPath>, provider: orderSources.OrderSourceId, ctx: ReturnType<typeof systemContext>, eventId: string, summary: string, handle: () => Promise<orderSources.OrderSourceOutcome>) {
+    const { db } = c.get("deps");
+    const deliveryId = await orderSources.beginOrderSourceDelivery(db, ctx, provider, eventId, summary);
+    if (!deliveryId) return c.json({ ok: true, action: "duplicate", reason: "this event was already processed" }, 200);
+    try {
+      const outcome = await handle();
+      await orderSources.finishOrderSourceDelivery(db, ctx, deliveryId, outcome);
+      await orderSources.touchOrderSource(db, ctx, provider);
+      return c.json({ ok: true, ...outcome }, 200);
+    } catch (err) {
+      await orderSources.finishOrderSourceDelivery(db, ctx, deliveryId, { error: err instanceof Error ? err.message : String(err), summary });
+      throw err;
+    }
+  }
+
+  r.post("/hooks/shopify/:tenantId", async (c) => {
+    const { ctx, creds, raw } = await orderSourceRequest(c, "shopify");
+    if (!orderSources.verifyShopifySignature(creds.webhookSecret, raw, c.req.header("x-shopify-hmac-sha256"))) throw unauthenticated("the signature does not match this workspace's Shopify webhook secret");
+    const shop = c.req.header("x-shopify-shop-domain")?.toLowerCase() ?? null;
+    if (creds.shopDomain && shop !== creds.shopDomain) throw unauthenticated(`this hook is connected to ${creds.shopDomain}, not ${shop ?? "an unnamed store"}`);
+    const topic = c.req.header("x-shopify-topic") ?? "unknown";
+    const payload = hookJson(raw);
+    const eventId = c.req.header("x-shopify-webhook-id") ?? createHash("sha256").update(raw).digest("hex");
+    return processOrderSourceEvent(c, "shopify", ctx, eventId, topic, () => orderSources.handleShopifyEvent(c.get("deps").db, ctx, topic, payload, { shopDomain: shop }));
+  });
+
+  r.post("/hooks/stripe/:tenantId", async (c) => {
+    const { ctx, creds, raw } = await orderSourceRequest(c, "stripe");
+    if (!orderSources.verifyStripeSignature(creds.webhookSecret, raw, c.req.header("stripe-signature"), c.get("now")())) throw unauthenticated("the signature does not match this workspace's Stripe webhook secret, or the event is too old");
+    const event = hookJson(raw) as unknown as orderSources.StripeEvent;
+    if (typeof event.id !== "string" || typeof event.type !== "string") throw validation("not a Stripe event");
+    return processOrderSourceEvent(c, "stripe", ctx, event.id, event.type, () => orderSources.handleStripeEvent(c.get("deps").db, ctx, event, creds, c.get("deps").orderSources));
   });
 
   /**
@@ -232,7 +290,7 @@ export function publicRoutes() {
       delete input.visitorId;
       delete input.sessionId;
     }
-    const amountMinor = input.amountMinor ?? toMinor(input.amount ?? 0, input.currency ?? tenant.currency);
+    const amountMinor = input.amountMinor ?? toMinorUnits(input.amount ?? 0, input.currency ?? tenant.currency);
     const deliveryId = newId("webhookDelivery");
     await db.insert(deliveriesTable).values({ id: deliveryId, tenantId: tenant.id, source: "pixel", idempotencyKey: `pixel:${input.orderId}:${deliveryId}`, payload: body, receivedAt: ctx.now() });
     try {
