@@ -7,6 +7,7 @@ import { api } from "@/lib/api";
 import { useAction, useApi } from "@/lib/hooks";
 import { dateTime, money, toMinor } from "@/lib/format";
 import { Alert, Badge, Field, PageHeader, Table } from "@/components/ui";
+import { StatusFilter, STATUS_OPTIONS } from "@/components/status-filter";
 
 function ConversionsList() {
   const params = useSearchParams();
@@ -15,7 +16,7 @@ function ConversionsList() {
   const { data: offers } = useApi<any>("/v1/offers");
   const { data: affiliates } = useApi<any>("/v1/affiliates?status=active");
   const { data: programs } = useApi<any>("/v1/programs");
-  const { busy, error: actionError, run } = useAction();
+  const { busy, run } = useAction();
   const [show, setShow] = useState(false);
   const [form, setForm] = useState({ externalOrderId: "", offerId: "", amount: "", affiliateId: "", programId: "", couponCode: "", reason: "" });
 
@@ -26,19 +27,14 @@ function ConversionsList() {
         subtitle="Orders received from your checkout, API or entered manually."
         actions={
           <>
-            <select value={status} onChange={(e) => (window.location.search = e.target.value ? `?status=${e.target.value}` : "")}>
-              <option value="">All statuses</option>
-              {["pending", "approved", "refunded", "cancelled", "reversed", "disputed"].map((s) => (
-                <option key={s}>{s}</option>
-              ))}
-            </select>
+            <StatusFilter options={STATUS_OPTIONS.conversions} />
             <button className="primary" onClick={() => setShow(!show)}>
               Record manually
             </button>
           </>
         }
       />
-      <Alert kind="error">{error ?? actionError}</Alert>
+      <Alert kind="error">{error}</Alert>
       {show && (
         <div className="card">
           <h2>Record a conversion</h2>

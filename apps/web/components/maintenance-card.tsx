@@ -22,7 +22,7 @@ function size(bytes: number | null | undefined): string {
 /** Admin overview → Maintenance: last backup, last retention prune, workspace purges, manual triggers and recent history. */
 export function MaintenanceCard({ ops }: { ops: any }) {
   const { data, reload } = useApi<any>("/admin/maintenance?limit=12");
-  const { busy, error, success, run } = useAction();
+  const { busy, error, success, run } = useAction({ inline: true });
   const m = ops?.maintenance;
   const backupCfg = data?.config?.backups;
   const backupOk = m?.backup?.status === "done" && (m.backup.ageSeconds ?? Infinity) < (backupCfg?.everyHours ? backupCfg.everyHours * 3600 * 1.5 : 36 * 3600);

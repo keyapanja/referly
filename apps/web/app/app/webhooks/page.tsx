@@ -9,7 +9,7 @@ import { Alert, Badge, CopyBox, Field, PageHeader, Table } from "@/components/ui
 export default function WebhooksPage() {
   const { data, error, reload } = useApi<any>("/v1/webhooks");
   const { data: catalog } = useApi<any>("/v1/webhooks/events");
-  const { busy, error: actionError, success, run } = useAction();
+  const { busy, run } = useAction();
   const [form, setForm] = useState({ url: "", description: "", all: true, events: [] as string[] });
   const [secret, setSecret] = useState<{ id: string; value: string } | null>(null);
   const [open, setOpen] = useState<string | null>(null);
@@ -19,8 +19,7 @@ export default function WebhooksPage() {
   return (
     <>
       <PageHeader title="Webhooks" subtitle="Send events to Zapier, Make or your own systems. Every delivery is signed, retried with backoff, and logged." />
-      <Alert kind="error">{error ?? actionError}</Alert>
-      <Alert kind="success">{success}</Alert>
+      <Alert kind="error">{error}</Alert>
       {secret ? (
         <Alert kind="info">
           <strong>Signing secret for the new endpoint.</strong> Copy it now; it will not be shown again. Use it to verify the <code>x-referly-signature</code> header.

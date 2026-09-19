@@ -65,7 +65,7 @@ export default function AnalyticsPage() {
   const { data: byCampaign } = useApi<any>("/v1/analytics/campaigns");
   const cur = me?.tenant?.currency ?? "USD";
   const { data: exportsData, reload: reloadExports } = useApi<any>("/v1/analytics/exports");
-  const { busy, error: exportError, run, setError: setExportError } = useAction();
+  const { busy, error: exportError, run, setError: setExportError } = useAction({ inline: true });
   const [exportEntity, setExportEntity] = useState("performance");
   const [exportScope, setExportScope] = useState<"period" | "all">("period");
   const [readyId, setReadyId] = useState<string | null>(null);

@@ -9,14 +9,14 @@ import { Alert, Badge, Field, PageHeader, Table } from "@/components/ui";
 export default function ProgramsPage() {
   const { data, error, reload } = useApi<any>("/v1/programs");
   const { data: offers } = useApi<any>("/v1/offers");
-  const { busy, error: actionError, run } = useAction();
+  const { busy, run } = useAction();
   const [show, setShow] = useState(false);
   const [form, setForm] = useState({ name: "", commissionModel: "percentage", commissionPercent: "20", commissionFixed: "", holdingDays: "30", attributionWindowDays: "30", approvalMode: "manual", refundPolicy: "full", precedence: "coupon_wins", termsText: "", offerIds: [] as string[] });
 
   return (
     <>
       <PageHeader title="Programs" subtitle="Commission, attribution and approval rules." actions={<button className="primary" onClick={() => setShow(!show)}>New program</button>} />
-      <Alert kind="error">{error ?? actionError}</Alert>
+      <Alert kind="error">{error}</Alert>
       {show && (
         <div className="card">
           <h2>New program</h2>

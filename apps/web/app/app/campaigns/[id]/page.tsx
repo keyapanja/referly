@@ -15,7 +15,7 @@ export default function CampaignDetail() {
   const { data: assetsData } = useApi<any>("/v1/assets");
   const { data: groupsData } = useApi<any>("/v1/groups");
   const [groupPick, setGroupPick] = useState("");
-  const { busy, error: actionError, success, run } = useAction();
+  const { busy, run } = useAction();
   const cur = me?.tenant?.currency ?? "USD";
   const [pick, setPick] = useState<string[]>([]);
   const [assetIds, setAssetIds] = useState<string[]>([]);
@@ -46,8 +46,6 @@ export default function CampaignDetail() {
           </>
         }
       />
-      <Alert kind="error">{actionError}</Alert>
-      <Alert kind="success">{success}</Alert>
       <div className="grid cols-4">
         <Stat label="Participants" value={`${perf.participants.active} / ${perf.participants.invited}`} hint="active / invited" />
         <Stat label="Sales" value={perf.conversions} />

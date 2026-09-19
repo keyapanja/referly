@@ -7,6 +7,7 @@ import { useAction, useApi } from "@/lib/hooks";
 import { dateTime } from "@/lib/format";
 import { Alert, Badge, Field, Loading, PageHeader, PasswordInput, Stat, Table } from "@/components/ui";
 import { CodeBlock } from "@/components/code-block";
+import { confirmAction } from "@/components/dialog";
 
 interface PlatformSnippet {
   title: string;
@@ -57,7 +58,7 @@ function Steps({ snippet }: { snippet: PlatformSnippet }) {
  * pasted into the site. The manual code stays available for sites that cannot install plugins.
  */
 function PluginSetup({ guide }: { guide: PlatformGuide }) {
-  const { busy, error, run } = useAction();
+  const { busy, error, run } = useAction({ inline: true });
   const [key, setKey] = useState<string | null>(null);
   const plugin = guide.plugin!;
   return (
@@ -116,7 +117,7 @@ function OrderSourceSetup({ guide, sources, reload, pixel }: { guide: PlatformGu
   const src = guide.orderSource!;
   const state = sources?.sources?.find((s: any) => s.provider === src.provider);
   const label = src.provider === "shopify" ? "Shopify" : "Stripe";
-  const { busy, error, success, run } = useAction();
+  const { busy, error, success, run } = useAction({ inline: true });
   const [values, setValues] = useState<Record<string, string>>({});
   return (
     <>
@@ -141,8 +142,9 @@ function OrderSourceSetup({ guide, sources, reload, pixel }: { guide: PlatformGu
             type="button"
             className="sm danger"
             disabled={busy}
-            onClick={() => {
-              if (window.confirm(`Disconnect ${label}? Its webhooks are refused until you connect it again.`)) run(() => api(`/v1/tenant/integrations/${src.provider}`, { method: "DELETE" }), `${label} disconnected.`).then(reload);
+            onClick={async () => {
+              const ok = await confirmAction({ title: `Disconnect ${label}?`, body: `Orders and refunds from ${label} stop arriving: its webhooks are refused until you connect it again. Sales already recorded stay.`, confirmLabel: "Disconnect", danger: true });
+              if (ok) run(() => api(`/v1/tenant/integrations/${src.provider}`, { method: "DELETE" }), `${label} disconnected.`).then(reload);
             }}
           >
             Disconnect
@@ -219,7 +221,7 @@ function OrderSourceSetup({ guide, sources, reload, pixel }: { guide: PlatformGu
 export default function TrackingPage() {
   const { data, error, reload } = useApi<any>("/v1/tenant/tracking");
   const { data: sources, reload: reloadSources } = useApi<any>(data?.enabled ? "/v1/tenant/integrations/order-sources" : null);
-  const { busy, error: actionError, success, run } = useAction();
+  const { busy, run } = useAction();
   const [platform, setPlatform] = useState<string>("custom");
   const [domains, setDomains] = useState<string | null>(null);
   const [pixel, setPixel] = useState(false);
@@ -266,7 +268,7 @@ export default function TrackingPage() {
     return (
       <>
         <PageHeader title="Website tracking" subtitle="Record what visitors from affiliate links do on your own website." />
-        <Alert kind="error">{error ?? actionError}</Alert>
+        <Alert kind="error">{error}</Alert>
         <div className="card">
           <h2>What it does</h2>
           <p className="muted">
@@ -292,8 +294,7 @@ export default function TrackingPage() {
           </Link>
         }
       />
-      <Alert kind="error">{error ?? actionError}</Alert>
-      <Alert kind="success">{success}</Alert>
+      <Alert kind="error">{error}</Alert>
 
       <div className="grid cols-4" style={{ marginBottom: 16 }}>
         <Stat label="Status" value={data.lastEventAt ? "Receiving" : "Waiting"} hint={data.lastEventAt ? `last event ${dateTime(data.lastEventAt)}` : "no events yet"} />
@@ -429,8 +430,14 @@ export default function TrackingPage() {
             type="button"
             className="danger"
             disabled={busy}
-            onClick={() => {
-              if (window.confirm("Rotate the site key? Snippets carrying the old key stop being accepted immediately; you will need to update the code on your site.")) run(() => api("/v1/tenant/tracking/rotate", { method: "POST" }), "Site key rotated. Update the code on your site now.").then(reload);
+            onClick={async () => {
+              const ok = await confirmAction({
+                title: "Rotate the site key?",
+                body: "Code carrying the old key stops being accepted immediately, so nothing is counted until you update the code on your site. WordPress sites with the plugin pick up the new key by themselves within a day, or at once with its Refresh button.",
+                confirmLabel: "Rotate key",
+                danger: true,
+              });
+              if (ok) run(() => api("/v1/tenant/tracking/rotate", { method: "POST" }), "Site key rotated. Update the code on your site now.").then(reload);
             }}
           >
             Rotate site key

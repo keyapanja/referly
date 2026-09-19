@@ -9,6 +9,7 @@ import { Icon, type IconName } from "./icons";
 import { brandStyle } from "@/lib/brand";
 import { NotificationBell } from "./notifications";
 import { ToastHost } from "./toast";
+import { DialogHost } from "./dialog";
 import { ExportWatcher } from "./export-watcher";
 
 type NavItem = readonly [href: string, label: string, icon: IconName];
@@ -201,6 +202,7 @@ export function Shell({ mode, children }: { mode: "merchant" | "portal" | "platf
         {children}
       </main>
       <ToastHost />
+      <DialogHost />
       {mode === "merchant" ? <ExportWatcher /> : null}
     </div>
   );

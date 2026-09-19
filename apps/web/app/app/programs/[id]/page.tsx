@@ -14,7 +14,7 @@ export default function ProgramDetail() {
   const { data, error, reload } = useApi<any>(`/v1/programs/${id}`);
   const { data: offers } = useApi<any>("/v1/offers");
   const { data: me } = useApi<any>("/v1/tenant/me");
-  const { busy, error: actionError, success, run } = useAction();
+  const { busy, run } = useAction();
   const [form, setForm] = useState<any>(null);
   const [leadForm, setLeadForm] = useState<any>(null);
   const [reason, setReason] = useState("");
@@ -42,8 +42,7 @@ export default function ProgramDetail() {
           </button>
         ))}
       />
-      <Alert kind="error">{error ?? actionError}</Alert>
-      <Alert kind="success">{success}</Alert>
+      <Alert kind="error">{error}</Alert>
       <div className="grid cols-2">
         <div className="card">
           <h2>Application page</h2>

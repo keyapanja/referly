@@ -2,19 +2,20 @@
 
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
+import { StatusFilter, STATUS_OPTIONS } from "@/components/status-filter";
 import { Suspense } from "react";
 import { api } from "@/lib/api";
 import { useAction, useApi } from "@/lib/hooks";
 import { dateTime, money } from "@/lib/format";
 import { Alert, Badge, PageHeader, Table } from "@/components/ui";
+import { askReason } from "@/components/dialog";
 
 function CommissionsList() {
   const params = useSearchParams();
   const status = params.get("status") ?? "";
   const { data, error, reload } = useApi<any>(`/v1/commissions${status ? `?status=${status}` : ""}`);
-  const { data: affiliates } = useApi<any>("/v1/affiliates");
-  const { busy, error: actionError, success, run } = useAction();
-  const name = (id: string) => affiliates?.affiliates?.find((a: any) => a.id === id)?.name ?? id;
+  const { busy, run } = useAction();
+  const name = (c: any) => c.affiliateName ?? "Unknown affiliate";
 
   return (
     <>
@@ -23,20 +24,14 @@ function CommissionsList() {
         subtitle="A commission is held until its program's holding period ends, then turns payable and can go into a payout. Pay now releases one early."
         actions={
           <>
-            <select value={status} onChange={(e) => (window.location.search = e.target.value ? `?status=${e.target.value}` : "")}>
-              <option value="">All statuses</option>
-              {["pending", "approved", "payable", "paid", "reversed", "void"].map((s) => (
-                <option key={s}>{s}</option>
-              ))}
-            </select>
+            <StatusFilter options={STATUS_OPTIONS.commissions} />
             <button className="primary" disabled={busy} onClick={() => run(async () => { const r = await api<any>("/v1/commissions/settle", { method: "POST" }); return r.settled.length; }, undefined).then((n) => { if (n !== undefined) { reload(); } })}>
               Settle holding periods
             </button>
           </>
         }
       />
-      <Alert kind="error">{error ?? actionError}</Alert>
-      <Alert kind="success">{success}</Alert>
+      <Alert kind="error">{error}</Alert>
       <div className="card">
         <Table
           rows={data?.commissions}
@@ -44,7 +39,7 @@ function CommissionsList() {
           empty="No commissions."
           columns={[
             { header: "Created", cell: (c: any) => <Link href={`/app/conversions/${c.conversionId}`}>{dateTime(c.createdAt)}</Link> },
-            { header: "Affiliate", cell: (c: any) => <Link href={`/app/affiliates/${c.affiliateId}`}>{name(c.affiliateId)}</Link> },
+            { header: "Affiliate", cell: (c: any) => <Link href={`/app/affiliates/${c.affiliateId}`}>{name(c)}</Link> },
             { header: "Amount", cell: (c: any) => money(c.amountMinor, c.currency), num: true },
             { header: "Payable from", cell: (c: any) => dateTime(c.payableAt) },
             { header: "Status", cell: (c: any) => <>{<Badge value={c.status} />}{c.isTest ? <> <Badge value="test" /></> : null}</> },
@@ -66,9 +61,16 @@ function CommissionsList() {
                     <button
                       className="sm danger"
                       disabled={busy}
-                      onClick={() => {
-                        const r = window.prompt("Reason for reversal:");
-                        if (r) run(() => api(`/v1/commissions/${c.id}/reverse`, { method: "POST", json: { reason: r } })).then(reload);
+                      onClick={async () => {
+                        const r = await askReason({
+                          title: `Reverse ${money(c.amountMinor, c.currency)} for ${name(c)}?`,
+                          body: "The commission goes to zero and the affiliate sees the reversal, with your reason, on their statement. This cannot be undone.",
+                          label: "Reason",
+                          placeholder: "Refunded outside the platform, duplicate order…",
+                          confirmLabel: "Reverse commission",
+                          danger: true,
+                        });
+                        if (r) run(() => api(`/v1/commissions/${c.id}/reverse`, { method: "POST", json: { reason: r } }), "Commission reversed.").then(reload);
                       }}
                     >
                       Reverse

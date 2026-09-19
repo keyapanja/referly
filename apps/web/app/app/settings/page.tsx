@@ -19,7 +19,7 @@ export default function SettingsPage() {
   const [paypal, setPaypal] = useState({ clientId: "", clientSecret: "", sandbox: true });
   const { data: twilioUrls } = useApi<any>("/v1/tenant/integrations/twilio/webhooks");
   const [twilio, setTwilio] = useState({ accountSid: "", authToken: "", fromSms: "", fromWhatsApp: "" });
-  const { busy, error: actionError, success, run } = useAction();
+  const { busy, success, run } = useAction();
   const [form, setForm] = useState<any>(null);
   const [member, setMember] = useState({ name: "", email: "", password: "", role: "admin" });
   const [keyName, setKeyName] = useState("Checkout webhook");
@@ -40,8 +40,7 @@ export default function SettingsPage() {
   return (
     <>
       <PageHeader title="Settings" />
-      <Alert kind="error">{error ?? actionError}</Alert>
-      <Alert kind="success">{success}</Alert>
+      <Alert kind="error">{error}</Alert>
       <div className="grid cols-2">
         <div className="card">
           <h2>Plan and usage</h2>

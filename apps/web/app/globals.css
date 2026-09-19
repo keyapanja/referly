@@ -600,6 +600,8 @@ code {
   gap: 8px;
   align-items: center;
   flex-wrap: wrap;
+  /* never wider than what holds it, so a long control inside can shrink rather than stretch the row */
+  max-width: 100%;
 }
 
 @media (max-width: 860px) {
@@ -954,6 +956,9 @@ button:disabled,
 }
 .actions > select {
   width: auto;
+  /* plain-word options are long; on a phone the control shrinks to the screen instead of pushing the page sideways */
+  max-width: 100%;
+  min-width: 0;
   height: 36px;
   box-shadow: var(--shadow-sm);
 }
@@ -1893,6 +1898,69 @@ tr.row-ready > td {
   }
   100% {
     background: transparent;
+  }
+}
+
+/* Dialog ---------------------------------------------------------------- */
+dialog.modal {
+  width: min(480px, calc(100vw - 32px));
+  max-height: calc(100vh - 48px);
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) + 4px);
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 24px 60px rgba(15, 15, 30, 0.28);
+  overflow: auto;
+}
+dialog.modal::backdrop {
+  background: rgba(15, 15, 30, 0.45);
+}
+dialog.modal[open] {
+  animation: modal-in 0.16s ease-out 1;
+}
+dialog.modal form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 22px 24px 20px;
+}
+dialog.modal h2 {
+  margin: 0;
+  font-size: 17px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  text-wrap: balance;
+}
+dialog.modal p {
+  margin: 0;
+  line-height: 1.55;
+}
+dialog.modal .field {
+  margin: 4px 0 0;
+}
+dialog.modal textarea {
+  width: 100%;
+  resize: vertical;
+  min-height: 76px;
+}
+.modal-actions {
+  justify-content: flex-end;
+  margin-top: 6px;
+}
+@keyframes modal-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  dialog.modal[open] {
+    animation: none;
   }
 }
 

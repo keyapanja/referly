@@ -16,7 +16,7 @@ export default function CampaignsPage() {
   const { data, error, reload } = useApi<any>("/v1/campaigns");
   const { data: programs } = useApi<any>("/v1/programs");
   const { data: me } = useApi<any>("/v1/tenant/me");
-  const { busy, error: actionError, run } = useAction();
+  const { busy, run } = useAction();
   const cur = me?.tenant?.currency ?? "USD";
   const [show, setShow] = useState(false);
   const now = new Date();
@@ -38,7 +38,7 @@ export default function CampaignsPage() {
   return (
     <>
       <PageHeader title="Campaigns" subtitle="Time-bound promotions with their own commission, bonus and creative." actions={<button className="primary" onClick={() => setShow(!show)}>New campaign</button>} />
-      <Alert kind="error">{error ?? actionError}</Alert>
+      <Alert kind="error">{error}</Alert>
       {show && (
         <div className="card">
           <h2>New campaign</h2>

@@ -9,7 +9,7 @@ import { Alert, Badge, Field, PageHeader, Table } from "@/components/ui";
 export default function MessagesPage() {
   const { data, error, reload } = useApi<any>("/v1/messages/templates");
   const { data: log } = useApi<any>("/v1/messages/log?limit=50");
-  const { busy, error: actionError, success, run } = useAction();
+  const { busy, run } = useAction();
   const [editing, setEditing] = useState<any>(null);
   const [channel, setChannel] = useState<"email" | "text">("email");
   const templates = data?.templates?.filter((t: any) => t.channel === channel);
@@ -17,8 +17,7 @@ export default function MessagesPage() {
   return (
     <>
       <PageHeader title="Messages" subtitle="Templates use safe variables only. Nothing is generated automatically." />
-      <Alert kind="error">{error ?? actionError}</Alert>
-      <Alert kind="success">{success}</Alert>
+      <Alert kind="error">{error}</Alert>
       <div className="grid cols-2">
         <div className="card">
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>

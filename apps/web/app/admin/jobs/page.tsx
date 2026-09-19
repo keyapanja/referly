@@ -7,11 +7,11 @@ import { Alert, Badge, PageHeader, Table } from "@/components/ui";
 
 export default function AdminJobs() {
   const { data, error, reload } = useApi<any>("/admin/jobs");
-  const { busy, error: actionError, run } = useAction();
+  const { busy, run } = useAction();
   return (
     <>
       <PageHeader title="Background jobs" subtitle="Dead jobs exhausted their retries; retrying jobs failed at least once." />
-      <Alert kind="error">{error ?? actionError}</Alert>
+      <Alert kind="error">{error}</Alert>
       <div className="card">
         <Table
           rows={data?.jobs}

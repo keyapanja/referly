@@ -4,10 +4,11 @@ import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { useAction, useApi } from "@/lib/hooks";
 import { Alert, Field, Loading, PageHeader, PasswordInput } from "@/components/ui";
+import { confirmAction } from "@/components/dialog";
 
 export default function PortalProfile() {
   const { data, error, reload } = useApi<any>("/portal/me");
-  const { busy, error: actionError, success, run } = useAction();
+  const { busy, run } = useAction();
   const [form, setForm] = useState<any>(null);
   const [payout, setPayout] = useState({ method: "bank_transfer", profileRef: "", masked: "" });
   const [texts, setTexts] = useState<{ channel: string; consent: boolean } | null>(null);
@@ -24,8 +25,6 @@ export default function PortalProfile() {
   return (
     <>
       <PageHeader title="Profile" />
-      <Alert kind="error">{actionError}</Alert>
-      <Alert kind="success">{success}</Alert>
       <div className="grid cols-2">
         <div className="card">
           <h2>Your details</h2>
@@ -166,8 +165,14 @@ export default function PortalProfile() {
         <p className="muted">You can ask {data.tenant?.name ?? "this business"} to delete the personal data they hold about you. They will settle anything still owed to you first; records of past sales and payouts are kept for accounting.</p>
         <button
           disabled={busy}
-          onClick={() => {
-            if (window.confirm("Ask for your personal data to be deleted? Your portal login will stop working once the request is carried out.")) run(() => api("/portal/erasure-request", { method: "POST", json: {} }), "Request sent. The team will be in touch.");
+          onClick={async () => {
+            const ok = await confirmAction({
+              title: "Ask for your personal data to be deleted?",
+              body: "The merchant is asked to erase your name, contact and payout details. Your portal login stops working once they carry it out, and anything still owed to you is settled first.",
+              confirmLabel: "Send the request",
+              danger: true,
+            });
+            if (ok) run(() => api("/portal/erasure-request", { method: "POST", json: {} }), "Request sent. The team will be in touch.");
           }}
         >
           Request deletion of my data

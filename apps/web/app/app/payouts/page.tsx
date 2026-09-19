@@ -2,11 +2,13 @@
 
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
+import { StatusFilter, STATUS_OPTIONS } from "@/components/status-filter";
 import { Suspense, useState } from "react";
 import { api } from "@/lib/api";
 import { useAction, useApi } from "@/lib/hooks";
 import { date, dateTime, money } from "@/lib/format";
 import { Alert, Badge, Field, PageHeader, Table } from "@/components/ui";
+import { askReason } from "@/components/dialog";
 
 function PayoutsList() {
   const params = useSearchParams();
@@ -14,9 +16,10 @@ function PayoutsList() {
   const { data, error, reload } = useApi<any>(`/v1/payouts${status ? `?status=${status}` : ""}`);
   const { data: payable, error: payableError, reload: reloadPayable } = useApi<any>("/v1/payouts/payable");
   const { data: affiliates } = useApi<any>("/v1/affiliates?status=active");
-  const { busy, error: actionError, success, run } = useAction();
+  const { busy, run } = useAction();
   const [external, setExternal] = useState({ affiliateId: "", reference: "", method: "bank_transfer" });
-  const name = (id: string) => affiliates?.affiliates?.find((a: any) => a.id === id)?.name ?? id;
+  // The API names the affiliate on every row, suspended ones included; an id is never shown in its place.
+  const name = (row: any) => row.affiliateName ?? "Unknown affiliate";
   const reloadAll = () => {
     reload();
     reloadPayable();
@@ -29,12 +32,7 @@ function PayoutsList() {
         subtitle="Batch payable commissions per affiliate, pay them outside the platform, then record completion."
         actions={
           <>
-            <select value={status} onChange={(e) => (window.location.search = e.target.value ? `?status=${e.target.value}` : "")}>
-              <option value="">All statuses</option>
-              {["draft", "processing", "paid", "failed", "cancelled"].map((s) => (
-                <option key={s}>{s}</option>
-              ))}
-            </select>
+            <StatusFilter options={STATUS_OPTIONS.payouts} />
             {data?.connectedProviders?.length && data?.payouts?.some((p: any) => p.canSend) ? (
               <button disabled={busy} onClick={() => run(async () => { const r = await api<any>("/v1/payouts/send-all", { method: "POST" }); return `${r.queued.length} sent to providers${r.skipped.length ? `, ${r.skipped.length} skipped` : ""}.`; }, undefined).then(reloadAll)}>
                 Send all drafts via providers
@@ -46,8 +44,7 @@ function PayoutsList() {
           </>
         }
       />
-      <Alert kind="error">{error ?? payableError ?? actionError}</Alert>
-      <Alert kind="success">{success}</Alert>
+      <Alert kind="error">{error ?? payableError}</Alert>
       <div className="card">
         <h2>Waiting to be paid</h2>
         <p className="muted">Payable money can go into a batch today. Held money is still inside its program&rsquo;s holding period — release one early with Pay now on the Commissions page.</p>
@@ -56,7 +53,7 @@ function PayoutsList() {
           keyOf={(b: any) => `${b.affiliateId}:${b.currency}`}
           empty="No unpaid commissions."
           columns={[
-            { header: "Affiliate", cell: (b: any) => <Link href={`/app/affiliates/${b.affiliateId}`}>{b.affiliateName ?? name(b.affiliateId)}</Link> },
+            { header: "Affiliate", cell: (b: any) => <Link href={`/app/affiliates/${b.affiliateId}`}>{name(b)}</Link> },
             { header: "Payable now", cell: (b: any) => money(b.payableMinor, b.currency), num: true },
             {
               header: "Held",
@@ -124,7 +121,7 @@ function PayoutsList() {
           empty="No payouts yet."
           columns={[
             { header: "Created", cell: (p: any) => dateTime(p.createdAt) },
-            { header: "Affiliate", cell: (p: any) => <Link href={`/app/affiliates/${p.affiliateId}`}>{name(p.affiliateId)}</Link> },
+            { header: "Affiliate", cell: (p: any) => <Link href={`/app/affiliates/${p.affiliateId}`}>{name(p)}</Link> },
             { header: "Amount", cell: (p: any) => money(p.amountMinor, p.currency), num: true },
             { header: "Method", cell: (p: any) => <>{p.method ?? p.payoutMethod ?? "—"}{p.provider ? <div className="muted">{p.provider === "stripe_connect" ? "Stripe" : "PayPal"}{p.providerStatus ? ` · ${p.providerStatus}` : ""}</div> : null}</> },
             { header: "Reference", cell: (p: any) => <span className="mono">{p.externalReference ?? p.providerRef ?? p.failureReason ?? "—"}</span> },
@@ -139,7 +136,7 @@ function PayoutsList() {
                     </button>
                   ) : null}
                   {p.status === "draft" && (
-                    <button className="sm" disabled={busy} onClick={() => run(() => api(`/v1/payouts/${p.id}/processing`, { method: "POST" })).then(reloadAll)}>
+                    <button className="sm" disabled={busy} onClick={() => run(() => api(`/v1/payouts/${p.id}/processing`, { method: "POST" }), "Payout started.").then(reloadAll)}>
                       Start
                     </button>
                   )}
@@ -147,9 +144,18 @@ function PayoutsList() {
                     <button
                       className="sm primary"
                       disabled={busy}
-                      onClick={() => {
-                        const ref = window.prompt("Payment reference (optional):") ?? "";
-                        run(() => api(`/v1/payouts/${p.id}/paid`, { method: "POST", json: { externalReference: ref || undefined } })).then(reload);
+                      onClick={async () => {
+                        const ref = await askReason({
+                          title: `Mark ${money(p.amountMinor, p.currency)} to ${name(p)} as paid?`,
+                          body: "Its commissions become paid and the affiliate is told. Do this once the money has actually left.",
+                          label: "Payment reference (optional)",
+                          placeholder: "Bank or transfer id",
+                          help: "Shown to the affiliate, so they can match it to their statement.",
+                          required: false,
+                          multiline: false,
+                          confirmLabel: "Mark paid",
+                        });
+                        if (ref !== null) run(() => api(`/v1/payouts/${p.id}/paid`, { method: "POST", json: { externalReference: ref || undefined } }), "Payout marked paid.").then(reloadAll);
                       }}
                     >
                       Mark paid
@@ -159,16 +165,23 @@ function PayoutsList() {
                     <button
                       className="sm danger"
                       disabled={busy}
-                      onClick={() => {
-                        const r = window.prompt("Failure reason:");
-                        if (r) run(() => api(`/v1/payouts/${p.id}/failed`, { method: "POST", json: { reason: r } })).then(reload);
+                      onClick={async () => {
+                        const r = await askReason({
+                          title: "Mark this payout as failed?",
+                          body: "The batch stays together so you can retry it, or cancel it to release its commissions.",
+                          label: "What went wrong",
+                          placeholder: "Bank rejected the transfer, wrong account details…",
+                          confirmLabel: "Mark failed",
+                          danger: true,
+                        });
+                        if (r) run(() => api(`/v1/payouts/${p.id}/failed`, { method: "POST", json: { reason: r } }), "Payout marked failed.").then(reloadAll);
                       }}
                     >
                       Failed
                     </button>
                   )}
                   {p.status === "failed" && (
-                    <button className="sm" disabled={busy} onClick={() => run(() => api(`/v1/payouts/${p.id}/processing`, { method: "POST" })).then(reloadAll)}>
+                    <button className="sm" disabled={busy} onClick={() => run(() => api(`/v1/payouts/${p.id}/processing`, { method: "POST" }), "Payout started again.").then(reloadAll)}>
                       Retry
                     </button>
                   )}
@@ -176,9 +189,16 @@ function PayoutsList() {
                     <button
                       className="sm"
                       disabled={busy}
-                      onClick={() => {
-                        const r = window.prompt("Cancel reason:");
-                        if (r) run(() => api(`/v1/payouts/${p.id}/cancel`, { method: "POST", json: { reason: r } })).then(reload);
+                      onClick={async () => {
+                        const r = await askReason({
+                          title: `Cancel this ${money(p.amountMinor, p.currency)} batch?`,
+                          body: "Nothing is paid. Its commissions go back to payable, ready for a new batch.",
+                          label: "Reason",
+                          confirmLabel: "Cancel batch",
+                          cancelLabel: "Keep it",
+                          danger: true,
+                        });
+                        if (r) run(() => api(`/v1/payouts/${p.id}/cancel`, { method: "POST", json: { reason: r } }), "Batch cancelled.").then(reloadAll);
                       }}
                     >
                       Cancel

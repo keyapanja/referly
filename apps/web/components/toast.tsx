@@ -26,9 +26,13 @@ export interface ToastInput {
 
 const EVENT = "referly:toast";
 const MAX_VISIBLE = 4;
+let hosts = 0;
 
-export function showToast(toast: ToastInput) {
-  if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent<ToastInput>(EVENT, { detail: toast }));
+/** Shows the toast and says whether anything could show it: pages outside the app shell (sign-in, join) have no host and keep their feedback inline. */
+export function showToast(toast: ToastInput): boolean {
+  if (typeof window === "undefined" || hosts === 0) return false;
+  window.dispatchEvent(new CustomEvent<ToastInput>(EVENT, { detail: toast }));
+  return true;
 }
 
 interface Shown extends ToastInput {
@@ -85,13 +89,17 @@ export function ToastHost() {
   const [toasts, setToasts] = useState<Shown[]>([]);
   const next = useRef(1);
   useEffect(() => {
+    hosts++;
     const on = (e: Event) => {
       const detail = (e as CustomEvent<ToastInput>).detail;
       if (!detail?.title) return;
       setToasts((list) => [...list, { ...detail, id: next.current++ }].slice(-MAX_VISIBLE));
     };
     window.addEventListener(EVENT, on);
-    return () => window.removeEventListener(EVENT, on);
+    return () => {
+      hosts--;
+      window.removeEventListener(EVENT, on);
+    };
   }, []);
   if (!toasts.length) return null;
   return (

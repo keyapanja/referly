@@ -17,7 +17,7 @@ const CATEGORIES = ["clicksDays", "messageLogsDays", "auditLogsDays", "webhookDe
 export function DataRetentionCard() {
   const { data, error, reload } = useApi<any>("/v1/tenant/retention");
   const { data: exportsData, reload: reloadExports } = useApi<any>("/v1/analytics/exports");
-  const { busy, error: actionError, success, run } = useAction();
+  const { busy, error: actionError, success, run } = useAction({ inline: true });
   const [form, setForm] = useState<Record<string, string> | null>(null);
 
   useEffect(() => {

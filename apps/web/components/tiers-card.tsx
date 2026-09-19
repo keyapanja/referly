@@ -10,7 +10,7 @@ import { Alert, Field, Table } from "./ui";
 export function TiersCard({ programId, currency }: { programId: string; currency: string }) {
   const { data, error, reload } = useApi<any>(`/v1/programs/${programId}/tiers`);
   const { data: groups } = useApi<any>("/v1/groups");
-  const { busy, error: actionError, success, run } = useAction();
+  const { busy, error: actionError, success, run } = useAction({ inline: true });
   const [form, setForm] = useState({ name: "", kind: "performance", groupId: "", metric: "conversions", threshold: "", windowDays: "", commissionModel: "percentage", commissionPercent: "", commissionFixed: "", priority: "0" });
 
   const describe = (t: any) => (t.kind === "group" ? `Members of ${t.groupName ?? t.groupId}` : `${t.metric === "revenue" ? money(t.threshold, currency) + " revenue" : t.threshold + " sales"}${t.windowDays ? ` in the last ${t.windowDays} days` : " lifetime"}`);

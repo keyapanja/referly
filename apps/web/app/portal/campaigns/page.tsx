@@ -8,13 +8,12 @@ import { Alert, Badge, CopyBox, Loading, PageHeader } from "@/components/ui";
 export default function PortalCampaigns() {
   const { data, error, reload } = useApi<any>("/portal/campaigns");
   const { data: me } = useApi<any>("/portal/me");
-  const { busy, error: actionError, run } = useAction();
+  const { busy, run } = useAction();
   const cur = me?.tenant?.currency ?? "USD";
   if (!data) return <Loading error={error} />;
   return (
     <>
       <PageHeader title="Campaigns" subtitle="Limited-time promotions you've been invited to. Join to unlock the campaign rate, bonus and creative." />
-      <Alert kind="error">{actionError}</Alert>
       {data.campaigns.length === 0 ? <div className="card empty">No campaigns right now.</div> : null}
       {data.campaigns.map((row: any) => {
         const c = row.campaign;

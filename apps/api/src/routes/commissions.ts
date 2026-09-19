@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { z } from "zod";
-import { commissions } from "@referly/core";
+import { commissions, affiliates } from "@referly/core";
 import { requireMerchantPrincipal, type AppEnv } from "../lib/auth";
 
 export function commissionRoutes() {
@@ -12,7 +12,11 @@ export function commissionRoutes() {
 
   r.get("/", async (c) => {
     const q = c.req.query();
-    return c.json({ commissions: await commissions.listCommissions(c.get("deps").db, c.get("ctx"), { affiliateId: q.affiliateId, status: q.status as never, programId: q.programId, limit: q.limit ? Number(q.limit) : undefined }) });
+    const { db } = c.get("deps");
+    const ctx = c.get("ctx");
+    const rows = await commissions.listCommissions(db, ctx, { affiliateId: q.affiliateId, status: q.status as never, programId: q.programId, limit: q.limit ? Number(q.limit) : undefined });
+    const names = await affiliates.affiliateNames(db, ctx, rows.map((r) => r.affiliateId));
+    return c.json({ commissions: rows.map((r) => ({ ...r, affiliateName: names.get(r.affiliateId) ?? null })) });
   });
   r.get("/:id", async (c) => c.json({ commission: await commissions.getCommission(c.get("deps").db, c.get("ctx"), c.req.param("id")) }));
   r.post("/:id/approve", async (c) => {

@@ -8,14 +8,13 @@ import { Alert, CopyBox, Loading, PageHeader } from "@/components/ui";
 export default function PortalOffers() {
   const { data, error } = useApi<any>("/portal/offers");
   const { data: links, reload } = useApi<any>("/portal/links");
-  const { busy, error: actionError, run } = useAction();
+  const { busy, run } = useAction();
   if (!data) return <Loading error={error} />;
   const linkFor = (offerId: string, programId: string) => links?.links?.find((l: any) => l.offerId === offerId && l.programId === programId && !l.label);
 
   return (
     <>
       <PageHeader title="Offers" subtitle="Everything you're eligible to promote, with your commission." />
-      <Alert kind="error">{actionError}</Alert>
       {data.offers.length === 0 ? <div className="card empty">No active offers yet.</div> : null}
       <div className="grid cols-2">
         {data.offers.map((o: any) => {

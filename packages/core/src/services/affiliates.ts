@@ -1,4 +1,4 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import type { DbLike } from "../db/client";
 import { withTx } from "../db/client";
@@ -354,6 +354,15 @@ export async function listAffiliates(db: DbLike, ctx: TenantContext, filter: { s
     .from(affiliates)
     .where(and(eq(affiliates.tenantId, ctx.tenantId), filter.status ? eq(affiliates.status, filter.status) : undefined))
     .orderBy(desc(affiliates.createdAt));
+}
+
+/** Names for a set of affiliates, whatever their status: lists of money must never fall back to showing an id. */
+export async function affiliateNames(db: DbLike, ctx: TenantContext, affiliateIds: string[]): Promise<Map<string, string>> {
+  requirePerm(ctx, "read");
+  const ids = [...new Set(affiliateIds)];
+  if (!ids.length) return new Map();
+  const rows = await db.select({ id: affiliates.id, name: affiliates.name }).from(affiliates).where(and(eq(affiliates.tenantId, ctx.tenantId), inArray(affiliates.id, ids)));
+  return new Map(rows.map((r) => [r.id, r.name]));
 }
 
 export async function listMemberships(db: DbLike, ctx: TenantContext, affiliateId: string): Promise<AffiliateProgram[]> {

@@ -70,6 +70,44 @@ describe("commission lifecycle and payouts (PRD s12)", () => {
     expect((await commissions.getCommission(db, ws.ctx, later.commission!.id)).status).toBe("pending"); // the other one still waits
   });
 
+  it("a sale is approved by what happens to its money: when its commission becomes payable, by the clock or by hand, and never a refunded or disputed one", async () => {
+    const kim = await createActiveAffiliate(db, ws, "Kim");
+    const byClock = await sale(kim, "auto-approve-1", 10_000);
+    const byHand = await sale(kim, "auto-approve-2", 10_000);
+    const refunded = await sale(kim, "auto-approve-3", 10_000);
+    const disputed = await sale(kim, "auto-approve-4", 10_000);
+    await conversions.refundConversion(db, ws.ctx, { conversionId: refunded.conversion.id, amountMinor: 1_000, reason: "one item back" });
+    await conversions.disputeConversion(db, ws.ctx, disputed.conversion.id, "checking the referral");
+    const status = async (id: string) => (await conversions.getConversion(db, ws.ctx, id)).status;
+    expect(await status(byClock.conversion.id)).toBe("pending");
+
+    await commissions.releaseCommission(db, ws.ctx, byHand.commission!.id);
+    expect(await status(byHand.conversion.id)).toBe("approved");
+    expect(await status(byClock.conversion.id)).toBe("pending"); // its holding period is still running
+
+    clock.advanceDays(31);
+    await commissions.settleHoldingPeriods(db, ws.ctx, clock.now());
+    expect(await status(byClock.conversion.id)).toBe("approved");
+    expect(await status(refunded.conversion.id)).toBe("refunded");
+    expect(await status(disputed.conversion.id)).toBe("disputed");
+    // the approval is on the audit trail with its cause
+    const { listAudit } = await import("../src/services/audit");
+    const trail = await listAudit(db, ws.ctx, { entityType: "conversion", entityId: byClock.conversion.id });
+    expect(trail.find((e) => e.action === "status:approved")).toMatchObject({ reason: "holding period elapsed" });
+  });
+
+  it("names the affiliates behind a list of money, whatever their status", async () => {
+    const affiliatesSvc = await import("../src/services/affiliates");
+    const lee = await createActiveAffiliate(db, ws, "Lee");
+    const mo = await createActiveAffiliate(db, ws, "Mo");
+    await affiliatesSvc.suspendAffiliate(db, ws.ctx, mo.id, "paused");
+    const names = await affiliatesSvc.affiliateNames(db, ws.ctx, [lee.id, mo.id, mo.id, "aff_missing"]);
+    expect([...names.entries()].sort()).toEqual([[lee.id, "Lee"], [mo.id, "Mo"]].sort());
+    expect((await affiliatesSvc.affiliateNames(db, ws.ctx, [])).size).toBe(0);
+    const other = await createWorkspace(db, clock);
+    expect((await affiliatesSvc.affiliateNames(db, other.ctx, [lee.id])).size).toBe(0);
+  });
+
   it("a disputed sale's commission cannot be released by hand", async () => {
     const jo = await createActiveAffiliate(db, ws, "Jo");
     const s = await sale(jo, "release-disputed", 10_000);

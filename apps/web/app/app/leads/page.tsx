@@ -6,6 +6,7 @@ import { api } from "@/lib/api";
 import { useAction, useApi } from "@/lib/hooks";
 import { dateTime, money } from "@/lib/format";
 import { Alert, Badge, Field, PageHeader, Stat, Table } from "@/components/ui";
+import { askReason } from "@/components/dialog";
 
 const FILTERS = [
   ["pending", "To review"],
@@ -20,7 +21,7 @@ export default function LeadsPage() {
   const { data, error, reload } = useApi<any>(`/v1/leads${filter ? `?disposition=${filter}` : ""}`, [filter]);
   const { data: programs } = useApi<any>("/v1/programs");
   const { data: affiliates } = useApi<any>("/v1/affiliates?status=active");
-  const { busy, error: actionError, success, run } = useAction();
+  const { busy, run } = useAction();
   const [show, setShow] = useState(false);
   const [form, setForm] = useState({ name: "", email: "", phone: "", company: "", programId: "", affiliateId: "", couponCode: "", reason: "" });
   const leadPrograms = (programs?.programs ?? []).filter((p: any) => p.leadsEnabled);
@@ -46,8 +47,7 @@ export default function LeadsPage() {
           </>
         }
       />
-      <Alert kind="error">{error ?? actionError}</Alert>
-      <Alert kind="success">{success}</Alert>
+      <Alert kind="error">{error}</Alert>
       <div className="grid cols-4" style={{ marginBottom: 16 }}>
         <Stat label="To review" value={s?.pending ?? "…"} hint="waiting for a decision" />
         <Stat label="Qualified" value={s?.qualified ?? "…"} hint="commission approved" />
@@ -182,8 +182,15 @@ export default function LeadsPage() {
                     <button
                       className="sm danger"
                       disabled={busy}
-                      onClick={() => {
-                        const note = window.prompt("Why is this lead disqualified? (recorded, and the commission is voided)");
+                      onClick={async () => {
+                        const note = await askReason({
+                          title: "Disqualify this lead?",
+                          body: "Its commission is voided, and your reason is kept on the lead.",
+                          label: "Why it does not qualify",
+                          placeholder: "Fake details, outside our market, already a customer…",
+                          confirmLabel: "Disqualify",
+                          danger: true,
+                        });
                         if (note) run(() => api(`/v1/leads/${r.lead.id}/disqualify`, { method: "POST", json: { note } }), "Lead disqualified.").then(reload);
                       }}
                     >

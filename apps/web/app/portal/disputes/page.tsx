@@ -11,7 +11,7 @@ const KIND: Record<string, string> = { attribution: "Missing attribution", amoun
 export default function PortalDisputes() {
   const { data, error, reload } = useApi<any>("/portal/disputes");
   const { data: conv } = useApi<any>("/portal/conversions");
-  const { busy, error: actionError, success, run } = useAction();
+  const { busy, success, run } = useAction();
   const [form, setForm] = useState({ kind: "attribution", conversionId: "", orderReference: "", reason: "" });
   const [open, setOpen] = useState<string | null>(null);
   const { data: detail, reload: reloadDetail } = useApi<any>(open ? `/portal/disputes/${open}` : null);
@@ -20,8 +20,7 @@ export default function PortalDisputes() {
   return (
     <>
       <PageHeader title="Disputes" subtitle="Think a sale is missing or a commission is wrong? Raise it here and the merchant will review it." />
-      <Alert kind="error">{error ?? actionError}</Alert>
-      <Alert kind="success">{success}</Alert>
+      <Alert kind="error">{error}</Alert>
       <div className="grid cols-2">
         <div className="card">
           <h2>Raise a dispute</h2>

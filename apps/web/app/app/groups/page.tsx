@@ -11,7 +11,7 @@ const KIND_LABEL: Record<string, string> = { partner_type: "Partner type", chann
 export default function GroupsPage() {
   const { data, error, reload } = useApi<any>("/v1/groups");
   const { data: affiliates } = useApi<any>("/v1/affiliates");
-  const { busy, error: actionError, success, run } = useAction();
+  const { busy, run } = useAction();
   const [form, setForm] = useState({ name: "", kind: "partner_type", description: "" });
   const [open, setOpen] = useState<string | null>(null);
   const { data: members, reload: reloadMembers } = useApi<any>(open ? `/v1/groups/${open}/members` : null);
@@ -23,8 +23,7 @@ export default function GroupsPage() {
   return (
     <>
       <PageHeader title="Groups" subtitle="Classify affiliates by partner type, channel, geography or negotiated rate. Groups drive tiers, asset access, campaign invites and automation." />
-      <Alert kind="error">{error ?? actionError}</Alert>
-      <Alert kind="success">{success}</Alert>
+      <Alert kind="error">{error}</Alert>
       <div className="grid cols-2">
         <div className="card">
           <h2>New group</h2>

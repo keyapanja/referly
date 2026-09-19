@@ -9,13 +9,13 @@ export default function PortalLinks() {
   const { data, error, reload } = useApi<any>("/portal/links");
   const { data: codes } = useApi<any>("/portal/codes");
   const { data: offers } = useApi<any>("/portal/offers");
-  const { busy, error: actionError, run } = useAction();
+  const { busy, run } = useAction();
   const [form, setForm] = useState({ offer: "", label: "" });
 
   return (
     <>
       <PageHeader title="Links & Codes" subtitle="Each link is unique to you. Add a label to track different placements (newsletter, bio, video)." />
-      <Alert kind="error">{error ?? actionError}</Alert>
+      <Alert kind="error">{error}</Alert>
       <div className="card">
         <h2>Create a labelled link</h2>
         <form

@@ -12,7 +12,7 @@ const NEXT: Record<string, string[]> = { draft: ["active", "archived"], active: 
 export default function OffersPage() {
   const { data: me } = useApi<any>("/v1/tenant/me");
   const { data, error, reload } = useApi<any>("/v1/offers");
-  const { busy, error: actionError, run } = useAction();
+  const { busy, run } = useAction();
   const [show, setShow] = useState(false);
   const [form, setForm] = useState({ name: "", type: "coaching", price: "", salesUrl: "", shortDescription: "" });
   const cur = me?.tenant?.currency ?? "USD";
@@ -20,7 +20,7 @@ export default function OffersPage() {
   return (
     <>
       <PageHeader title="Offers" subtitle="Products and services affiliates can promote." actions={<button className="primary" onClick={() => setShow(!show)}>New offer</button>} />
-      <Alert kind="error">{error ?? actionError}</Alert>
+      <Alert kind="error">{error}</Alert>
       {show && (
         <div className="card">
           <h2>New offer</h2>

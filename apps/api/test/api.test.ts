@@ -210,8 +210,15 @@ describe("MVP acceptance over HTTP", () => {
     expect(tooEarly.body.error.message).toContain("5000.00 INR");
     expect(tooEarly.body.error.details).toMatchObject({ heldMinor: 500_000, heldCount: 1 });
 
+    // money lists name the affiliate themselves, so a row never falls back to showing an id
+    const listed = await call("/v1/commissions", { token: ownerToken });
+    expect(listed.body.commissions.find((c: any) => c.id === commissionId)).toMatchObject({ affiliateName: "Sam Partner", status: "pending" });
+    expect((await call(`/v1/conversions/${conversionId}`, { token: ownerToken })).body.conversion.status).toBe("pending");
+
     const settle = await call("/v1/commissions/settle", { method: "POST", token: ownerToken });
     expect(settle.body.settled.map((s: any) => s.id)).toContain(commissionId);
+    // the sale is approved by its money becoming payable; nobody clicks Approve on it
+    expect((await call(`/v1/conversions/${conversionId}`, { token: ownerToken })).body.conversion.status).toBe("approved");
 
     const payable = await call(`/v1/payouts/payable/${affiliateId}`, { token: ownerToken });
     expect(payable.body.totalMinor).toBe(500_000);

@@ -7,13 +7,14 @@ import { api } from "@/lib/api";
 import { useAction, useApi } from "@/lib/hooks";
 import { dateTime, money, toMinor } from "@/lib/format";
 import { Alert, Badge, Field, Loading, PageHeader, Table } from "@/components/ui";
+import { askReason } from "@/components/dialog";
 
 export default function ConversionDetail() {
   const { id } = useParams<{ id: string }>();
   const { data, error, reload } = useApi<any>(`/v1/conversions/${id}`);
   const { data: audit, reload: reloadAudit } = useApi<any>(`/v1/tenant/audit?entityType=conversion&entityId=${id}`);
   const { data: affiliates } = useApi<any>("/v1/affiliates?status=active");
-  const { busy, error: actionError, run } = useAction();
+  const { busy, run } = useAction();
   const [refund, setRefund] = useState({ amount: "", reason: "" });
   const [reattr, setReattr] = useState({ affiliateId: "", reason: "" });
 
@@ -36,17 +37,18 @@ export default function ConversionDetail() {
         }
         actions={
           <>
-            {c.status === "pending" && (
-              <button disabled={busy} onClick={() => run(() => api(`/v1/conversions/${id}/approve`, { method: "POST" })).then(refresh)}>
-                Approve
-              </button>
-            )}
             {["pending", "approved"].includes(c.status) && (
               <button
                 disabled={busy}
-                onClick={() => {
-                  const r = window.prompt("Dispute reason:");
-                  if (r) run(() => api(`/v1/conversions/${id}/dispute`, { method: "POST", json: { reason: r } })).then(refresh);
+                onClick={async () => {
+                  const r = await askReason({
+                    title: "Put this sale on hold?",
+                    body: "A dispute is opened and the commission is not paid until you resolve it. The affiliate is told their sale is under review.",
+                    label: "What needs checking",
+                    placeholder: "Suspected self-referral, customer says they never clicked…",
+                    confirmLabel: "Open dispute",
+                  });
+                  if (r) run(() => api(`/v1/conversions/${id}/dispute`, { method: "POST", json: { reason: r } }), "Sale on hold; dispute opened.").then(refresh);
                 }}
               >
                 Dispute
@@ -56,9 +58,17 @@ export default function ConversionDetail() {
               <button
                 className="danger"
                 disabled={busy}
-                onClick={() => {
-                  const r = window.prompt("Cancel reason:");
-                  if (r) run(() => api(`/v1/conversions/${id}/cancel`, { method: "POST", json: { reason: r } })).then(refresh);
+                onClick={async () => {
+                  const r = await askReason({
+                    title: "Cancel this sale?",
+                    body: "The sale no longer counts and its commission is voided. This cannot be undone; for money returned to the customer, record a refund instead.",
+                    label: "Reason",
+                    placeholder: "Test order, order never fulfilled…",
+                    confirmLabel: "Cancel sale",
+                    cancelLabel: "Keep it",
+                    danger: true,
+                  });
+                  if (r) run(() => api(`/v1/conversions/${id}/cancel`, { method: "POST", json: { reason: r } }), "Sale cancelled.").then(refresh);
                 }}
               >
                 Cancel
@@ -67,7 +77,7 @@ export default function ConversionDetail() {
           </>
         }
       />
-      <Alert kind="error">{error ?? actionError}</Alert>
+      <Alert kind="error">{error}</Alert>
       <div className="grid cols-2">
         <div className="card">
           <h2>Order</h2>

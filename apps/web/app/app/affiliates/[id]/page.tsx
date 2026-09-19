@@ -7,6 +7,7 @@ import { api, API_URL } from "@/lib/api";
 import { useAction, useApi } from "@/lib/hooks";
 import { date, dateTime, money } from "@/lib/format";
 import { Alert, Badge, CopyBox, Field, Loading, PageHeader, Stat, Table } from "@/components/ui";
+import { askReason } from "@/components/dialog";
 
 export default function AffiliateDetail() {
   const { id } = useParams<{ id: string }>();
@@ -16,7 +17,7 @@ export default function AffiliateDetail() {
   const { data: programs } = useApi<any>("/v1/programs");
   const { data: allGroups } = useApi<any>("/v1/groups");
   const [groupPick, setGroupPick] = useState("");
-  const { busy, error: actionError, success, run } = useAction();
+  const { busy, run } = useAction();
   const [reason, setReason] = useState("");
   const [coupon, setCoupon] = useState({ code: "", programId: "" });
   const [override, setOverride] = useState({ programId: "", percent: "", reason: "" });
@@ -56,9 +57,16 @@ export default function AffiliateDetail() {
               <button
                 className="danger"
                 disabled={busy}
-                onClick={() => {
-                  const r = window.prompt("Reason for suspension (required):");
-                  if (r) run(() => api(`/v1/affiliates/${id}/suspend`, { method: "POST", json: { reason: r } })).then(refresh);
+                onClick={async () => {
+                  const r = await askReason({
+                    title: `Suspend ${a.name}?`,
+                    body: "Their links stop tracking and they earn nothing new until you reactivate them. What they have already earned is untouched.",
+                    label: "Reason",
+                    placeholder: "Broke the program terms, asked to pause…",
+                    confirmLabel: "Suspend",
+                    danger: true,
+                  });
+                  if (r) run(() => api(`/v1/affiliates/${id}/suspend`, { method: "POST", json: { reason: r } }), `${a.name} suspended.`).then(refresh);
                 }}
               >
                 Suspend
@@ -73,8 +81,15 @@ export default function AffiliateDetail() {
               <button
                 className="danger"
                 disabled={busy}
-                onClick={() => {
-                  const r = window.prompt(`Erase ${a.name}'s personal data? Name, email, phone, payout details and messages are replaced with placeholders and their portal login is disabled. Sales, commissions and payouts stay. This cannot be undone. Type a reason to confirm:`);
+                onClick={async () => {
+                  const r = await askReason({
+                    title: `Erase ${a.name}'s personal data?`,
+                    body: "Name, email, phone, payout details and messages are replaced with placeholders and their portal login is disabled. Sales, commissions and payouts stay. This cannot be undone.",
+                    label: "Reason",
+                    placeholder: "Erasure request received on…",
+                    confirmLabel: "Erase personal data",
+                    danger: true,
+                  });
                   if (r) run(() => api(`/v1/affiliates/${id}/erase`, { method: "POST", json: { reason: r } }), "Personal data erased.").then(refresh);
                 }}
               >
@@ -85,8 +100,7 @@ export default function AffiliateDetail() {
         }
       />
       {a.erasedAt ? <Alert kind="info">Personal data erased {dateTime(a.erasedAt)}. Financial records are kept for the books.</Alert> : null}
-      <Alert kind="error">{error ?? actionError}</Alert>
-      <Alert kind="success">{success}</Alert>
+      <Alert kind="error">{error}</Alert>
       <div className="grid cols-4" style={{ marginBottom: 16 }}>
         <Stat label="Pending" value={money(data.balances.pendingMinor, cur)} hint="in holding period" />
         <Stat label="Available" value={money(data.balances.availableMinor, cur)} hint="payable now" />

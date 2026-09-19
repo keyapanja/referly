@@ -15,7 +15,7 @@ export default function DisputeDetail() {
   const { data, error, reload } = useApi<any>(`/v1/disputes/${id}`);
   const { data: affiliates } = useApi<any>("/v1/affiliates?status=active");
   const { data: programs } = useApi<any>("/v1/programs");
-  const { busy, error: actionError, success, run } = useAction();
+  const { busy, run } = useAction();
   const [comment, setComment] = useState("");
   const [link, setLink] = useState("");
   const [res, setRes] = useState({ resolution: "upheld", outcome: "restore", note: "", affiliateId: "", programId: "" });
@@ -36,8 +36,6 @@ export default function DisputeDetail() {
         }
         actions={d.status === "open" ? <button disabled={busy} onClick={() => run(() => api(`/v1/disputes/${id}/review`, { method: "POST" }), "Marked under review.").then(reload)}>Start review</button> : null}
       />
-      <Alert kind="error">{actionError}</Alert>
-      <Alert kind="success">{success}</Alert>
       <div className="grid cols-2">
         <div className="card">
           <h2>Claim</h2>

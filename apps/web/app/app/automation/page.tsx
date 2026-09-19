@@ -11,7 +11,7 @@ import { RuleBuilder, emptyRule, type RuleDraft } from "@/components/rule-builde
 export default function AutomationPage() {
   const { data, error, reload } = useApi<any>("/v1/automation/rules");
   const { data: catalog } = useApi<any>("/v1/automation/catalog");
-  const { busy, error: actionError, success, run } = useAction();
+  const { busy, run } = useAction();
   const [draft, setDraft] = useState<RuleDraft | null>(null);
   const label = (t: string) => catalog?.triggers?.find((x: any) => x.type === t)?.label ?? t;
 
@@ -22,8 +22,7 @@ export default function AutomationPage() {
         subtitle="Deterministic rules: when an event happens and the conditions hold, run the actions. Every run is logged."
         actions={<button className="primary" onClick={() => setDraft(draft ? null : emptyRule())}>{draft ? "Close" : "New rule"}</button>}
       />
-      <Alert kind="error">{error ?? actionError}</Alert>
-      <Alert kind="success">{success}</Alert>
+      <Alert kind="error">{error}</Alert>
       {draft && catalog ? (
         <div className="card">
           <h2>New rule</h2>

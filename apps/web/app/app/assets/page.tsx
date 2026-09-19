@@ -19,7 +19,7 @@ export default function AssetsPage() {
   const { data: programs } = useApi<any>("/v1/programs");
   const { data: affiliates } = useApi<any>("/v1/affiliates?status=active");
   const { data: groupsData } = useApi<any>("/v1/groups");
-  const { busy, error: actionError, success, run } = useAction();
+  const { busy, run } = useAction();
   const [show, setShow] = useState(false);
   const [form, setForm] = useState(emptyForm);
   const bodyRef = useRef<HTMLTextAreaElement>(null);
@@ -116,8 +116,7 @@ export default function AssetsPage() {
           </>
         }
       />
-      <Alert kind="error">{error ?? actionError}</Alert>
-      <Alert kind="success">{success}</Alert>
+      <Alert kind="error">{error}</Alert>
       {show && (
         <div className="card">
           <h2>New asset</h2>

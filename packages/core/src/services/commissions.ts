@@ -212,8 +212,23 @@ export async function releaseCommission(db: DbLike, ctx: TenantContext, commissi
   if (conversion?.status === "disputed") throw validation("this sale is disputed: resolve the dispute before releasing its commission");
   const now = ctx.now();
   const after = await setStatus(db, ctx, before, "payable", { approvedAt: before.approvedAt ?? now, payableAt: now }, reason ?? "holding period ended by hand");
+  if (conversion?.status === "pending") await approveSale(db, ctx, conversion.id, "its commission was released for payment");
   await emitEvent(db, ctx, "commission.payable", { type: "commission", id: commissionId }, { affiliateId: after.affiliateId, amountMinor: after.amountMinor, currency: after.currency, released: true });
   return after;
+}
+
+/**
+ * A sale is approved by what happens to its money, not by a button: once its commission is
+ * payable the sale has survived its holding period (or the merchant chose to pay early), and that
+ * is what "approved" means. Only a pending sale moves; refunded, disputed and cancelled ones stay.
+ */
+async function approveSale(db: DbLike, ctx: TenantContext, conversionId: string, reason: string): Promise<void> {
+  const updated = await db
+    .update(conversions)
+    .set({ status: "approved", updatedAt: ctx.now() })
+    .where(and(eq(conversions.id, conversionId), eq(conversions.tenantId, ctx.tenantId), eq(conversions.status, "pending")))
+    .returning({ id: conversions.id });
+  if (updated.length) await writeAudit(db, ctx, { entityType: "conversion", entityId: conversionId, action: "status:approved", before: { status: "pending" }, after: { status: "approved" }, reason });
 }
 
 /**
@@ -232,6 +247,7 @@ export async function settleHoldingPeriods(db: DbLike, ctx: TenantContext, now: 
   for (const { commission, conversionStatus } of due) {
     if (conversionStatus === "disputed") continue;
     const after = await setStatus(db, ctx, commission, "payable", { approvedAt: commission.approvedAt ?? now }, "holding period elapsed");
+    if (conversionStatus === "pending") await approveSale(db, ctx, commission.conversionId, "holding period elapsed");
     await emitEvent(db, ctx, "commission.payable", { type: "commission", id: after.id }, { affiliateId: after.affiliateId, amountMinor: after.amountMinor, currency: after.currency });
     settled.push(after);
   }

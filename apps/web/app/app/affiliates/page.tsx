@@ -7,13 +7,14 @@ import { api } from "@/lib/api";
 import { useAction, useApi } from "@/lib/hooks";
 import { date } from "@/lib/format";
 import { Alert, Badge, CopyBox, Field, PageHeader, Table } from "@/components/ui";
+import { StatusFilter, STATUS_OPTIONS } from "@/components/status-filter";
 
 function AffiliatesList() {
   const params = useSearchParams();
   const status = params.get("status") ?? "";
   const { data, error, reload } = useApi<any>(`/v1/affiliates${status ? `?status=${status}` : ""}`);
   const { data: programs } = useApi<any>("/v1/programs?status=active");
-  const { busy, error: actionError, run } = useAction();
+  const { busy, run } = useAction();
   const [mode, setMode] = useState<"" | "invite" | "create">("");
   const [invite, setInvite] = useState({ email: "", name: "", programId: "" });
   const [create, setCreate] = useState({ name: "", email: "", programId: "" });
@@ -26,14 +27,7 @@ function AffiliatesList() {
         subtitle="Applications, active partners and their performance."
         actions={
           <>
-            <select value={status} onChange={(e) => (window.location.search = e.target.value ? `?status=${e.target.value}` : "")}>
-              <option value="">All statuses</option>
-              {["applied", "active", "suspended", "rejected"].map((s) => (
-                <option key={s} value={s}>
-                  {s}
-                </option>
-              ))}
-            </select>
+            <StatusFilter options={STATUS_OPTIONS.affiliates} />
             <button onClick={() => setMode(mode === "create" ? "" : "create")}>Add manually</button>
             <button className="primary" onClick={() => setMode(mode === "invite" ? "" : "invite")}>
               Invite
@@ -41,7 +35,7 @@ function AffiliatesList() {
           </>
         }
       />
-      <Alert kind="error">{error ?? actionError}</Alert>
+      <Alert kind="error">{error}</Alert>
       {acceptUrl ? (
         <Alert kind="success">
           Invitation sent. Accept link: <CopyBox value={acceptUrl} />

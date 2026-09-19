@@ -6,6 +6,7 @@ import { api } from "@/lib/api";
 import { useAction, useApi } from "@/lib/hooks";
 import { dateTime } from "@/lib/format";
 import { Alert, Badge, Field, Loading, PageHeader, Table } from "@/components/ui";
+import { askReason } from "@/components/dialog";
 
 const LIMIT_KEYS = ["activeAffiliates", "programs", "teamMembers", "monthlyConversions"] as const;
 const LABELS: Record<string, string> = { activeAffiliates: "Active affiliates", programs: "Programs", teamMembers: "Team members", monthlyConversions: "Conversions / month" };
@@ -13,7 +14,7 @@ const LABELS: Record<string, string> = { activeAffiliates: "Active affiliates", 
 export default function AdminTenantDetail() {
   const { id } = useParams<{ id: string }>();
   const { data, error, reload } = useApi<any>(`/admin/tenants/${id}`);
-  const { busy, error: actionError, success, run } = useAction();
+  const { busy, run } = useAction();
   const [planId, setPlanId] = useState("starter");
   const [overrides, setOverrides] = useState<Record<string, string>>({});
   const [reason, setReason] = useState("");
@@ -67,8 +68,14 @@ export default function AdminTenantDetail() {
               <button
                 className="danger"
                 disabled={busy}
-                onClick={() => {
-                  const r = window.prompt(`Close ${t.name}? Everyone is signed out now, and every record and file of this workspace is permanently deleted after the grace period. Type a reason to confirm:`);
+                onClick={async () => {
+                  const r = await askReason({
+                    title: `Close ${t.name}?`,
+                    body: "Everyone is signed out now, and every record and file of this workspace is permanently deleted after the grace period.",
+                    label: "Reason",
+                    confirmLabel: "Close workspace",
+                    danger: true,
+                  });
                   if (r) run(() => api(`/admin/tenants/${id}`, { method: "PATCH", json: { status: "closed", reason: r } }), "Workspace closed; purge scheduled.").then(reload);
                 }}
               >
@@ -83,8 +90,6 @@ export default function AdminTenantDetail() {
           Closed {dateTime(t.closedAt)}. Rows and files are purged by the nightly retention job once the grace period (TENANT_PURGE_DAYS, 30 by default) has passed. Reopen before then to keep everything.
         </Alert>
       ) : null}
-      <Alert kind="error">{actionError}</Alert>
-      <Alert kind="success">{success}</Alert>
       <div className="grid cols-2">
         <div className="card">
           <h2>Plan and limits</h2>

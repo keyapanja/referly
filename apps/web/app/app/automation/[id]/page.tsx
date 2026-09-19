@@ -13,7 +13,7 @@ export default function AutomationRulePage() {
   const { data, error, reload } = useApi<any>(`/v1/automation/rules/${id}`);
   const { data: runs, reload: reloadRuns } = useApi<any>(`/v1/automation/rules/${id}/runs`);
   const { data: catalog } = useApi<any>("/v1/automation/catalog");
-  const { busy, error: actionError, success, run } = useAction();
+  const { busy, success, run } = useAction();
   const [draft, setDraft] = useState<RuleDraft | null>(null);
   const [editing, setEditing] = useState(false);
   useEffect(() => {
@@ -41,8 +41,6 @@ export default function AutomationRulePage() {
           </>
         }
       />
-      <Alert kind="error">{actionError}</Alert>
-      <Alert kind="success">{success}</Alert>
       {editing && draft ? (
         <div className="card">
           <h2>Edit rule</h2>

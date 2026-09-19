@@ -75,7 +75,7 @@ export function NotificationsPage({ base }: { base: "/v1/notifications" | "/port
   const [filter, setFilter] = useState<"unread" | "all">("unread");
   const { data, error, reload } = useApi<any>(`${base}?limit=100${filter === "unread" ? "&unread=1" : ""}`, [filter]);
   const { data: prefs, reload: reloadPrefs } = useApi<any>(`${base}/preferences`);
-  const { busy, error: actionError, run } = useAction();
+  const { busy, error: actionError, run } = useAction({ inline: true });
   const isPortal = base === "/portal/notifications";
 
   async function open(n: any) {
