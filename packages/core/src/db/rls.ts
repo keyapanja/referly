@@ -85,5 +85,5 @@ export const RLS_TABLES = [
   "exports",
   "notifications",
   "leads",
-  "journey_events",
+  "journey_stats",
 ] as const;

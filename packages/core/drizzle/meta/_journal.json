@@ -127,6 +127,20 @@
       "when": 1788952984830,
       "tag": "0017_journey_consent",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1789793721418,
+      "tag": "0018_journey_stats",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1789793734644,
+      "tag": "0019_drop_journey_events",
+      "breakpoints": true
     }
   ]
 }

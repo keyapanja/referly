@@ -110,6 +110,12 @@ describe("WordPress plugin", () => {
     expect(php).toContain(`'referly_vid' => '/${journeys.VISITOR_ID.source}/'`);
     expect(php).toContain("'referly_ref' =>");
     expect(php).toContain("rfly1_");
+    // it tells the tracking code which page is the checkout (never the order-received page), and passes on the merchant's own checkout addresses
+    expect(php).toContain("is_checkout()");
+    expect(php).toContain("is_order_received_page()");
+    expect(php).toContain(`data-page="`);
+    expect(php).toContain("$tracking['checkoutPaths']");
+    expect(php).toContain(`data-checkout="`);
     // orders without an affiliate click or coupon never leave the store, and a skipped answer is understood
     expect(php).toContain("! $order->get_coupon_codes()");
     expect(php).toContain("'recorded'");
@@ -148,11 +154,11 @@ describe("WordPress plugin", () => {
     expect(conn.status).toBe(200);
     expect(conn.body).toEqual({
       workspace: { id: expect.stringMatching(/^ten_/), name: "WP Shop", currency: "USD" },
-      tracking: { enabled: true, siteKey, scriptUrl: `${BASE}/referly.js`, apiUrl: BASE, consentMode: "off" },
+      tracking: { enabled: true, siteKey, scriptUrl: `${BASE}/referly.js`, apiUrl: BASE, consentMode: "off", checkoutPaths: [] },
     });
-    await call("/v1/tenant/tracking", { method: "PATCH", token: ownerToken, json: { consentMode: "wait" } });
-    expect((await call("/v1/connection", { token: pluginKey })).body.tracking.consentMode).toBe("wait");
-    await call("/v1/tenant/tracking", { method: "PATCH", token: ownerToken, json: { consentMode: "off" } });
+    await call("/v1/tenant/tracking", { method: "PATCH", token: ownerToken, json: { consentMode: "wait", checkoutPaths: ["/enroll"] } });
+    expect((await call("/v1/connection", { token: pluginKey })).body.tracking).toMatchObject({ consentMode: "wait", checkoutPaths: ["/enroll"] });
+    await call("/v1/tenant/tracking", { method: "PATCH", token: ownerToken, json: { consentMode: "off", checkoutPaths: [] } });
 
     expect((await call("/v1/connection")).status).toBe(401);
     expect((await call("/v1/connection", { token: "rk_live_notakey" })).status).toBe(401);

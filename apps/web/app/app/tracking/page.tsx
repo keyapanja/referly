@@ -224,12 +224,14 @@ export default function TrackingPage() {
   const [domains, setDomains] = useState<string | null>(null);
   const [pixel, setPixel] = useState(false);
   const [consent, setConsent] = useState(false);
+  const [checkout, setCheckout] = useState("");
 
   useEffect(() => {
     if (data && domains === null) {
       setDomains((data.domains ?? []).join(", "));
       setPixel(!!data.pixelConversions);
       setConsent(data.consentMode === "wait");
+      setCheckout((data.checkoutPaths ?? []).join(", "));
     }
   }, [data, domains]);
 
@@ -296,8 +298,8 @@ export default function TrackingPage() {
       <div className="grid cols-4" style={{ marginBottom: 16 }}>
         <Stat label="Status" value={data.lastEventAt ? "Receiving" : "Waiting"} hint={data.lastEventAt ? `last event ${dateTime(data.lastEventAt)}` : "no events yet"} />
         <Stat label="Reporting from" value={data.lastEventHost ?? "—"} hint="the host of the last event" />
-        <Stat label="Events" value={data.events7d} hint="last 7 days" />
         <Stat label="Visitors" value={data.visitors7d} hint="last 7 days" />
+        <Stat label="Reached checkout" value={data.checkouts7d} hint="last 7 days" />
       </div>
 
       {!data.lastEventAt ? <Alert kind="info">Nothing has arrived yet. Paste the code below on your site, then load any page of it: this turns to “Receiving” within a few seconds.</Alert> : null}
@@ -329,12 +331,26 @@ export default function TrackingPage() {
         <form
           onSubmit={async (e) => {
             e.preventDefault();
-            const ok = await run(() => api("/v1/tenant/tracking", { method: "PATCH", json: { domains: domainList, pixelConversions: pixel, consentMode: consent ? "wait" : "off" } }), "Saved.");
+            const checkoutPaths = checkout
+              .split(/[,\n]+/)
+              .map((p) => p.trim())
+              .filter(Boolean);
+            const ok = await run(() => api("/v1/tenant/tracking", { method: "PATCH", json: { domains: domainList, pixelConversions: pixel, consentMode: consent ? "wait" : "off", checkoutPaths } }), "Saved.");
             if (ok) reload();
           }}
         >
           <Field label="Your website domains">
             <input value={domains ?? ""} onChange={(e) => setDomains(e.target.value)} placeholder="shop.example.com, example.com" />
+          </Field>
+          <Field
+            label="Checkout page addresses (optional)"
+            help={
+              <>
+                Journeys counts how many people reach your checkout. It recognises one by &ldquo;checkout&rdquo; in the address, and the WordPress plugin points it out directly, so most sites leave this empty. If yours lives somewhere else, list that part of the address, then copy the code in step 1 again: it gains <span className="mono">data-checkout</span>.
+              </>
+            }
+          >
+            <input value={checkout} onChange={(e) => setCheckout(e.target.value)} placeholder="/buy, /enroll" />
           </Field>
 
           <h3>Options</h3>
@@ -384,7 +400,9 @@ export default function TrackingPage() {
 
       <div className="card">
         <h2>4. Track your own events</h2>
-        <p className="muted">Optional. Anything you want to see on a visitor&apos;s journey: added to cart, started a signup, watched a video, booked a demo.</p>
+        <p className="muted">
+          Optional. Anything you want counted on the <Link href="/app/journeys">Journeys</Link> page: added to cart, started a signup, watched a video, booked a demo. Each is counted once per person per day, by name only; nothing else you pass is kept.
+        </p>
         <CodeBlock code={data.examples.event} language="js" />
         <h3>Lead forms</h3>
         <p className="muted">Add these hidden inputs to a form that posts to a program&apos;s capture endpoint; the snippet fills them in, so the lead is attributed even when the form is several pages after the landing.</p>

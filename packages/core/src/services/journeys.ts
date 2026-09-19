@@ -1,7 +1,7 @@
-import { and, asc, desc, eq, gte, inArray, isNotNull, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNotNull, isNull, like, ne, notInArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { DbLike } from "../db/client";
-import { affiliates, clicks, journeyEvents, programs, tenants, type Conversion, type JourneyEvent, type Tenant, type TenantTracking } from "../db/schema";
+import { clicks, conversions, journeyStats, programs, tenants, type Tenant, type TenantTracking } from "../db/schema";
 import { newId, newToken } from "../ids";
 import { validation } from "../errors";
 import { type TenantContext, require as requirePerm } from "../context";
@@ -9,28 +9,30 @@ import { writeAudit } from "./audit";
 import { getTenant } from "./tenants";
 
 /**
- * Website tracking (TRK-09): a first-party snippet on the merchant's own site records the
- * affiliate journey without any checkout work. The snippet keeps the click token the tracking
- * redirect placed in `?ref=`, assigns the visitor a first-party id, and reports page views,
- * custom events and (optionally) orders to public endpoints keyed by the workspace's site key.
+ * Website tracking (TRK-09): a first-party snippet on the merchant's own site reports what the
+ * people affiliates send do there. Nothing is kept per visitor. The snippet remembers, in the
+ * visitor's own browser, which stages it has already reported today (arrived, read half a page,
+ * read to the bottom, reached the checkout), reports each one once, and the server only adds to
+ * daily counters per affiliate and page. Purchases are not reported by the browser at all: they
+ * are counted from the recorded sales.
  *
  * Everything the browser sends is untrusted: the tenant comes from the site key, the affiliate
- * only ever from a click token that resolves inside that tenant, origins are checked against
- * the workspace's domain list, and snippet-reported sales are off unless the merchant turns
- * them on for a fixed set of domains. Journey rows are analytics, never money: a sale is still
- * attributed by the same engine as every other source.
+ * only ever from a click token that resolves inside that tenant, origins are checked against the
+ * workspace's domain list, and the counters are analytics, never money.
  */
-export const JOURNEY_EVENT_TYPES = ["page_view", "event", "conversion", "lead"] as const;
-export type JourneyEventType = (typeof JOURNEY_EVENT_TYPES)[number];
+export const JOURNEY_STAGES = ["visit", "half", "bottom", "checkout"] as const;
+export type JourneyStage = (typeof JOURNEY_STAGES)[number];
 
 /** Snippet-generated ids: short, URL-safe, no lookalikes needed. */
 export const VISITOR_ID = /^[A-Za-z0-9_-]{8,64}$/;
-const MAX_EVENTS_PER_BATCH = 50;
-const MAX_PROPERTIES_BYTES = 2048;
-/** How far back a visitor's earlier click is used when a batch arrives without a ref. */
-const VISITOR_MEMORY_DAYS = 400;
-/** Sessions the listing goes back through. */
-const MAX_SESSION_ROWS = 500;
+const MAX_HITS_PER_BATCH = 50;
+/** Distinct pages and distinct custom event names counted per workspace per day; the rest fold into "(other)" or are dropped. */
+const MAX_PAGES_PER_DAY = 300;
+const MAX_EVENT_NAMES_PER_DAY = 30;
+export const OTHER_PAGE = "(other)";
+const MAX_PAGE_LENGTH = 160;
+/** How often the workspace's "last heard from the snippet" is refreshed. */
+const TOUCH_EVERY_MS = 60_000;
 
 // ---------------------------------------------------------------------------
 // Settings
@@ -42,10 +44,11 @@ export interface TrackingView {
   domains: string[];
   pixelConversions: boolean;
   consentMode: "off" | "wait";
+  checkoutPaths: string[];
   lastEventAt: Date | null;
   lastEventHost: string | null;
-  events7d: number;
   visitors7d: number;
+  checkouts7d: number;
 }
 
 const hostname = z
@@ -57,41 +60,58 @@ const hostname = z
   .regex(/^(?!-)([a-z0-9-]{1,63}\.)+[a-z]{2,63}$|^localhost$/, "enter a hostname such as shop.example.com")
   .transform((h) => h.replace(/^www\./, ""));
 
+/** "/buy", "buy" or a pasted "https://shop.example.com/buy?x=1" all become "/buy". */
+const checkoutPath = z
+  .string()
+  .trim()
+  .min(1)
+  .max(200)
+  .transform((v) => {
+    let path = v;
+    try {
+      if (/^https?:\/\//i.test(v)) path = new URL(v).pathname;
+    } catch {
+      /* not a URL: treat as a path fragment */
+    }
+    path = path.split(/[?#]/)[0]!.toLowerCase();
+    return path.startsWith("/") ? path : `/${path}`;
+  })
+  .refine((p) => p.length > 1 && p.length <= 80 && /^[a-z0-9/._~%-]+$/.test(p), "enter part of the checkout page's address, such as /buy");
+
 export const trackingSettingsSchema = z
   .object({
     domains: z.array(hostname).max(20).optional(),
     pixelConversions: z.boolean().optional(),
     consentMode: z.enum(["off", "wait"]).optional(),
+    checkoutPaths: z.array(checkoutPath).max(10).optional(),
   })
   .strict();
+
+const DAY_MS = 86_400_000;
+/** UTC calendar day, the grain the counters are kept at. */
+export const dayOf = (d: Date): string => d.toISOString().slice(0, 10);
 
 export async function getTracking(db: DbLike, ctx: TenantContext): Promise<TrackingView> {
   requirePerm(ctx, "read");
   const tenant = await getTenant(db, ctx);
-  const since = new Date(ctx.now().getTime() - 7 * 86_400_000);
-  const [stats] = await db
-    .select({
-      events: sql<number>`count(*)`.mapWith(Number),
-      visitors: sql<number>`count(distinct ${journeyEvents.visitorId})`.mapWith(Number),
-    })
-    .from(journeyEvents)
-    .where(and(eq(journeyEvents.tenantId, ctx.tenantId), gte(journeyEvents.occurredAt, since)));
-  const [last] = await db
-    .select({ occurredAt: journeyEvents.occurredAt, url: journeyEvents.url })
-    .from(journeyEvents)
-    .where(and(eq(journeyEvents.tenantId, ctx.tenantId), inArray(journeyEvents.type, ["page_view", "event"])))
-    .orderBy(desc(journeyEvents.occurredAt), desc(journeyEvents.seq))
-    .limit(1);
+  const since = dayOf(new Date(ctx.now().getTime() - 6 * DAY_MS));
+  const rows = await db
+    .select({ stage: journeyStats.stage, n: sql<number>`coalesce(sum(${journeyStats.count}), 0)`.mapWith(Number) })
+    .from(journeyStats)
+    .where(and(eq(journeyStats.tenantId, ctx.tenantId), eq(journeyStats.page, ""), inArray(journeyStats.stage, ["visit", "checkout"]), gte(journeyStats.day, since)))
+    .groupBy(journeyStats.stage);
+  const total = (stage: string) => rows.find((r) => r.stage === stage)?.n ?? 0;
   return {
     enabled: !!tenant.siteKey,
     siteKey: tenant.siteKey,
     domains: tenant.tracking?.domains ?? [],
     pixelConversions: !!tenant.tracking?.pixelConversions,
     consentMode: tenant.tracking?.consentMode ?? "off",
-    lastEventAt: last?.occurredAt ?? null,
-    lastEventHost: last?.url ? hostOf(last.url) : null,
-    events7d: stats?.events ?? 0,
-    visitors7d: stats?.visitors ?? 0,
+    checkoutPaths: tenant.tracking?.checkoutPaths ?? [],
+    lastEventAt: tenant.trackingLastAt ?? null,
+    lastEventHost: tenant.trackingLastHost ?? null,
+    visitors7d: total("visit"),
+    checkouts7d: total("checkout"),
   };
 }
 
@@ -125,6 +145,7 @@ export async function updateTracking(db: DbLike, ctx: TenantContext, rawInput: z
   if (input.domains !== undefined) next.domains = [...new Set(input.domains)];
   if (input.pixelConversions !== undefined) next.pixelConversions = input.pixelConversions;
   if (input.consentMode !== undefined) next.consentMode = input.consentMode;
+  if (input.checkoutPaths !== undefined) next.checkoutPaths = [...new Set(input.checkoutPaths)];
   if (next.pixelConversions && !(next.domains?.length)) throw validation("list your website's domains before accepting orders reported by the snippet");
   await db.update(tenants).set({ tracking: next, updatedAt: ctx.now() }).where(eq(tenants.id, ctx.tenantId));
   await writeAudit(db, ctx, { entityType: "tenant", entityId: ctx.tenantId, action: "tracking_updated", before: { tracking: tenant.tracking ?? {} }, after: { tracking: next } });
@@ -159,49 +180,71 @@ function hostOf(url: string): string | null {
   }
 }
 
-function pathOf(url: string | undefined): string | null {
+/** Path segments that identify one order, product or person rather than a page: numbers, UUIDs, long hex or long tokens. */
+const ID_SEGMENT = /^(\d+|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{16,}|(?=[a-z0-9_-]*\d)[a-z0-9_-]{20,})$/i;
+
+/**
+ * The page a hit belongs to, as "host/path": no query string or fragment (they carry click
+ * tokens, order keys and emails), no "www.", no trailing slash, and id-like segments folded into
+ * ":id" so every order-received page is one page rather than one per order.
+ */
+export function normalizePage(url: string | null | undefined): string | null {
   if (!url) return null;
+  let u: URL;
   try {
-    const u = new URL(url);
-    return `${u.pathname}${u.search}`.slice(0, 500);
+    u = new URL(url);
   } catch {
     return null;
   }
+  if (u.protocol !== "http:" && u.protocol !== "https:") return null;
+  const host = u.hostname.toLowerCase().replace(/^www\./, "");
+  let path: string;
+  try {
+    path = decodeURIComponent(u.pathname);
+  } catch {
+    path = u.pathname;
+  }
+  const segments = path
+    .split("/")
+    .filter(Boolean)
+    .map((seg) => (ID_SEGMENT.test(seg) ? ":id" : seg.toLowerCase()));
+  const page = `${host}/${segments.join("/")}`.replace(/\/$/, "") || host;
+  return page.length > MAX_PAGE_LENGTH ? `${page.slice(0, MAX_PAGE_LENGTH - 1)}…` : page;
 }
 
 // ---------------------------------------------------------------------------
 // Ingest
 // ---------------------------------------------------------------------------
 
-const clientEvent = z.object({
-  type: z.enum(["page_view", "event"]),
-  name: z.string().trim().min(1).max(80).optional(),
+const clientHit = z.object({
+  /** The stage reached, or `event` for one of the site's own events (named in `n`). */
+  s: z.enum([...JOURNEY_STAGES, "event"]),
+  n: z.string().trim().min(1).max(40).optional(),
   url: z.string().max(2000).optional(),
-  title: z.string().max(300).optional(),
-  referrer: z.string().max(2000).optional(),
-  properties: z.record(z.string().max(60), z.unknown()).optional(),
-  /** Client clock, epoch milliseconds. Used only when it is plausible. */
-  at: z.number().optional(),
+  /** First time today this visitor reached the stage on this page, and anywhere on the site. The browser keeps that memory; the server keeps none. */
+  page: z.boolean().optional(),
+  site: z.boolean().optional(),
 });
 
 export const ingestSchema = z.object({
-  visitorId: z.string().regex(VISITOR_ID),
-  sessionId: z.string().regex(VISITOR_ID),
+  /** Lets an order that carries the visitor id find this click later; nothing else is kept about the visitor. */
+  visitorId: z.string().regex(VISITOR_ID).optional(),
   /** Click token from the landing URL or the snippet's first-party cookie. */
   ref: z.string().max(64).nullable().optional(),
   /** `granted` when the snippet runs in consent mode and the visitor agreed; `not_required` otherwise. */
   consent: z.enum(["granted", "not_required"]).optional(),
-  events: z.array(clientEvent).min(1).max(MAX_EVENTS_PER_BATCH),
+  hits: z.array(clientHit).min(1).max(MAX_HITS_PER_BATCH),
 });
 export type IngestInput = z.input<typeof ingestSchema>;
 
 export interface IngestResult {
+  /** Hits that added to a counter. */
   accepted: number;
   attributed: boolean;
   /** When the ref resolved: how long the snippet should keep it, from the program's attribution window. */
   ref: { ttlSeconds: number } | null;
-  /** Set when the batch was refused: the workspace requires consent and the batch did not carry it. */
-  dropped?: "consent_required" | "no_affiliate";
+  /** Set when the batch was refused: the workspace requires consent and the batch did not carry it, or no affiliate sent this visitor. */
+  dropped?: "consent_required" | "no_affiliate" | "legacy";
 }
 
 export interface IngestOptions {
@@ -209,296 +252,241 @@ export interface IngestOptions {
   consentRequired?: boolean;
 }
 
-interface ResolvedClick {
-  clickId: string;
-  affiliateId: string;
-  programId: string;
-  ttlSeconds: number | null;
+const EVENT_NAME = /^[A-Za-z0-9][A-Za-z0-9 _.:-]*$/;
+
+/**
+ * Add a batch from the snippet to the day's counters. The request must already be scoped to the
+ * tenant the site key resolved to. Batches from snippets older than v5 (per-visitor events) are
+ * acknowledged and not counted: they carry no once-a-day memory, so counting them would inflate
+ * every number for the hour a cached copy lives.
+ */
+export async function ingestHits(db: DbLike, ctx: TenantContext, rawInput: unknown, opts: IngestOptions = {}): Promise<IngestResult> {
+  const legacy = !!rawInput && typeof rawInput === "object" && !("hits" in rawInput) && Array.isArray((rawInput as { events?: unknown }).events);
+  const input = legacy ? null : ingestSchema.parse(rawInput);
+  const consent = legacy ? (rawInput as { consent?: unknown }).consent : input!.consent;
+  if (opts.consentRequired && consent !== "granted") return { accepted: 0, attributed: false, ref: null, dropped: "consent_required" };
+  const ref = legacy ? (rawInput as { ref?: unknown }).ref : input!.ref;
+  const click = typeof ref === "string" && ref ? await db.query.clicks.findFirst({ where: and(eq(clicks.tenantId, ctx.tenantId), eq(clicks.clickToken, ref)) }) : null;
+  // Only visitors an affiliate sent are counted; anyone else is not Referly's business.
+  if (!click) return { accepted: 0, attributed: false, ref: null, dropped: "no_affiliate" };
+  const program = await db.query.programs.findFirst({ where: eq(programs.id, click.programId) });
+  const refTtl = program ? { ttlSeconds: program.attributionWindowDays * 86_400 } : null;
+  if (legacy) return { accepted: 0, attributed: true, ref: refTtl, dropped: "legacy" };
+
+  const now = ctx.now();
+  const day = dayOf(now);
+  if (input!.visitorId && !click.visitorId) await db.update(clicks).set({ visitorId: input!.visitorId }).where(and(eq(clicks.id, click.id), isNull(clicks.visitorId)));
+
+  // page + "\n" + stage -> how much to add. One visitor's batch rarely touches more than a handful of keys.
+  const add = new Map<string, number>();
+  const bump = (page: string, stage: string) => add.set(`${page}\n${stage}`, (add.get(`${page}\n${stage}`) ?? 0) + 1);
+  let accepted = 0;
+  let host: string | null = null;
+  for (const hit of input!.hits) {
+    if (!hit.page && !hit.site) continue;
+    const page = normalizePage(hit.url);
+    host ??= hit.url ? hostOf(hit.url) : null;
+    if (hit.s === "event") {
+      // The site's own events are counted by name for the whole site, once per visitor per day.
+      if (!hit.site || !hit.n || !EVENT_NAME.test(hit.n)) continue;
+      bump("", `event:${hit.n.replace(/\s+/g, " ")}`);
+      accepted++;
+      continue;
+    }
+    if (hit.site) {
+      bump("", hit.s);
+      // The first page of the day is where this visitor landed.
+      if (hit.s === "visit" && page) bump(page, "land");
+    }
+    if (hit.page && page) bump(page, hit.s);
+    accepted++;
+  }
+  if (add.size) await applyCounters(db, ctx, day, click.affiliateId, add);
+
+  const tenant = await getTenant(db, ctx);
+  if (!tenant.trackingLastAt || now.getTime() - tenant.trackingLastAt.getTime() >= TOUCH_EVERY_MS)
+    await db.update(tenants).set({ trackingLastAt: now, trackingLastHost: host ?? tenant.trackingLastHost }).where(eq(tenants.id, ctx.tenantId));
+  return { accepted, attributed: true, ref: refTtl };
 }
 
-async function resolveClick(db: DbLike, ctx: TenantContext, ref: string | null | undefined, visitorId: string): Promise<ResolvedClick | null> {
-  if (ref) {
-    const click = await db.query.clicks.findFirst({ where: and(eq(clicks.tenantId, ctx.tenantId), eq(clicks.clickToken, ref)) });
-    if (click) {
-      const program = await db.query.programs.findFirst({ where: eq(programs.id, click.programId) });
-      return { clickId: click.id, affiliateId: click.affiliateId, programId: click.programId, ttlSeconds: program ? program.attributionWindowDays * 86_400 : null };
+/** Upserts the day's counters, keeping the number of distinct pages and event names a workspace can create in a day bounded. */
+async function applyCounters(db: DbLike, ctx: TenantContext, day: string, affiliateId: string, add: Map<string, number>): Promise<void> {
+  const today = and(eq(journeyStats.tenantId, ctx.tenantId), eq(journeyStats.day, day));
+  const pages = [...new Set([...add.keys()].map((k) => k.split("\n")[0]!).filter((p) => p && p !== OTHER_PAGE))];
+  const events = [...new Set([...add.keys()].map((k) => k.split("\n")[1]!).filter((s) => s.startsWith("event:")))];
+  const fold = new Map<string, string>();
+  if (pages.length) {
+    const known = new Set((await db.selectDistinct({ page: journeyStats.page }).from(journeyStats).where(and(today, inArray(journeyStats.page, pages)))).map((r) => r.page));
+    const fresh = pages.filter((p) => !known.has(p));
+    if (fresh.length) {
+      const [{ n } = { n: 0 }] = await db.select({ n: sql<number>`count(distinct ${journeyStats.page})`.mapWith(Number) }).from(journeyStats).where(and(today, ne(journeyStats.page, "")));
+      let room = Math.max(0, MAX_PAGES_PER_DAY - n);
+      for (const p of fresh) {
+        if (room > 0) room--;
+        else fold.set(p, OTHER_PAGE);
+      }
     }
   }
-  // No usable ref (cookie cleared, another device profile): stay with the click this visitor arrived through earlier.
-  const since = new Date(ctx.now().getTime() - VISITOR_MEMORY_DAYS * 86_400_000);
-  const [prior] = await db
-    .select({ clickId: journeyEvents.clickId, affiliateId: journeyEvents.affiliateId, programId: journeyEvents.programId })
-    .from(journeyEvents)
-    .where(and(eq(journeyEvents.tenantId, ctx.tenantId), eq(journeyEvents.visitorId, visitorId), isNotNull(journeyEvents.clickId), gte(journeyEvents.occurredAt, since)))
-    .orderBy(desc(journeyEvents.occurredAt), desc(journeyEvents.seq))
-    .limit(1);
-  if (prior?.clickId && prior.affiliateId && prior.programId) return { clickId: prior.clickId, affiliateId: prior.affiliateId, programId: prior.programId, ttlSeconds: null };
-  return null;
-}
-
-function boundedProperties(props: Record<string, unknown> | undefined): Record<string, unknown> {
-  if (!props) return {};
-  const out: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(props)) {
-    if (v === undefined || v === null) continue;
-    if (typeof v === "string") out[k] = v.slice(0, 500);
-    else if (typeof v === "number" || typeof v === "boolean") out[k] = v;
-    else out[k] = JSON.stringify(v).slice(0, 500);
+  const dropped = new Set<string>();
+  if (events.length) {
+    const known = new Set((await db.selectDistinct({ stage: journeyStats.stage }).from(journeyStats).where(and(today, inArray(journeyStats.stage, events)))).map((r) => r.stage));
+    const fresh = events.filter((e) => !known.has(e));
+    if (fresh.length) {
+      const [{ n } = { n: 0 }] = await db.select({ n: sql<number>`count(distinct ${journeyStats.stage})`.mapWith(Number) }).from(journeyStats).where(and(today, like(journeyStats.stage, "event:%")));
+      let room = Math.max(0, MAX_EVENT_NAMES_PER_DAY - n);
+      for (const e of fresh) {
+        if (room > 0) room--;
+        else dropped.add(e);
+      }
+    }
   }
-  return JSON.stringify(out).length > MAX_PROPERTIES_BYTES ? { _truncated: true } : out;
-}
-
-/** Client timestamps are trusted only inside the last day and not in the future. */
-function plausibleTime(at: number | undefined, now: Date): Date {
-  if (typeof at !== "number" || !Number.isFinite(at)) return now;
-  const d = new Date(at);
-  if (d.getTime() > now.getTime() + 60_000 || d.getTime() < now.getTime() - 86_400_000) return now;
-  return d;
-}
-
-/** Record a batch the snippet sent. The request must already be scoped to the tenant the site key resolved to. */
-export async function ingestEvents(db: DbLike, ctx: TenantContext, rawInput: IngestInput, opts: IngestOptions = {}): Promise<IngestResult> {
-  const input = ingestSchema.parse(rawInput);
-  if (opts.consentRequired && input.consent !== "granted") return { accepted: 0, attributed: false, ref: null, dropped: "consent_required" };
-  const now = ctx.now();
-  const click = await resolveClick(db, ctx, input.ref, input.visitorId);
-  // Only visitors an affiliate sent are recorded; anyone else is not Referly's business.
-  if (!click) return { accepted: 0, attributed: false, ref: null, dropped: "no_affiliate" };
-  const rows = input.events.map((e) => ({
-    id: newId("journeyEvent"),
-    tenantId: ctx.tenantId,
-    visitorId: input.visitorId,
-    sessionId: input.sessionId,
-    clickId: click?.clickId ?? null,
-    affiliateId: click?.affiliateId ?? null,
-    programId: click?.programId ?? null,
-    type: e.type,
-    name: e.type === "event" ? (e.name ?? "event") : (e.name ?? null),
-    url: e.url?.slice(0, 2000) ?? null,
-    path: pathOf(e.url),
-    title: e.title?.slice(0, 300) ?? null,
-    referrer: e.referrer?.slice(0, 2000) ?? null,
-    conversionId: null,
-    properties: boundedProperties(e.properties),
-    consentState: input.consent ?? "not_required",
-    occurredAt: plausibleTime(e.at, now),
-    createdAt: now,
-  }));
-  await db.insert(journeyEvents).values(rows);
-  return { accepted: rows.length, attributed: !!click, ref: click?.ttlSeconds ? { ttlSeconds: click.ttlSeconds } : null };
-}
-
-/** Click tokens this visitor arrived through, oldest first, for the attribution engine. */
-export async function visitorClickTokens(db: DbLike, ctx: TenantContext, visitorId: string): Promise<string[]> {
-  const rows = await db
-    .select({ token: clicks.clickToken, at: sql<Date>`max(${journeyEvents.occurredAt})`.mapWith(journeyEvents.occurredAt) })
-    .from(journeyEvents)
-    .innerJoin(clicks, eq(clicks.id, journeyEvents.clickId))
-    .where(and(eq(journeyEvents.tenantId, ctx.tenantId), eq(journeyEvents.visitorId, visitorId)))
-    .groupBy(clicks.clickToken)
-    .orderBy(asc(sql`max(${journeyEvents.occurredAt})`))
-    .limit(10);
-  return rows.map((r) => r.token);
+  const final = new Map<string, number>();
+  for (const [key, n] of add) {
+    const [page, stage] = key.split("\n") as [string, string];
+    if (dropped.has(stage)) continue;
+    const k = `${fold.get(page) ?? page}\n${stage}`;
+    final.set(k, (final.get(k) ?? 0) + n);
+  }
+  for (const [key, n] of final) {
+    const [page, stage] = key.split("\n") as [string, string];
+    await db
+      .insert(journeyStats)
+      .values({ id: newId("journeyStat"), tenantId: ctx.tenantId, day, affiliateId, page, stage, count: n })
+      .onConflictDoUpdate({ target: [journeyStats.tenantId, journeyStats.day, journeyStats.affiliateId, journeyStats.page, journeyStats.stage], set: { count: sql`${journeyStats.count} + ${n}` } });
+  }
 }
 
 /**
- * Put a recorded conversion on the visitor's journey. Called by the conversion service for every
- * source; it finds the visitor through the id the caller passed or through the attributed click
- * (a checkout that forwarded `ref` still lands on the journey). No visitor, no row.
+ * Click tokens this visitor arrived through, oldest first, for the attribution engine: an order
+ * that carries the snippet's visitor id still finds its click after the ref cookie is gone.
  */
-export async function linkConversion(db: DbLike, ctx: TenantContext, input: { conversion: Conversion; visitorId?: string | null; clickId?: string | null }): Promise<JourneyEvent | null> {
-  if (!input.conversion.affiliateId) return null;
-  let visitorId = input.visitorId ?? null;
-  let sessionId: string | null = null;
-  let consentState = "not_required";
-  const where = visitorId
-    ? and(eq(journeyEvents.tenantId, ctx.tenantId), eq(journeyEvents.visitorId, visitorId))
-    : input.clickId
-      ? and(eq(journeyEvents.tenantId, ctx.tenantId), eq(journeyEvents.clickId, input.clickId))
-      : null;
-  if (where) {
-    const [latest] = await db.select({ visitorId: journeyEvents.visitorId, sessionId: journeyEvents.sessionId, consentState: journeyEvents.consentState }).from(journeyEvents).where(where).orderBy(desc(journeyEvents.occurredAt), desc(journeyEvents.seq)).limit(1);
-    if (latest) {
-      visitorId = latest.visitorId;
-      sessionId = latest.sessionId;
-      consentState = latest.consentState;
-    }
-  }
-  if (!visitorId) return null;
-  const c = input.conversion;
-  const [row] = await db
-    .insert(journeyEvents)
-    .values({
-      id: newId("journeyEvent"),
-      tenantId: ctx.tenantId,
-      visitorId,
-      sessionId: sessionId ?? "server",
-      clickId: input.clickId ?? null,
-      affiliateId: c.affiliateId,
-      programId: c.programId,
-      type: c.kind === "lead" ? "lead" : "conversion",
-      name: c.externalOrderId,
-      url: typeof c.metadata?.url === "string" ? c.metadata.url.slice(0, 2000) : null,
-      path: typeof c.metadata?.url === "string" ? pathOf(c.metadata.url) : null,
-      title: null,
-      referrer: null,
-      conversionId: c.id,
-      properties: { amountMinor: c.amountMinor, currency: c.currency, source: c.source, attributed: !!c.affiliateId },
-      consentState,
-      occurredAt: c.occurredAt,
-      createdAt: ctx.now(),
-    })
-    .returning();
-  return row!;
+export async function visitorClickTokens(db: DbLike, ctx: TenantContext, visitorId: string): Promise<string[]> {
+  const rows = await db
+    .select({ token: clicks.clickToken })
+    .from(clicks)
+    .where(and(eq(clicks.tenantId, ctx.tenantId), eq(clicks.visitorId, visitorId)))
+    .orderBy(desc(clicks.occurredAt))
+    .limit(10);
+  return rows.map((r) => r.token).reverse();
 }
 
 // ---------------------------------------------------------------------------
 // Reading
 // ---------------------------------------------------------------------------
 
-export interface JourneySession {
-  visitorId: string;
-  sessionId: string;
-  affiliateId: string | null;
-  affiliateName: string | null;
-  programId: string | null;
-  startedAt: Date;
-  lastAt: Date;
-  pages: number;
-  events: number;
-  conversions: number;
-  leads: number;
-  landingPath: string | null;
-  landingUrl: string | null;
-  referrer: string | null;
-  /** Total of the sales on this visit, in minor units, and their currency. */
-  saleMinor: number;
-  currency: string | null;
-  /** browsing | engaged (custom events) | lead | converted */
-  outcome: "browsing" | "engaged" | "lead" | "converted";
-}
-
-export interface JourneySummary {
-  /** Visits from affiliate links. */
-  visits: number;
-  /** Visits that ended in a purchase. */
-  sales: number;
-  /** Visits that ended in a sign-up but no purchase. */
+export interface JourneyFunnel {
+  /** People who arrived through an affiliate link, counted once a day. */
+  visitors: number;
+  /** ...who read at least half of a page. */
+  half: number;
+  /** ...who read a page to the bottom. */
+  bottom: number;
+  /** ...who reached a checkout page. */
+  checkout: number;
+  /** Sales attributed to an affiliate's link in the period, from the recorded conversions. */
+  purchases: number;
+  /** What those sales were worth, per currency, largest number of sales first. Amounts in different currencies are never added together. */
+  revenue: { currency: string; minor: number }[];
+  /** Sign-ups (pay-per-lead) attributed to an affiliate's link. */
   leads: number;
 }
 
-export interface SessionFilter {
+export interface JourneyPageRow {
+  page: string;
+  /** People whose first page of the day this was. */
+  landed: number;
+  visitors: number;
+  half: number;
+  bottom: number;
+  /** People counted as reaching the checkout on this page: non-zero marks a checkout page. */
+  checkout: number;
+}
+
+export interface JourneyReport {
+  days: number;
+  since: Date;
+  funnel: JourneyFunnel;
+  /** Sales credited through a coupon code alone: real sales, but nobody arrived through a link, so they are not part of the funnel. */
+  couponOnlySales: number;
+  pages: JourneyPageRow[];
+  /** The site's own events (`referly('track', name)`), by how many people triggered each. */
+  events: { name: string; visitors: number }[];
+}
+
+export interface ReportFilter {
   /** Look-back in days; default 30. */
   days?: number;
   affiliateId?: string;
-  /** Only sessions with a sale or lead on them. */
-  converted?: boolean;
-  limit?: number;
+  /** Pages listed, busiest first. */
+  pageLimit?: number;
 }
 
-function sessionGrouping(db: DbLike, tenantId: string, since: Date) {
-  return db
-    .select({
-      visitorId: journeyEvents.visitorId,
-      sessionId: journeyEvents.sessionId,
-      affiliateId: sql<string | null>`max(${journeyEvents.affiliateId})`.as("affiliate_id"),
-      programId: sql<string | null>`max(${journeyEvents.programId})`.as("program_id"),
-      startedAt: sql<Date>`min(${journeyEvents.occurredAt})`.mapWith(journeyEvents.occurredAt).as("started_at"),
-      lastAt: sql<Date>`max(${journeyEvents.occurredAt})`.mapWith(journeyEvents.occurredAt).as("last_at"),
-      pages: sql<number>`count(*) filter (where ${journeyEvents.type} = 'page_view')`.mapWith(Number).as("pages"),
-      events: sql<number>`count(*) filter (where ${journeyEvents.type} = 'event')`.mapWith(Number).as("events"),
-      conversions: sql<number>`count(*) filter (where ${journeyEvents.type} = 'conversion')`.mapWith(Number).as("conversions"),
-      leads: sql<number>`count(*) filter (where ${journeyEvents.type} = 'lead')`.mapWith(Number).as("leads"),
-      landingPath: sql<string | null>`(array_agg(${journeyEvents.path} order by ${journeyEvents.occurredAt}, ${journeyEvents.seq}))[1]`.as("landing_path"),
-      landingUrl: sql<string | null>`(array_agg(${journeyEvents.url} order by ${journeyEvents.occurredAt}, ${journeyEvents.seq}))[1]`.as("landing_url"),
-      referrer: sql<string | null>`(array_agg(${journeyEvents.referrer} order by ${journeyEvents.occurredAt}, ${journeyEvents.seq}))[1]`.as("referrer"),
-      saleMinor: sql<number>`coalesce(sum((${journeyEvents.properties}->>'amountMinor')::bigint) filter (where ${journeyEvents.type} = 'conversion'), 0)`.mapWith(Number).as("sale_minor"),
-      currency: sql<string | null>`max(${journeyEvents.properties}->>'currency') filter (where ${journeyEvents.type} = 'conversion')`.as("currency"),
-    })
-    .from(journeyEvents)
-    .where(and(eq(journeyEvents.tenantId, tenantId), gte(journeyEvents.occurredAt, since)))
-    .groupBy(journeyEvents.visitorId, journeyEvents.sessionId)
-    .as("s");
-}
-
-function outcomeOf(s: { conversions: number; leads: number; events: number }): JourneySession["outcome"] {
-  if (s.conversions > 0) return "converted";
-  if (s.leads > 0) return "lead";
-  if (s.events > 0) return "engaged";
-  return "browsing";
-}
-
-export async function listSessions(db: DbLike, ctx: TenantContext, filter: SessionFilter = {}): Promise<JourneySession[]> {
+export async function journeyReport(db: DbLike, ctx: TenantContext, filter: ReportFilter = {}): Promise<JourneyReport> {
   requirePerm(ctx, "read");
-  const days = Math.min(Math.max(filter.days ?? 30, 1), 400);
-  const since = new Date(ctx.now().getTime() - days * 86_400_000);
-  const s = sessionGrouping(db, ctx.tenantId, since);
-  const conditions = [
-    filter.affiliateId ? eq(s.affiliateId, filter.affiliateId) : undefined,
-    isNotNull(s.affiliateId),
-    filter.converted ? sql`${s.conversions} + ${s.leads} > 0` : undefined,
-  ];
+  const days = Math.min(Math.max(Math.trunc(filter.days ?? 30), 1), 400);
+  const since = new Date(ctx.now().getTime() - days * DAY_MS);
   const rows = await db
-    .select()
-    .from(s)
-    .where(and(...conditions))
-    .orderBy(desc(s.lastAt))
-    .limit(Math.min(filter.limit ?? 100, MAX_SESSION_ROWS));
-  const affiliateIds = [...new Set(rows.map((r) => r.affiliateId).filter((x): x is string => !!x))];
-  const names = new Map<string, string>();
-  if (affiliateIds.length) for (const a of await db.select({ id: affiliates.id, name: affiliates.name }).from(affiliates).where(and(eq(affiliates.tenantId, ctx.tenantId), inArray(affiliates.id, affiliateIds)))) names.set(a.id, a.name);
-  return rows.map((r) => ({ ...r, affiliateName: r.affiliateId ? (names.get(r.affiliateId) ?? null) : null, outcome: outcomeOf(r) }));
-}
+    .select({ page: journeyStats.page, stage: journeyStats.stage, n: sql<number>`coalesce(sum(${journeyStats.count}), 0)`.mapWith(Number) })
+    .from(journeyStats)
+    .where(and(eq(journeyStats.tenantId, ctx.tenantId), gte(journeyStats.day, dayOf(since)), filter.affiliateId ? eq(journeyStats.affiliateId, filter.affiliateId) : undefined))
+    .groupBy(journeyStats.page, journeyStats.stage);
 
-export async function journeySummary(db: DbLike, ctx: TenantContext, days = 30): Promise<JourneySummary> {
-  requirePerm(ctx, "read");
-  const since = new Date(ctx.now().getTime() - Math.min(Math.max(days, 1), 400) * 86_400_000);
-  const s = sessionGrouping(db, ctx.tenantId, since);
-  const [row] = await db
-    .select({
-      visits: sql<number>`count(*)`.mapWith(Number),
-      sales: sql<number>`count(*) filter (where ${s.conversions} > 0)`.mapWith(Number),
-      leads: sql<number>`count(*) filter (where ${s.leads} > 0 and ${s.conversions} = 0)`.mapWith(Number),
-    })
-    .from(s)
-    .where(isNotNull(s.affiliateId));
-  return row ?? { visits: 0, sales: 0, leads: 0 };
-}
-
-/** Every event of one session, in order. */
-export async function sessionEvents(db: DbLike, ctx: TenantContext, visitorId: string, sessionId: string): Promise<JourneyEvent[]> {
-  requirePerm(ctx, "read");
-  return db
-    .select()
-    .from(journeyEvents)
-    .where(and(eq(journeyEvents.tenantId, ctx.tenantId), eq(journeyEvents.visitorId, visitorId), eq(journeyEvents.sessionId, sessionId)))
-    .orderBy(asc(journeyEvents.occurredAt), asc(journeyEvents.seq))
-    .limit(500);
-}
-
-/** Every event of one visitor across sessions, in order. */
-export async function visitorEvents(db: DbLike, ctx: TenantContext, visitorId: string): Promise<JourneyEvent[]> {
-  requirePerm(ctx, "read");
-  return db
-    .select()
-    .from(journeyEvents)
-    .where(and(eq(journeyEvents.tenantId, ctx.tenantId), eq(journeyEvents.visitorId, visitorId)))
-    .orderBy(asc(journeyEvents.occurredAt), asc(journeyEvents.seq))
-    .limit(500);
-}
-
-/**
- * The whole journey behind a conversion: found through the conversion's own journey row, or
- * failing that through the click it was attributed to. Empty when the site has no snippet.
- */
-export async function journeyForConversion(db: DbLike, ctx: TenantContext, conversionId: string, clickId: string | null): Promise<{ visitorId: string | null; events: JourneyEvent[] }> {
-  requirePerm(ctx, "read");
-  const [own] = await db.select({ visitorId: journeyEvents.visitorId }).from(journeyEvents).where(and(eq(journeyEvents.tenantId, ctx.tenantId), eq(journeyEvents.conversionId, conversionId))).limit(1);
-  let visitorId = own?.visitorId ?? null;
-  if (!visitorId && clickId) {
-    const [viaClick] = await db.select({ visitorId: journeyEvents.visitorId }).from(journeyEvents).where(and(eq(journeyEvents.tenantId, ctx.tenantId), eq(journeyEvents.clickId, clickId))).orderBy(desc(journeyEvents.occurredAt), desc(journeyEvents.seq)).limit(1);
-    visitorId = viaClick?.visitorId ?? null;
+  const site = (stage: string) => rows.find((r) => r.page === "" && r.stage === stage)?.n ?? 0;
+  const byPage = new Map<string, JourneyPageRow>();
+  for (const r of rows) {
+    if (!r.page) continue;
+    const row = byPage.get(r.page) ?? { page: r.page, landed: 0, visitors: 0, half: 0, bottom: 0, checkout: 0 };
+    if (r.stage === "visit") row.visitors = r.n;
+    else if (r.stage === "land") row.landed = r.n;
+    else if (r.stage === "half") row.half = r.n;
+    else if (r.stage === "bottom") row.bottom = r.n;
+    else if (r.stage === "checkout") row.checkout = r.n;
+    byPage.set(r.page, row);
   }
-  if (!visitorId) return { visitorId: null, events: [] };
-  return { visitorId, events: await visitorEvents(db, ctx, visitorId) };
+  const events = rows
+    .filter((r) => r.page === "" && r.stage.startsWith("event:"))
+    .map((r) => ({ name: r.stage.slice("event:".length), visitors: r.n }))
+    .sort((a, b) => b.visitors - a.visitors || a.name.localeCompare(b.name));
+
+  // Purchases come from the sales themselves, never from the browser. Only sales a link click earned
+  // belong to a funnel of link visitors; sales typed in by hand or imported never were site visits.
+  const onSite = and(
+    eq(conversions.tenantId, ctx.tenantId),
+    gte(conversions.occurredAt, since),
+    isNotNull(conversions.affiliateId),
+    eq(conversions.isTest, false),
+    ne(conversions.status, "cancelled"),
+    notInArray(conversions.source, ["manual", "import"]),
+    filter.affiliateId ? eq(conversions.affiliateId, filter.affiliateId) : undefined,
+  );
+  const sales = await db
+    .select({
+      kind: conversions.kind,
+      via: conversions.attributionSource,
+      currency: conversions.currency,
+      n: sql<number>`count(*)`.mapWith(Number),
+      minor: sql<number>`coalesce(sum(${conversions.amountMinor}), 0)`.mapWith(Number),
+    })
+    .from(conversions)
+    .where(onSite)
+    .groupBy(conversions.kind, conversions.attributionSource, conversions.currency);
+  const total = (kind: string, via: string) => sales.filter((s) => s.kind === kind && s.via === via).reduce((n, s) => n + s.n, 0);
+  const linkSales = sales.filter((s) => s.kind === "sale" && s.via === "link").sort((a, b) => b.n - a.n || a.currency.localeCompare(b.currency));
+
+  return {
+    days,
+    since,
+    funnel: {
+      visitors: site("visit"),
+      half: site("half"),
+      bottom: site("bottom"),
+      checkout: site("checkout"),
+      purchases: total("sale", "link"),
+      revenue: linkSales.map((s) => ({ currency: s.currency, minor: s.minor })),
+      leads: total("lead", "link"),
+    },
+    couponOnlySales: total("sale", "coupon"),
+    pages: [...byPage.values()].sort((a, b) => b.visitors - a.visitors || b.landed - a.landed || a.page.localeCompare(b.page)).slice(0, Math.min(filter.pageLimit ?? 50, 300)),
+    events,
+  };
 }

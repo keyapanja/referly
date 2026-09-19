@@ -1811,32 +1811,67 @@ details.fallback[open] summary {
 }
 
 /* A visitor's journey as a plain list of steps */
-.journey-steps {
+.funnel {
   list-style: none;
-  margin: 0;
+  margin: 6px 0 0;
   padding: 0;
 }
-.journey-steps li {
+.funnel li {
   display: grid;
-  grid-template-columns: 180px minmax(0, 1fr);
-  gap: 12px;
-  padding: 8px 0;
+  grid-template-columns: 210px minmax(0, 1fr) 72px 52px;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 0;
   border-bottom: 1px solid var(--border);
-  font-size: 13px;
 }
-.journey-steps li:last-child {
+.funnel li:last-child {
   border-bottom: 0;
 }
-.journey-steps .when {
-  color: var(--muted);
+.funnel-label {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.funnel-label strong {
+  font-size: 13.5px;
+  font-weight: 600;
+}
+.funnel-track {
+  height: 14px;
+  border-radius: 4px;
+  background: var(--viz-grid);
+  overflow: hidden;
+}
+.funnel-bar {
+  height: 100%;
+  min-width: 2px;
+  border-radius: 0 4px 4px 0;
+  background: var(--series-1);
+}
+.funnel-value {
+  text-align: right;
+  font-size: 15px;
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
-.journey-steps .what {
+.funnel-share {
+  text-align: right;
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+.card > p.funnel-note {
+  margin: 12px 0 0;
+}
+.page-name {
   overflow-wrap: anywhere;
 }
 @media (max-width: 640px) {
-  .journey-steps li {
-    grid-template-columns: 1fr;
-    gap: 2px;
+  .funnel li {
+    grid-template-columns: minmax(0, 1fr) 64px 46px;
+    row-gap: 6px;
+  }
+  .funnel-label {
+    grid-column: 1 / -1;
   }
 }

@@ -2,7 +2,7 @@
 /**
  * Plugin Name:       Referly
  * Description:       Connects this site to Referly. Adds the tracking code to every page and reports paid WooCommerce orders that came through an affiliate, FunnelKit checkouts included, with refunds following automatically.
- * Version:           1.1.0
+ * Version:           1.2.0
  * Requires at least: 6.0
  * Requires PHP:      7.4
  * Author:            Referly
@@ -55,14 +55,26 @@ final class Referly_Connector {
 	// Tracking code
 	// ---------------------------------------------------------------------
 
+	/** The page where the customer pays: WooCommerce's checkout or a FunnelKit one, never the order-received page. */
+	private static function is_checkout_page() {
+		if ( ! function_exists( 'is_checkout' ) || ! is_checkout() ) {
+			return false;
+		}
+		return ! ( function_exists( 'is_order_received_page' ) && is_order_received_page() );
+	}
+
 	public static function print_tracking_code() {
 		$c = self::connection();
 		if ( ! $c || empty( $c['tracking_enabled'] ) || empty( $c['script_url'] ) || ! preg_match( '/^site_[A-Za-z0-9]{24}$/', (string) ( $c['site_key'] ?? '' ) ) ) {
 			return;
 		}
 		$consent = ( 'wait' === ( $c['consent_mode'] ?? '' ) ) ? ' data-consent="wait"' : '';
+		// WooCommerce knows which page is the checkout (FunnelKit's included) and which is the thank-you page,
+		// so Referly's count of people who reached the checkout needs no guessing from the address.
+		$page = ' data-page="' . ( self::is_checkout_page() ? 'checkout' : 'page' ) . '"';
+		$paths = ( ! empty( $c['checkout_paths'] ) && is_array( $c['checkout_paths'] ) ) ? ' data-checkout="' . esc_attr( implode( ',', $c['checkout_paths'] ) ) . '"' : '';
 		echo '<script data-cfasync="false">window.referly=window.referly||function(){(window.referly.q=window.referly.q||[]).push(arguments)};</script>' . "\n";
-		echo '<script async data-cfasync="false" src="' . esc_url( $c['script_url'] ) . '" data-site="' . esc_attr( $c['site_key'] ) . '" data-api="' . esc_url( $c['api'] ) . '"' . $consent . "></script>\n";
+		echo '<script async data-cfasync="false" src="' . esc_url( $c['script_url'] ) . '" data-site="' . esc_attr( $c['site_key'] ) . '" data-api="' . esc_url( $c['api'] ) . '"' . $consent . $page . $paths . "></script>\n";
 		// Pick up changes made in Referly, such as a rotated site key or consent mode, twice a day and off the page view.
 		if ( time() - (int) ( $c['checked_at'] ?? 0 ) > 12 * HOUR_IN_SECONDS && ! wp_next_scheduled( self::REFRESH ) ) {
 			wp_schedule_single_event( time(), self::REFRESH );
@@ -93,8 +105,21 @@ final class Referly_Connector {
 			'site_key'         => sanitize_text_field( (string) ( $tracking['siteKey'] ?? '' ) ),
 			'script_url'       => esc_url_raw( (string) ( $tracking['scriptUrl'] ?? '' ) ),
 			'consent_mode'     => ( 'wait' === ( $tracking['consentMode'] ?? '' ) ) ? 'wait' : 'off',
+			'checkout_paths'   => self::clean_paths( $tracking['checkoutPaths'] ?? array() ),
 			'checked_at'       => time(),
 		);
+	}
+
+	/** Extra checkout addresses set in Referly, for checkouts WooCommerce does not know about. Only plain path fragments are kept. */
+	private static function clean_paths( $paths ) {
+		$out = array();
+		foreach ( is_array( $paths ) ? $paths : array() as $p ) {
+			$p = strtolower( trim( (string) $p ) );
+			if ( '' !== $p && strlen( $p ) <= 80 && preg_match( '#^[a-z0-9/._~%-]+$#', $p ) ) {
+				$out[] = $p;
+			}
+		}
+		return array_slice( $out, 0, 10 );
 	}
 
 	/** Re-read the settings from Referly. Runs from WP-Cron and from the Refresh button. */

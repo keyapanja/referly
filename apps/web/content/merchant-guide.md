@@ -75,12 +75,12 @@ Affiliates get an email and an in-app notification at each step.
 - **Coupon codes** (affiliate page → New coupon code) attribute without a click: a sale reporting the code is attributed to the code's affiliate. The program's precedence setting decides what wins when both a click and a code are present.
 - Clicks from bots, iframes and script loads are refused; consent state is recorded per click.
 
-**Website tracking snippet**: paste one script on your site and the journey is recorded without any checkout work. Setup in section 6.
+**Website tracking snippet**: paste one script on your site and what affiliate visitors do there is counted without any checkout work. Setup in section 6.
 
 ## 6. Website tracking snippet
 
 
-The snippet records the complete journey of every visitor who arrives through an affiliate link, on your own website, with one paste. Once it is in place you get, without touching your checkout: the click token kept for the whole attribution window, every page the visitor opens, any event you choose to send, lead forms that carry the attribution by themselves, and (optionally) the order reported straight from your thank-you page.
+The snippet counts what the people your affiliates send do on your own website, with one paste. Once it is in place you get, without touching your checkout: the click token kept for the whole attribution window, how many people arrived, how far down your pages they read, how many reached your checkout and how many bought, any event you choose to count, lead forms that carry the attribution by themselves, and (optionally) the order reported straight from your thank-you page. It keeps totals only: no record is kept of what any one visitor did.
 
 ### 6.1 Turn it on
 
@@ -112,20 +112,21 @@ On the same page, under **Lock it to your domains**, enter your website's hostna
 ### 6.3 What is recorded automatically
 
 - **The click token.** An affiliate link `/r/<token>` redirects to your offer URL with `?ref=<click token>`. The snippet stores it in a first-party cookie on your domain for the program's attribution window (the server tells it the exact length), so it survives navigation, reloads and return visits.
-- **A visitor id** (first party, one year) and a **session id** (a new one after 30 minutes of inactivity).
-- **Page views**: URL, path, title and the referrer of the landing page, including route changes in single-page apps.
+- **A visitor id** (first party, one year). Its only use is to let an order find its click if the click token has gone; nothing is recorded against it.
+- **The stages each person reaches**, each counted once per person per day: arrived, read half a page, read a page to the bottom, reached the checkout. Pages are counted by address without the query string, with order numbers and other ids folded together, including route changes in single-page apps.
+- **The checkout** is recognised by "checkout" in the page's address (never the order-received or thank-you page). The WordPress plugin points it out directly, FunnelKit checkouts included. If yours lives at another address, list it under **Checkout page addresses** on the Website tracking page and copy the code again.
 
-Visitors who did not come through an affiliate link are not tracked at all: for them the snippet writes no cookie and sends nothing. No names, emails or IP addresses are stored by the snippet.
+What was already counted today is remembered in the visitor's own browser, so Referly's database holds daily totals per affiliate and page and nothing about any one visitor. Visitors who did not come through an affiliate link are not tracked at all: for them the snippet writes no cookie and sends nothing. No names, emails or IP addresses are stored by the snippet.
 
 ### 6.4 Send your own events
 
 Anywhere on your site, after the snippet:
 
 ```html
-<script>referly('track', 'add_to_cart', { sku: 'SKU-123', value: 49 });</script>
+<script>referly('track', 'add_to_cart');</script>
 ```
 
-The first argument is the event name (up to 80 characters), the second an optional object of simple properties (strings, numbers, booleans; nested values are stringified, 2 KB per event). Typical events: `add_to_cart`, `checkout_started`, `signup_started`, `demo_booked`, `video_watched`. They show as steps in the visitor's journey. Calls made before the script has loaded are queued and sent once it has.
+The argument is the event name (up to 40 characters: letters, numbers, spaces, `_ . : -`). Typical events: `add_to_cart`, `signup_started`, `demo_booked`, `video_watched`. Each is counted once per person per day and shows under **Your own events** on the Journeys page; up to 30 different names a day. Anything else you pass is ignored, so nothing about the visitor is kept. `referly('track', 'checkout')` counts the person as having reached the checkout, for checkouts that open without a page of their own. Calls made before the script has loaded are queued and sent once it has.
 
 ### 6.5 Report orders from the thank-you page (optional)
 
@@ -159,7 +160,7 @@ What happens on each outcome:
 - **Granted**: the click token and visitor id are written, everything that happened while the banner was open is sent, and the events are stored marked as consented. The decision is remembered for 180 days, so later pages track immediately.
 - **Denied**: the queued events are discarded, any ids already in the browser are deleted, hidden visitor inputs are blanked, and nothing further is sent. Only the decision itself is remembered.
 
-Orders reported from the thank-you page still go through while consent is pending or denied, because an order is contract data rather than analytics, but they travel **without** the visitor id, so they are attributed by the click token or coupon alone and do not appear on a journey. If your legal position is that even that requires consent, leave the thank-you page call inside your banner's consented branch.
+Orders reported from the thank-you page still go through while consent is pending or denied, because an order is contract data rather than analytics, but they travel **without** the visitor id, so they are attributed by the click token or coupon alone. If your legal position is that even that requires consent, leave the thank-you page call inside your banner's consented branch.
 
 ### 6.7 Lead forms
 
@@ -175,23 +176,30 @@ The snippet fills them in on load and again on submit, so the lead is attributed
 ### 6.8 Your own integrations
 
 - `referly('ref')` returns the current click token; `referly('visitor')` the visitor id. Send either with your server-side conversion post (`clickToken` or `visitorId` in the body): the visitor id works even after the cookie is gone, because Referly remembers which clicks that visitor arrived through.
-- `referly('page')` records a page view by hand (for apps that manage their own routing); `referly('flush')` sends what is queued immediately.
-- Add `data-auto="false"` to the script tag to switch off automatic page views and form filling and call `referly('page')` yourself.
+- `referly('page')` counts the current page by hand (for apps that manage their own routing); `referly('flush')` sends what is queued immediately.
+- Add `data-auto="false"` to the script tag to switch off automatic counting, scroll measuring and form filling and call `referly('page')` yourself.
 
 ### 6.9 Reading the journeys
 
-**Journeys** (main navigation) lists every visit that came through an affiliate link: when it happened, which affiliate sent it, and the result: bought, with the amount, signed up, or no purchase. Choose an affiliate and the last 7, 30 or 90 days. **View** shows what that person did as a short list of steps: the pages they viewed, anything your site reported, and the purchase. The same steps appear on each sale's page under "Website journey", so a surprising sale can be checked against what the buyer actually did.
+**Journeys** (main navigation) is a report in totals. Choose an affiliate, or all of them, and the last 7, 30 or 90 days.
+
+- **From arriving to buying**: of the people who arrived through an affiliate link, how many read half a page, read one to the bottom, reached the checkout, and bought, each with its share of those who arrived. "Bought" is not reported by the browser: it is the number of sales credited to a link click in that period, with what they were worth. Sales credited through a coupon code alone are mentioned beside the funnel rather than in it, because nobody arrived through a link.
+- **Pages**: for each page, how many people landed there, how many saw it, and how many read half of it and all of it. A page marked **checkout** is one Referly counts as your checkout.
+- **Your own events**: what you count with `referly('track', ...)`.
+
+A person is counted once a day per stage, so someone who comes back tomorrow counts again. There is no list of visitors and no per-person timeline: Referly does not keep one.
 
 ### 6.10 If nothing shows up
 
 - View the page source and confirm both script lines are present with your site key.
 - Open the browser console: a red request to `/t/<site key>/events` with a 404 means the key is wrong, the workspace is suspended, or the page's domain is not in your domain list.
 - Content blockers on your own machine can block the script; test in a private window.
-- Journeys only ever show visits that arrived through an affiliate link. To test, open one of your own affiliate links in a private window and browse from there.
+- Journeys only ever counts people who arrived through an affiliate link. To test, open one of your own affiliate links in a private window and browse from there. You count once a day per stage, so a second test the same day from the same browser adds nothing: use a fresh private window.
+- "Reached the checkout" stays at zero: your checkout's address does not contain "checkout". List its address under **Checkout page addresses** and copy the code again, or install the WordPress plugin, which points it out by itself.
 - Rotating the site key (bottom of the Website tracking page) invalidates the old snippet immediately; update the code on your site straight after.
 - With consent mode on, nothing is recorded until your banner reports consent: check `referly('consent')` in the console; `pending` means your banner never called it.
 
-Journey events are kept for the period set under Settings → Data (90 days by default) and are included in backups and the workspace export.
+The daily totals are kept for the period set under Settings → Data (90 days by default) and are included in backups and the workspace export.
 
 ## 7. Getting sales in
 
@@ -266,7 +274,7 @@ A merchant can dispute a sale (fraud, refund, amount). An affiliate can claim a 
 ## 15. Analytics, journeys and exports
 
 
-Journeys: every visit that came through an affiliate link, with the affiliate and whether it ended in a purchase; open one to see the steps. Needs the website tracking snippet (section 6).
+Journeys: of the people affiliates sent, how many arrived, read your pages, reached the checkout and bought, per page and per affiliate, in totals. Needs the website tracking snippet (section 6).
 
 Analytics: clicks, sales, attributed revenue, commission and new affiliates over time with comparison to the previous period; the click → attributed → approved funnel; breakdowns by affiliate, offer, program, campaign, group and attribution source. Exports build in the background (affiliates, conversions, commissions, payouts, ledger, clicks as CSV; the whole workspace as JSON lines) and stay downloadable for 7 days.
 
@@ -278,7 +286,7 @@ Webhooks page: endpoints for Zapier, Make or your own systems. Pick events, get 
 ## 17. Data, retention and privacy
 
 
-Settings → Data: how long clicks, message logs, audit trail, webhook deliveries, automation runs, notifications, lead contact details and website journey events are kept. Financial records are never deleted. Export the whole workspace from the same card. Affiliates can request erasure from their portal; carry it out from their page once nothing is owed.
+Settings → Data: how long clicks, message logs, audit trail, webhook deliveries, automation runs, notifications, lead contact details and website journey totals are kept. Financial records are never deleted. Export the whole workspace from the same card. Affiliates can request erasure from their portal; carry it out from their page once nothing is owed.
 
 ## 18. What your affiliates see
 

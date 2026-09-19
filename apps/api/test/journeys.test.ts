@@ -12,8 +12,8 @@ import { PLATFORM_IDS, platformGuides } from "../src/platforms";
 
 /**
  * Website tracking over HTTP (TRK-09): the served snippet, settings endpoints, the public
- * events endpoint (text/plain bodies, CORS, origin rules, no affiliate leakage), snippet-reported
- * orders (off by default, idempotent, attributed), and the merchant's journey views.
+ * events endpoint (text/plain bodies, CORS, origin rules, no affiliate leakage, counters only),
+ * snippet-reported orders (off by default, idempotent, attributed), and the merchant's report.
  */
 let handle: DbHandle;
 let app: App;
@@ -105,30 +105,35 @@ describe("website tracking over HTTP", () => {
     expect(on.body.examples.convert).toContain("referly('convert'");
   });
 
-  it("the events endpoint answers the preflight for any origin, takes a text/plain JSON body, ties events to the affiliate and returns only the cookie ttl", async () => {
+  it("the events endpoint answers the preflight for any origin, takes a text/plain JSON body, counts the stages for the affiliate and returns only the cookie ttl", async () => {
     const preflight = await app.request(`${BASE}/t/${siteKey}/events`, { method: "OPTIONS", headers: { origin: "https://shop.acme.test", "access-control-request-method": "POST" } });
     expect(preflight.status).toBeLessThan(300);
     expect(preflight.headers.get("access-control-allow-origin")).toBe("*");
 
     const res = await beacon(`/t/${siteKey}/events`, {
+      v: 5,
       visitorId: visitor,
-      sessionId: "s_browser_session1",
       ref: clickToken,
-      events: [
-        { type: "page_view", url: `https://shop.acme.test/course?ref=${clickToken}`, title: "Course", referrer: "https://pat.blog/review", at: clock.getTime() - 60_000 },
-        { type: "event", name: "add_to_cart", url: "https://shop.acme.test/course", properties: { sku: "COURSE" }, at: clock.getTime() - 55_000 },
+      hits: [
+        { s: "visit", url: "https://shop.acme.test/course", page: true, site: true },
+        { s: "half", url: "https://shop.acme.test/course", page: true, site: true },
+        { s: "event", n: "add_to_cart", url: "https://shop.acme.test/course", site: true },
       ],
     });
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ ok: true, accepted: 2, ref: { ttlSeconds: 30 * 86_400 } });
+    expect(res.body).toEqual({ ok: true, accepted: 3, ref: { ttlSeconds: 30 * 86_400 } });
     expect(JSON.stringify(res.body)).not.toContain(affiliateId);
 
-    expect((await beacon(`/t/site_000000000000000000000000/events`, { visitorId: visitor, sessionId: "s_browser_session1", events: [{ type: "page_view" }] })).status).toBe(404);
+    expect((await beacon(`/t/site_000000000000000000000000/events`, { ref: clickToken, hits: [{ s: "visit", site: true }] })).status).toBe(404);
     expect((await call(`/t/${siteKey}/events`, { method: "POST", text: "not json", headers: { origin: "https://shop.acme.test" } })).status).toBe(400);
-    expect((await beacon(`/t/${siteKey}/events`, { visitorId: "x", sessionId: "y", events: [] })).status).toBe(400);
+    expect((await beacon(`/t/${siteKey}/events`, { visitorId: "x", ref: clickToken, hits: [] })).status).toBe(400);
+    // a copy of the older snippet, still in a browser cache, is answered and not counted
+    const legacy = await beacon(`/t/${siteKey}/events`, { visitorId: visitor, sessionId: "s_browser_session1", ref: clickToken, events: [{ type: "page_view", url: "https://shop.acme.test/course" }] });
+    expect(legacy.body).toEqual({ ok: true, accepted: 0, ref: { ttlSeconds: 30 * 86_400 }, dropped: "legacy" });
 
     const view = await call("/v1/tenant/tracking", { token: ownerToken });
-    expect(view.body).toMatchObject({ enabled: true, events7d: 2, visitors7d: 1, lastEventHost: "shop.acme.test" });
+    expect(view.body).toMatchObject({ enabled: true, visitors7d: 1, checkouts7d: 0, lastEventHost: "shop.acme.test", checkoutPaths: [] });
+    expect(view.body.lastEventAt).toBe(clock.toISOString());
   });
 
   it("once domains are set, other origins and non-browser requests are refused with the same 404", async () => {
@@ -137,15 +142,26 @@ describe("website tracking over HTTP", () => {
     const saved = await call("/v1/tenant/tracking", { method: "PATCH", token: ownerToken, json: { domains: ["shop.acme.test"], pixelConversions: true } });
     expect(saved.status).toBe(200);
     expect(saved.body).toMatchObject({ domains: ["shop.acme.test"], pixelConversions: true });
-    const batch = { visitorId: visitor, sessionId: "s_browser_session1", events: [{ type: "page_view", url: "https://shop.acme.test/pricing" }] };
+    const batch = { visitorId: visitor, ref: clickToken, hits: [{ s: "visit", url: "https://shop.acme.test/pricing", page: true }, { s: "bottom", url: "https://shop.acme.test/pricing", page: true, site: true }] };
     expect((await beacon(`/t/${siteKey}/events`, batch, "https://evil.test")).status).toBe(404);
     expect((await call(`/t/${siteKey}/events`, { method: "POST", text: JSON.stringify(batch) })).status).toBe(404);
     expect((await beacon(`/t/${siteKey}/events`, batch, "https://www.shop.acme.test")).status).toBe(200);
     expect((await call(`/v1/tenant/tracking`, { method: "PATCH", token: marketingToken, json: { domains: [] } })).status).toBe(403);
   });
 
-  it("an order reported by the snippet is recorded as a pixel sale, attributed through the visitor, idempotent, and shows on the journey; the delivery is logged", async () => {
-    const order = { visitorId: visitor, sessionId: "s_browser_session1", orderId: "WEB-1", amount: 129, currency: "usd", email: "buyer@example.com", url: "https://shop.acme.test/thanks?order=WEB-1" };
+  it("the checkout addresses a merchant sets ride on the install code, for every platform", async () => {
+    const saved = await call("/v1/tenant/tracking", { method: "PATCH", token: ownerToken, json: { checkoutPaths: ["/buy", "https://shop.acme.test/Enroll?x=1"] } });
+    expect(saved.status).toBe(200);
+    expect(saved.body.checkoutPaths).toEqual(["/buy", "/enroll"]);
+    expect(saved.body.install).toContain(`data-site="${siteKey}" data-checkout="/buy,/enroll"></script>`);
+    for (const guide of saved.body.platforms) expect(guide.install.code, guide.id).toContain('data-checkout="/buy,/enroll"');
+    expect((await call("/v1/tenant/tracking", { method: "PATCH", token: ownerToken, json: { checkoutPaths: ['/x"><script>'] } })).status).toBe(400);
+    const cleared = await call("/v1/tenant/tracking", { method: "PATCH", token: ownerToken, json: { checkoutPaths: [] } });
+    expect(cleared.body.install).not.toContain("data-checkout");
+  });
+
+  it("an order reported by the snippet is recorded as a pixel sale, attributed through the visitor, and idempotent; the delivery is logged", async () => {
+    const order = { visitorId: visitor, orderId: "WEB-1", amount: 129, currency: "usd", email: "buyer@example.com", url: "https://shop.acme.test/thanks" };
     const first = await beacon(`/t/${siteKey}/convert`, order);
     expect(first.status).toBe(201);
     expect(first.body).toEqual({ ok: true, recorded: true, conversionId: expect.stringMatching(/^cnv_/), duplicate: false, attributed: true });
@@ -156,10 +172,8 @@ describe("website tracking over HTTP", () => {
     expect(detail.body.conversion).toMatchObject({ source: "pixel", kind: "sale", amountMinor: 12_900, currency: "USD", affiliateId, attributionSource: "link", customerRef: null });
     expect(detail.body.conversion.customerEmailHash).toBeTruthy();
     expect(detail.body.commission.amountMinor).toBe(1_290);
-    const journey = await call(`/v1/conversions/${first.body.conversionId}/journey`, { token: ownerToken });
-    expect(journey.body.visitorId).toBe(visitor);
-    expect(journey.body.events.map((e: any) => e.type)).toEqual(["page_view", "event", "page_view", "conversion"]);
-    expect(journey.body.events.at(-1)).toMatchObject({ name: "WEB-1", conversionId: first.body.conversionId, path: "/thanks?order=WEB-1" });
+    // the per-visitor journey of a sale is gone with the per-visitor rows
+    expect((await call(`/v1/conversions/${first.body.conversionId}/journey`, { token: ownerToken })).status).toBe(404);
     // minor units and a zero-decimal currency are accepted too; a bad body is a 400 and logged as failed
     expect((await beacon(`/t/${siteKey}/convert`, { ...order, orderId: "WEB-2", amount: undefined, amountMinor: 5_000 })).body).toMatchObject({ duplicate: false });
     expect((await beacon(`/t/${siteKey}/convert`, { ...order, orderId: "WEB-3", amount: 1500, currency: "JPY" })).status).toBe(201);
@@ -173,13 +187,13 @@ describe("website tracking over HTTP", () => {
     expect(smuggled).toMatchObject({ source: "pixel", kind: "sale", affiliateId });
   });
 
-  it("snippet-reported orders are refused when the workspace turns them off, while events keep flowing", async () => {
+  it("snippet-reported orders are refused when the workspace turns them off, while hits keep flowing", async () => {
     await call("/v1/tenant/tracking", { method: "PATCH", token: ownerToken, json: { pixelConversions: false } });
     expect((await beacon(`/t/${siteKey}/convert`, { visitorId: visitor, orderId: "WEB-9", amount: 10 })).status).toBe(404);
-    expect((await beacon(`/t/${siteKey}/events`, { visitorId: visitor, sessionId: "s_browser_session2", events: [{ type: "page_view", url: "https://shop.acme.test/" }] })).status).toBe(200);
+    expect((await beacon(`/t/${siteKey}/events`, { visitorId: visitor, ref: clickToken, hits: [{ s: "visit", url: "https://shop.acme.test/checkout", page: true }, { s: "checkout", url: "https://shop.acme.test/checkout", page: true, site: true }] })).status).toBe(200);
   });
 
-  it("a server-side post from the checkout with the visitor id (no cookie, no ref) is attributed through the recorded journey", async () => {
+  it("a server-side post from the checkout with the visitor id (no cookie, no ref) is attributed through the click that visitor landed with", async () => {
     const res = await call("/v1/conversions", { method: "POST", token: apiKey, json: { externalOrderId: "SRV-1", offerId, amountMinor: 20_000, visitorId: visitor } });
     expect(res.status).toBe(201);
     expect(res.body.conversion.affiliateId).toBe(affiliateId);
@@ -187,46 +201,49 @@ describe("website tracking over HTTP", () => {
     expect((await call("/v1/conversions", { method: "POST", token: apiKey, json: { externalOrderId: "SRV-2", offerId, amountMinor: 20_000, visitorId: "bad id!" } })).status).toBe(400);
   });
 
-  it("the journeys page lists visits with outcome and affiliate, filters, summarises, and opens a visitor's full journey; affiliates are refused", async () => {
-    const session = await call(`/v1/journeys/sessions/${visitor}/s_browser_session1`, { token: ownerToken });
-    expect(session.body.events.map((e: any) => `${e.type}:${e.name ?? e.path}`)).toEqual([`page_view:/course?ref=${clickToken}`, "event:add_to_cart", "page_view:/pricing", "conversion:WEB-1", "conversion:WEB-2", "conversion:WEB-3", "conversion:WEB-4"]);
-    const list = await call("/v1/journeys?days=30", { token: ownerToken });
-    expect(list.status).toBe(200);
-    // the server-side sale (SRV-1) landed on the visitor's newer session, so both visits converted
-    expect(list.body.summary).toEqual({ visits: 2, sales: 2, leads: 0 });
-    const first = list.body.sessions.find((s: any) => s.sessionId === "s_browser_session1");
-    expect(first).toMatchObject({ visitorId: visitor, affiliateId, affiliateName: "Pat Partner", pages: 2, events: 1, conversions: 4, outcome: "converted", landingPath: `/course?ref=${clickToken}`, referrer: "https://pat.blog/review" });
-    expect((await call("/v1/journeys?converted=1", { token: ownerToken })).body.sessions.map((s: any) => s.sessionId).sort()).toEqual(["s_browser_session1", "s_browser_session2"]);
-    const second = list.body.sessions.find((s: any) => s.sessionId === "s_browser_session2");
-    expect(second).toMatchObject({ pages: 1, conversions: 1, outcome: "converted" });
-    expect((await call(`/v1/journeys?affiliateId=${affiliateId}`, { token: ownerToken })).body.sessions.length).toBe(2);
-    expect((await call(`/v1/journeys?affiliateId=aff_nobody`, { token: ownerToken })).body.sessions.length).toBe(0);
-    const all = await call(`/v1/journeys/visitors/${visitor}`, { token: ownerToken });
-    expect(all.body.events.length).toBe(9);
+  it("the journeys report is totals only: the funnel, the pages, the site's own events, filtered by affiliate; nothing in it identifies a visitor; affiliates are refused", async () => {
+    const report = await call("/v1/journeys?days=30", { token: ownerToken });
+    expect(report.status).toBe(200);
+    // one person arrived, read half of one page and the bottom of another, reached the checkout, and five sales were recorded against the link
+    expect(report.body.funnel).toEqual({ visitors: 1, half: 1, bottom: 1, checkout: 1, purchases: 5, revenue: [{ currency: "USD", minor: 12_900 + 5_000 + 12_900 + 20_000 }, { currency: "JPY", minor: 1_500 }], leads: 0 });
+    expect(report.body.couponOnlySales).toBe(0);
+    expect(report.body.pages).toEqual([
+      { page: "shop.acme.test/course", landed: 1, visitors: 1, half: 1, bottom: 0, checkout: 0 },
+      { page: "shop.acme.test/checkout", landed: 0, visitors: 1, half: 0, bottom: 0, checkout: 1 },
+      { page: "shop.acme.test/pricing", landed: 0, visitors: 1, half: 0, bottom: 1, checkout: 0 },
+    ]);
+    expect(report.body.events).toEqual([{ name: "add_to_cart", visitors: 1 }]);
+    expect(JSON.stringify(report.body)).not.toContain(visitor);
+    expect((await call(`/v1/journeys?affiliateId=${affiliateId}`, { token: ownerToken })).body.funnel.visitors).toBe(1);
+    expect((await call(`/v1/journeys?affiliateId=aff_nobody`, { token: ownerToken })).body).toMatchObject({ funnel: { visitors: 0, purchases: 0 }, pages: [] });
+    // the per-visitor endpoints no longer exist
+    expect((await call(`/v1/journeys/visitors/${visitor}`, { token: ownerToken })).status).toBe(404);
+    expect((await call(`/v1/journeys/sessions/${visitor}/s_browser_session1`, { token: ownerToken })).status).toBe(404);
     expect((await call("/v1/journeys", { token: marketingToken })).status).toBe(200);
     expect((await call("/v1/journeys", { token: apiKey })).status).toBe(200); // read scope covers reporting
     expect((await call("/v1/journeys", { token: affiliateToken })).status).toBe(403);
     expect((await call("/v1/tenant/tracking", { token: affiliateToken })).status).toBe(403);
   });
 
-  it("another workspace's site key never sees these journeys, and rotating the key invalidates the old snippet", async () => {
+  it("another workspace's site key never counts these visitors, and rotating the key invalidates the old snippet", async () => {
     const other = await call("/v1/auth/signup", { method: "POST", json: { name: "Other", slug: "other-shop", currency: "USD", owner: { name: "Bo", email: "bo@other.test", password: "supersecret1" } } });
     const enabled = await call("/v1/tenant/tracking/enable", { method: "POST", token: other.body.token });
     const otherKey = enabled.body.siteKey;
-    const res = await beacon(`/t/${otherKey}/events`, { visitorId: visitor, sessionId: "s_browser_session1", ref: clickToken, events: [{ type: "page_view", url: "https://other.test/" }] });
-    // the click belongs to Acme, so for this workspace nobody sent the visitor and nothing is kept
+    const hits = [{ s: "visit", url: "https://other.test/", page: true, site: true }];
+    const res = await beacon(`/t/${otherKey}/events`, { visitorId: visitor, ref: clickToken, hits });
+    // the click belongs to Acme, so for this workspace nobody sent the visitor and nothing is counted
     expect(res.body).toEqual({ ok: true, accepted: 0, ref: null, dropped: "no_affiliate" });
-    expect((await call("/v1/journeys", { token: other.body.token })).body.sessions).toEqual([]);
-    expect((await call("/v1/journeys", { token: ownerToken })).body.summary.visits).toBe(2);
+    expect((await call("/v1/journeys", { token: other.body.token })).body.funnel.visitors).toBe(0);
+    expect((await call("/v1/journeys", { token: ownerToken })).body.funnel.visitors).toBe(1);
     const rotated = await call("/v1/tenant/tracking/rotate", { method: "POST", token: ownerToken });
     expect(rotated.body.siteKey).not.toBe(siteKey);
-    expect((await beacon(`/t/${siteKey}/events`, { visitorId: visitor, sessionId: "s_browser_session2", events: [{ type: "page_view" }] })).status).toBe(404);
-    expect((await beacon(`/t/${rotated.body.siteKey}/events`, { visitorId: visitor, sessionId: "s_browser_session2", events: [{ type: "page_view" }] })).status).toBe(200);
+    expect((await beacon(`/t/${siteKey}/events`, { ref: clickToken, hits })).status).toBe(404);
+    expect((await beacon(`/t/${rotated.body.siteKey}/events`, { ref: clickToken, hits })).status).toBe(200);
   });
 });
 
 describe("consent mode over HTTP", () => {
-  it("the snippet code carries data-consent, visits wait for consent, and orders before consent still count by click but stay off the journey", async () => {
+  it("the snippet code carries data-consent, hits wait for consent, and orders before consent still count by click", async () => {
     const signup = await call("/v1/auth/signup", { method: "POST", json: { name: "EU Shop", slug: "eu-shop", currency: "EUR", owner: { name: "Eva", email: "eva@eu.test", password: "supersecret1" } } });
     const token = signup.body.token;
     const on = await call("/v1/tenant/tracking/enable", { method: "POST", token });
@@ -249,30 +266,31 @@ describe("consent mode over HTTP", () => {
     const redirect = await app.request(`${BASE}/r/${link.body.link.token}`, { redirect: "manual" });
     const ref = new URL(redirect.headers.get("location")!).searchParams.get("ref")!;
 
-    const batch = { visitorId: "v_eu_browser_0001", sessionId: "s_eu_browser_0001", ref, events: [{ type: "page_view", url: "https://eu.test/" }] };
+    const batch = { visitorId: "v_eu_browser_0001", ref, hits: [{ s: "visit", url: "https://eu.test/", page: true, site: true }] };
     expect((await beacon(`/t/${key}/events`, batch, "https://eu.test")).body).toEqual({ ok: true, accepted: 0, ref: null, dropped: "consent_required" });
+    expect((await call("/v1/journeys", { token })).body.funnel.visitors).toBe(0);
     expect((await beacon(`/t/${key}/events`, { ...batch, consent: "granted" }, "https://eu.test")).body).toEqual({ ok: true, accepted: 1, ref: { ttlSeconds: 30 * 86_400 } });
-    const events = await call(`/v1/journeys/visitors/${batch.visitorId}`, { token });
-    expect(events.body.events.map((e: any) => e.consentState)).toEqual(["granted"]);
+    expect((await call("/v1/journeys", { token })).body.funnel.visitors).toBe(1);
 
-    // someone who never consents still counts by their own click; the visitor id stays in the browser and no journey is kept
+    // someone who never consents still counts by their own click; the visitor id stays in the browser
     const neverConsented = new URL((await app.request(`${BASE}/r/${link.body.link.token}`, { redirect: "manual" })).headers.get("location")!).searchParams.get("ref")!;
-    const byClick = await beacon(`/t/${key}/convert`, { visitorId: "v_eu_never_consent1", sessionId: "s_eu_never_consent1", consent: "pending", ref: neverConsented, orderId: "EU-1", amount: 10 }, "https://eu.test");
+    const byClick = await beacon(`/t/${key}/convert`, { visitorId: "v_eu_never_consent1", consent: "pending", ref: neverConsented, orderId: "EU-1", amount: 10 }, "https://eu.test");
     expect(byClick.status).toBe(201);
     expect(byClick.body).toMatchObject({ recorded: true, attributed: true });
-    expect((await call(`/v1/journeys/visitors/${batch.visitorId}`, { token })).body.events.length).toBe(1);
-    expect((await call("/v1/journeys/visitors/v_eu_never_consent1", { token })).body.events).toEqual([]);
+    // the unconsented visitor id was not kept: an order that carries only that id finds no click
+    const orphan = await beacon(`/t/${key}/convert`, { visitorId: "v_eu_never_consent1", consent: "granted", orderId: "EU-3", amount: 10 }, "https://eu.test");
+    expect(orphan.body).toEqual({ ok: true, recorded: false, reason: "no_affiliate" });
     // an order no affiliate can claim is acknowledged and not kept
     const nobody = await beacon(`/t/${key}/convert`, { consent: "pending", orderId: "EU-0", amount: 10 }, "https://eu.test");
     expect(nobody.status).toBe(200);
     expect(nobody.body).toEqual({ ok: true, recorded: false, reason: "no_affiliate" });
-    // with consent it lands on the journey
-    const consented = await beacon(`/t/${key}/convert`, { visitorId: batch.visitorId, sessionId: batch.sessionId, consent: "granted", orderId: "EU-2", amount: 10 }, "https://eu.test");
+    // with consent the visitor id is evidence
+    const consented = await beacon(`/t/${key}/convert`, { visitorId: batch.visitorId, consent: "granted", orderId: "EU-2", amount: 10 }, "https://eu.test");
     expect(consented.status).toBe(201);
-    expect((await call(`/v1/journeys/visitors/${batch.visitorId}`, { token })).body.events.map((e: any) => [e.type, e.consentState])).toEqual([["page_view", "granted"], ["conversion", "granted"]]);
+    expect((await call("/v1/journeys", { token })).body.funnel).toMatchObject({ visitors: 1, purchases: 2 });
     // switching consent mode off accepts plain batches again
     await call("/v1/tenant/tracking", { method: "PATCH", token, json: { consentMode: "off" } });
-    expect((await beacon(`/t/${key}/events`, batch, "https://eu.test")).body).toMatchObject({ accepted: 1 });
+    expect((await beacon(`/t/${key}/events`, { ...batch, hits: [{ s: "half", url: "https://eu.test/", page: true, site: true }] }, "https://eu.test")).body).toMatchObject({ accepted: 1 });
   });
 });
 

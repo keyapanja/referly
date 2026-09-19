@@ -1,7 +1,7 @@
 import { and, count, eq, inArray, isNull, lt, notInArray, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { DbLike } from "../db/client";
-import { attributions, auditLogs, authTokens, automationRuns, clicks, exports, jobs, journeyEvents, messageLogs, notifications, sessions, tenants, webhookDeliveries, webhookOutboundDeliveries, type Tenant, type TenantRetention } from "../db/schema";
+import { attributions, auditLogs, authTokens, automationRuns, clicks, exports, jobs, journeyStats, messageLogs, notifications, sessions, tenants, webhookDeliveries, webhookOutboundDeliveries, type Tenant, type TenantRetention } from "../db/schema";
 import { type TenantContext, require as requirePerm } from "../context";
 import { writeAudit } from "./audit";
 import { getTenant } from "./tenants";
@@ -51,7 +51,7 @@ export const RETENTION_LABELS: Record<RetentionCategory, string> = {
   automationRunsDays: "Automation run history",
   notificationsDays: "In-app notifications",
   leadsDays: "Lead contact details (settled leads; the lead record stays)",
-  journeyDays: "Website journey events (page views and events from the site snippet)",
+  journeyDays: "Website journey totals (daily counts from the site snippet; no visitor is recorded)",
 };
 
 const dayField = (cat: RetentionCategory) => z.number().int().min(RETENTION_BOUNDS[cat][0]).max(RETENTION_BOUNDS[cat][1]).nullable().optional();
@@ -115,7 +115,7 @@ export async function previewPrune(db: DbLike, ctx: TenantContext, policy: Reten
     db.select({ n: count() }).from(automationRuns).where(and(eq(automationRuns.tenantId, t), lt(automationRuns.createdAt, daysAgo(now, policy.automationRunsDays)))),
     db.select({ n: count() }).from(notifications).where(and(eq(notifications.tenantId, t), lt(notifications.createdAt, daysAgo(now, policy.notificationsDays)))),
     countOldLeadContacts(db, t, daysAgo(now, policy.leadsDays)),
-    db.select({ n: count() }).from(journeyEvents).where(and(eq(journeyEvents.tenantId, t), lt(journeyEvents.occurredAt, daysAgo(now, policy.journeyDays)))),
+    db.select({ n: count() }).from(journeyStats).where(and(eq(journeyStats.tenantId, t), lt(journeyStats.day, daysAgo(now, policy.journeyDays).toISOString().slice(0, 10)))),
   ]);
   return { clicksDays: n(clk), messageLogsDays: n(msg), auditLogsDays: n(aud), webhookDeliveriesDays: n(whIn) + n(whOut), automationRunsDays: n(runs), notificationsDays: n(ntf), leadsDays: lds, journeyDays: n(jev) };
 }
@@ -171,7 +171,7 @@ export async function pruneTenant(db: DbLike, ctx: TenantContext, policy: Retent
   const runs = affected(await db.delete(automationRuns).where(and(eq(automationRuns.tenantId, t), lt(automationRuns.createdAt, daysAgo(now, policy.automationRunsDays)))));
   const ntf = affected(await db.delete(notifications).where(and(eq(notifications.tenantId, t), lt(notifications.createdAt, daysAgo(now, policy.notificationsDays)))));
   const lds = await eraseOldLeadContacts(db, t, daysAgo(now, policy.leadsDays));
-  const jev = affected(await db.delete(journeyEvents).where(and(eq(journeyEvents.tenantId, t), lt(journeyEvents.occurredAt, daysAgo(now, policy.journeyDays)))));
+  const jev = affected(await db.delete(journeyStats).where(and(eq(journeyStats.tenantId, t), lt(journeyStats.day, daysAgo(now, policy.journeyDays).toISOString().slice(0, 10)))));
   const counts = { clicksDays: clk, messageLogsDays: msg, auditLogsDays: aud, webhookDeliveriesDays: whIn + whOut, automationRunsDays: runs, notificationsDays: ntf, leadsDays: lds, journeyDays: jev };
   if (Object.values(counts).some((v) => v > 0)) await writeAudit(db, ctx, { entityType: "tenant", entityId: t, action: "retention_pruned", after: { deleted: counts, policy } });
   return counts;

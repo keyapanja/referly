@@ -34,7 +34,7 @@ export function WebsiteTrackingCard() {
             <dd>{data.lastEventAt ? `${dateTime(data.lastEventAt)}${data.lastEventHost ? ` from ${data.lastEventHost}` : ""}` : "nothing yet"}</dd>
             <dt>Last 7 days</dt>
             <dd>
-              {data.events7d} events from {data.visitors7d} visitors
+              {data.visitors7d} visitors, {data.checkouts7d} reached the checkout
             </dd>
             <dt>Domains</dt>
             <dd>{data.domains.length ? data.domains.join(", ") : <span className="muted">any (not locked down)</span>}</dd>

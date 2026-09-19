@@ -26,6 +26,7 @@ export function connectionRoutes() {
         scriptUrl: `${base}/referly.js`,
         apiUrl: base,
         consentMode: tenant.tracking?.consentMode ?? "off",
+        checkoutPaths: tenant.tracking?.checkoutPaths ?? [],
       },
     });
   });

@@ -1,4 +1,4 @@
-import { installSnippet } from "./snippet";
+import { installSnippet, snippetAttributes } from "./snippet";
 import { WORDPRESS_PLUGIN_PATH } from "./wordpress";
 
 /**
@@ -57,10 +57,10 @@ export interface PlatformGuide {
 export const PLATFORM_IDS = ["custom", "wordpress", "shopify", "stripe", "webflow", "wix-squarespace", "gtm", "react"] as const;
 export type PlatformId = (typeof PLATFORM_IDS)[number];
 
-export function platformGuides(baseUrl: string, siteKey: string, opts: { consentMode?: "off" | "wait" } = {}): PlatformGuide[] {
+export function platformGuides(baseUrl: string, siteKey: string, opts: { consentMode?: "off" | "wait"; checkoutPaths?: string[] } = {}): PlatformGuide[] {
   const base = baseUrl.replace(/\/$/, "");
-  const consentAttr = opts.consentMode === "wait" ? ` data-consent="wait"` : "";
-  const tag = installSnippet(base, siteKey, { consentMode: opts.consentMode });
+  const tagAttrs = snippetAttributes(opts);
+  const tag = installSnippet(base, siteKey, opts);
 
   const guides: PlatformGuide[] = [
     {
@@ -95,7 +95,7 @@ export function platformGuides(baseUrl: string, siteKey: string, opts: { consent
       plugin: {
         downloadUrl: `${base}${WORDPRESS_PLUGIN_PATH}`,
         covers: [
-          "Adds the tracking code to every page, FunnelKit and other page-builder pages included.",
+          "Adds the tracking code to every page, FunnelKit and other page-builder pages included, and tells it which page is your checkout.",
           "Reports paid WooCommerce orders that came through an affiliate, from your server, so a closed tab or an abandoned upsell never loses a sale. Other orders are never sent.",
           "Sends refunds you make in WooCommerce, so the commission is reduced or reversed automatically.",
         ],
@@ -303,7 +303,7 @@ const session = await stripe.checkout.sessions.create({
 <Script id="referly-stub" strategy="beforeInteractive">
   {\`window.referly=window.referly||function(){(window.referly.q=window.referly.q||[]).push(arguments)};\`}
 </Script>
-<Script src="${base}/referly.js" data-site="${siteKey}"${consentAttr} strategy="afterInteractive" />`,
+<Script src="${base}/referly.js" data-site="${siteKey}"${tagAttrs} strategy="afterInteractive" />`,
         note: "Vite, Create React App, Vue or plain single-page apps: paste the plain HTML version into index.html instead. Do not call it on every route change; the snippet already does that.",
       },
       order: {

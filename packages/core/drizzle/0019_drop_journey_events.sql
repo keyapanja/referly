@@ -1,0 +1,1 @@
+DROP TABLE "journey_events" CASCADE;

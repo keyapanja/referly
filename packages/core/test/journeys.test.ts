@@ -1,19 +1,23 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { and, eq } from "drizzle-orm";
 import type { Db } from "../src/db/client";
 import { clickFor, closeDb, createActiveAffiliate, createWorkspace, getDb, makeClock, type Workspace } from "./helpers";
 import { systemContext } from "../src/context";
+import { clicks, journeyStats } from "../src/db/schema";
 import * as journeys from "../src/services/journeys";
 import * as conversions from "../src/services/conversions";
 import * as leads from "../src/services/leads";
-import * as programs from "../src/services/programs";
 import * as retention from "../src/services/retention";
 import * as tenants from "../src/services/tenants";
+import * as tracking from "../src/services/tracking";
 import { withTenantScope } from "../src/db/rls";
 
 /**
- * Website tracking (TRK-09): site key lifecycle and origin rules, event ingest with click
- * resolution and visitor memory, the visitor id as attribution evidence, conversions landing
- * on the journey, session listing and summaries, and retention.
+ * Website tracking (TRK-09) as totals: site key lifecycle and origin rules, hits from the
+ * snippet becoming daily counters per affiliate and page with nothing kept per visitor, page
+ * normalisation and the caps that bound the table, the funnel report with purchases counted from
+ * the sales themselves, the visitor id as attribution evidence through the click row, and
+ * retention.
  */
 let db: Db;
 const clock = makeClock("2026-04-01T09:00:00Z");
@@ -25,12 +29,14 @@ beforeAll(async () => {
 });
 afterAll(closeDb);
 
-const at = (offsetMs: number) => clock.now().getTime() + offsetMs;
+const SHOP = "https://shop.example.com";
+/** What the snippet sends for a stage: both flags set means "first time today, on the site and on this page". */
+const hit = (s: "visit" | "half" | "bottom" | "checkout", path: string, flags: { site?: boolean; page?: boolean } = { site: true, page: true }) => ({ s, url: `${SHOP}${path}`, ...flags });
 
 describe("website tracking settings", () => {
   it("is off until enabled; enabling mints a stable site key that resolves the workspace; rotation replaces it", async () => {
     const before = await journeys.getTracking(db, ws.ctx);
-    expect(before).toMatchObject({ enabled: false, siteKey: null, domains: [], pixelConversions: false, lastEventAt: null, events7d: 0 });
+    expect(before).toMatchObject({ enabled: false, siteKey: null, domains: [], pixelConversions: false, checkoutPaths: [], lastEventAt: null, lastEventHost: null, visitors7d: 0, checkouts7d: 0 });
     const key = await journeys.enableTracking(db, ws.ctx);
     expect(key).toMatch(/^site_[A-Za-z0-9]{24}$/);
     expect(await journeys.enableTracking(db, ws.ctx)).toBe(key);
@@ -61,133 +67,200 @@ describe("website tracking settings", () => {
     await expect(journeys.updateTracking(db, marketing, { domains: [] })).rejects.toThrow(/integrations.manage/);
     await journeys.updateTracking(db, ws.ctx, { domains: [], pixelConversions: false });
   });
+
+  it("checkout addresses are kept as path fragments, whatever was pasted", async () => {
+    const saved = await journeys.updateTracking(db, ws.ctx, { checkoutPaths: ["buy", "/Enroll/", "https://shop.example.com/pay-now?step=2", "/buy"] });
+    expect(saved.checkoutPaths).toEqual(["/buy", "/enroll/", "/pay-now"]);
+    expect((await journeys.getTracking(db, ws.ctx)).checkoutPaths).toEqual(["/buy", "/enroll/", "/pay-now"]);
+    await expect(journeys.updateTracking(db, ws.ctx, { checkoutPaths: ['/x" onload="alert(1)'] })).rejects.toThrow();
+    await expect(journeys.updateTracking(db, ws.ctx, { checkoutPaths: ["/"] })).rejects.toThrow();
+    await journeys.updateTracking(db, ws.ctx, { checkoutPaths: [] });
+  });
 });
 
-describe("journey ingest and attribution", () => {
-  let aliceId: string;
-  let clickToken: string;
-  const visitor = "v_alice_visitor_01";
+describe("pages", () => {
+  it("are host and path only: no query string, no www, no trailing slash, and ids folded so one order is not one page", () => {
+    expect(journeys.normalizePage("https://WWW.Shop.Example.com/Pricing/?ref=abc123&email=a@b.co#plans")).toBe("shop.example.com/pricing");
+    expect(journeys.normalizePage("https://shop.example.com/")).toBe("shop.example.com");
+    expect(journeys.normalizePage("https://shop.example.com/checkout/order-received/10452/?key=wc_order_Ab12Cd34")).toBe("shop.example.com/checkout/order-received/:id");
+    expect(journeys.normalizePage("https://shop.example.com/orders/3f2504e0-4f89-41d3-9a0c-0305e82c3301/status")).toBe("shop.example.com/orders/:id/status");
+    expect(journeys.normalizePage("https://acme.myshopify.com/checkouts/cn/Z2NwLXVzLWNlbnRyYWwxOjAxSjk4/information")).toBe("acme.myshopify.com/checkouts/cn/:id/information");
+    // an ordinary long slug is a page, not an id
+    expect(journeys.normalizePage("https://shop.example.com/blog/how-to-choose-a-standing-desk")).toBe("shop.example.com/blog/how-to-choose-a-standing-desk");
+    expect(journeys.normalizePage(`https://shop.example.com/${"z".repeat(400)}`)!.length).toBe(160);
+    expect(journeys.normalizePage("javascript:alert(1)")).toBeNull();
+    expect(journeys.normalizePage("not a url")).toBeNull();
+    expect(journeys.normalizePage(undefined)).toBeNull();
+  });
+});
 
-  it("a batch with the click token from the landing URL is tied to the affiliate and returns the program's window as the cookie ttl", async () => {
+describe("hits become daily counters", () => {
+  let aliceId: string;
+  let bobId: string;
+  let aliceClick: { id: string; token: string };
+  let bobToken: string;
+  const ctx = () => systemContext(ws.tenant.id, clock.now);
+
+  it("a visitor's first batch counts them on the site, on the page and as landing there, and returns the program's window as the cookie ttl", async () => {
     const alice = await createActiveAffiliate(db, ws, "Alice");
     aliceId = alice.id;
     const click = await clickFor(db, ws, alice, clock);
-    clickToken = click.token;
-    const result = await journeys.ingestEvents(db, systemContext(ws.tenant.id, clock.now), {
-      visitorId: visitor,
-      sessionId: "s_first_session_01",
-      ref: clickToken,
-      events: [
-        { type: "page_view", url: "https://acme.example.com/coaching?ref=" + clickToken + "&utm=x", title: "Coaching", referrer: "https://blog.partner.io/post", at: at(0) },
-        { type: "page_view", url: "https://acme.example.com/pricing", title: "Pricing", at: at(30_000) },
-        { type: "event", name: "add_to_cart", url: "https://acme.example.com/pricing", properties: { sku: "COACH-1", value: 1000, nested: { deep: true }, long: "x".repeat(900) }, at: at(45_000) },
-      ],
-    });
-    expect(result).toEqual({ accepted: 3, attributed: true, ref: { ttlSeconds: 14 * 86_400 } });
-    const events = await journeys.sessionEvents(db, ws.ctx, visitor, "s_first_session_01");
-    expect(events.map((e) => e.type)).toEqual(["page_view", "page_view", "event"]);
-    expect(events[0]!).toMatchObject({ affiliateId: aliceId, programId: ws.program.id, path: "/coaching?ref=" + clickToken + "&utm=x", title: "Coaching", referrer: "https://blog.partner.io/post" });
-    expect(events[0]!.clickId).toBeTruthy();
-    expect(events[2]!.name).toBe("add_to_cart");
-    // properties are bounded: nested values stringified, long strings cut
-    expect(events[2]!.properties).toMatchObject({ sku: "COACH-1", value: 1000, nested: '{"deep":true}' });
-    expect((events[2]!.properties.long as string).length).toBe(500);
-    expect(events[0]!.occurredAt.getTime()).toBe(at(0));
+    aliceClick = { id: click.click.id, token: click.token };
+    const res = await journeys.ingestHits(db, ctx(), { visitorId: "v_alice_visitor_01", ref: click.token, hits: [hit("visit", "/course?ref=" + click.token), hit("half", "/course")] });
+    expect(res).toEqual({ accepted: 2, attributed: true, ref: { ttlSeconds: 14 * 86_400 } });
+
+    const rows = await db.select().from(journeyStats).where(eq(journeyStats.tenantId, ws.tenant.id));
+    expect(rows.map((r) => [r.day, r.affiliateId, r.page, r.stage, r.count]).sort()).toEqual(
+      [
+        ["2026-04-01", aliceId, "", "half", 1],
+        ["2026-04-01", aliceId, "", "visit", 1],
+        ["2026-04-01", aliceId, "shop.example.com/course", "half", 1],
+        ["2026-04-01", aliceId, "shop.example.com/course", "land", 1],
+        ["2026-04-01", aliceId, "shop.example.com/course", "visit", 1],
+      ].sort(),
+    );
+    // nothing about the visitor is in the counters; only the click remembers who landed with it
+    expect(JSON.stringify(rows)).not.toContain("v_alice_visitor_01");
+    expect((await db.query.clicks.findFirst({ where: eq(clicks.id, aliceClick.id) }))!.visitorId).toBe("v_alice_visitor_01");
   });
 
-  it("a later batch without a ref (cookie gone) stays with the visitor's earlier click; an implausible client clock is replaced by the server's", async () => {
-    clock.advanceDays(2);
-    const result = await journeys.ingestEvents(db, systemContext(ws.tenant.id, clock.now), {
-      visitorId: visitor,
-      sessionId: "s_second_session_1",
-      events: [{ type: "page_view", url: "https://acme.example.com/pricing", at: at(-5 * 86_400_000) }],
-    });
-    expect(result).toEqual({ accepted: 1, attributed: true, ref: null });
-    const [ev] = await journeys.sessionEvents(db, ws.ctx, visitor, "s_second_session_1");
-    expect(ev!.affiliateId).toBe(aliceId);
-    expect(ev!.occurredAt.getTime()).toBe(clock.now().getTime());
-    // a visitor nobody sent is not recorded at all
-    const stranger = await journeys.ingestEvents(db, systemContext(ws.tenant.id, clock.now), { visitorId: "v_stranger_000001", sessionId: "s_stranger_00001", ref: "not-a-token", events: [{ type: "page_view", url: "https://acme.example.com/" }] });
-    expect(stranger).toEqual({ accepted: 0, attributed: false, ref: null, dropped: "no_affiliate" });
-    expect(await journeys.visitorClickTokens(db, ws.ctx, visitor)).toEqual([clickToken]);
-    expect(await journeys.visitorClickTokens(db, ws.ctx, "v_stranger_000001")).toEqual([]);
+  it("later pages the same day add to the page, not to the site; a second visitor adds to both; another affiliate has rows of their own", async () => {
+    // Alice's visitor moves on: already counted on the site today, new on these pages
+    await journeys.ingestHits(db, ctx(), { visitorId: "v_alice_visitor_01", ref: aliceClick.token, hits: [hit("visit", "/pricing", { page: true }), hit("bottom", "/pricing"), hit("visit", "/checkout", { page: true }), hit("checkout", "/checkout")] });
+    // a hit the browser says it has already reported adds nothing
+    expect((await journeys.ingestHits(db, ctx(), { ref: aliceClick.token, hits: [hit("visit", "/pricing", {})] })).accepted).toBe(0);
+    // a second person through the same affiliate's link
+    const alice2 = await clickFor(db, ws, { id: aliceId } as never, clock);
+    await journeys.ingestHits(db, ctx(), { visitorId: "v_alice_visitor_02", ref: alice2.token, hits: [hit("visit", "/course")] });
+    // and one through Bob's
+    const bob = await createActiveAffiliate(db, ws, "Bob");
+    bobId = bob.id;
+    bobToken = (await clickFor(db, ws, bob, clock)).token;
+    await journeys.ingestHits(db, ctx(), { visitorId: "v_bob_visitor_0001", ref: bobToken, hits: [hit("visit", "/course"), hit("half", "/course"), hit("bottom", "/course")] });
+
+    const all = await journeys.journeyReport(db, ws.ctx, { days: 30 });
+    expect(all.funnel).toMatchObject({ visitors: 3, half: 2, bottom: 2, checkout: 1, purchases: 0, leads: 0 });
+    expect(all.pages).toEqual([
+      { page: "shop.example.com/course", landed: 3, visitors: 3, half: 2, bottom: 1, checkout: 0 },
+      { page: "shop.example.com/checkout", landed: 0, visitors: 1, half: 0, bottom: 0, checkout: 1 },
+      { page: "shop.example.com/pricing", landed: 0, visitors: 1, half: 0, bottom: 1, checkout: 0 },
+    ]);
+    const bobs = await journeys.journeyReport(db, ws.ctx, { days: 30, affiliateId: bobId });
+    expect(bobs.funnel).toMatchObject({ visitors: 1, half: 1, bottom: 1, checkout: 0 });
+    expect(bobs.pages).toEqual([{ page: "shop.example.com/course", landed: 1, visitors: 1, half: 1, bottom: 1, checkout: 0 }]);
+    // the row count is bounded by days, affiliates, pages and stages, not by visitors
+    const before = (await db.select().from(journeyStats).where(eq(journeyStats.tenantId, ws.tenant.id))).length;
+    for (let i = 0; i < 25; i++) await journeys.ingestHits(db, ctx(), { visitorId: `v_crowd_visitor_${String(i).padStart(3, "0")}`, ref: bobToken, hits: [hit("visit", "/course"), hit("half", "/course"), hit("bottom", "/course")] });
+    expect((await db.select().from(journeyStats).where(eq(journeyStats.tenantId, ws.tenant.id))).length).toBe(before);
+    expect((await journeys.journeyReport(db, ws.ctx, { affiliateId: bobId })).funnel.visitors).toBe(26);
   });
 
-  it("the ingest schema refuses malformed batches", async () => {
-    const ctx = systemContext(ws.tenant.id, clock.now);
-    await expect(journeys.ingestEvents(db, ctx, { visitorId: "short", sessionId: "s_ok_session_0001", events: [{ type: "page_view" }] })).rejects.toThrow();
-    await expect(journeys.ingestEvents(db, ctx, { visitorId: visitor, sessionId: "s_ok_session_0001", events: [] })).rejects.toThrow();
-    await expect(journeys.ingestEvents(db, ctx, { visitorId: visitor, sessionId: "s_ok_session_0001", events: [{ type: "purchase" as never }] })).rejects.toThrow();
-    await expect(journeys.ingestEvents(db, ctx, { visitorId: visitor, sessionId: "s_ok_session_0001", events: Array.from({ length: 51 }, () => ({ type: "page_view" as const })) })).rejects.toThrow();
+  it("the site's own events are counted by name, once per visitor per day, and the tracking page shows the last hit and the week's totals", async () => {
+    await journeys.ingestHits(db, ctx(), { ref: aliceClick.token, hits: [{ s: "event", n: "add_to_cart", url: `${SHOP}/course`, site: true }, { s: "event", n: "add_to_cart", url: `${SHOP}/course` }, { s: "event", n: "<script>", site: true }, { s: "event", site: true }] });
+    await journeys.ingestHits(db, ctx(), { ref: bobToken, hits: [{ s: "event", n: "add_to_cart", site: true }, { s: "event", n: "watched video", site: true }] });
+    const report = await journeys.journeyReport(db, ws.ctx);
+    expect(report.events).toEqual([
+      { name: "add_to_cart", visitors: 2 },
+      { name: "watched video", visitors: 1 },
+    ]);
+    const view = await journeys.getTracking(db, ws.ctx);
+    expect(view).toMatchObject({ lastEventHost: "shop.example.com", visitors7d: 28, checkouts7d: 1 });
+    expect(view.lastEventAt?.getTime()).toBe(clock.now().getTime());
   });
 
-  it("a server-side sale that carries only the visitor id is attributed through the visitor's recorded click and lands on the journey", async () => {
-    const result = await conversions.recordConversion(db, ws.ctx, { source: "api", externalOrderId: "J-100", offerId: ws.offer.id, amountMinor: 50_000, visitorId: visitor, metadata: { url: "https://acme.example.com/thanks" } });
-    expect(result.conversion.affiliateId).toBe(aliceId);
-    expect(result.attribution?.ruleApplied).toBe("last_click");
-    expect(result.commission?.amountMinor).toBe(10_000);
-    const journey = await journeys.journeyForConversion(db, ws.ctx, result.conversion.id, result.attribution?.clickId ?? null);
-    expect(journey.visitorId).toBe(visitor);
-    const sale = journey.events.find((e) => e.type === "conversion");
-    expect(sale).toMatchObject({ conversionId: result.conversion.id, name: "J-100", affiliateId: aliceId, sessionId: "s_second_session_1", path: "/thanks", properties: { amountMinor: 50_000, currency: "USD", source: "api", attributed: true } });
-    expect(journey.events.map((e) => e.type)).toEqual(["page_view", "page_view", "event", "page_view", "conversion"]);
+  it("refuses what no affiliate sent, malformed batches, and acknowledges an older snippet's batch without counting it", async () => {
+    expect(await journeys.ingestHits(db, ctx(), { visitorId: "v_nobody_visitor_1", hits: [hit("visit", "/course")] })).toEqual({ accepted: 0, attributed: false, ref: null, dropped: "no_affiliate" });
+    expect(await journeys.ingestHits(db, ctx(), { ref: "not-a-real-token", hits: [hit("visit", "/course")] })).toMatchObject({ accepted: 0, dropped: "no_affiliate" });
+    await expect(journeys.ingestHits(db, ctx(), { ref: aliceClick.token, hits: [] })).rejects.toThrow();
+    await expect(journeys.ingestHits(db, ctx(), { ref: aliceClick.token, hits: [{ s: "teleported", url: SHOP }] })).rejects.toThrow();
+    await expect(journeys.ingestHits(db, ctx(), { ref: aliceClick.token, visitorId: "x", hits: [hit("visit", "/")] })).rejects.toThrow();
+    await expect(journeys.ingestHits(db, ctx(), { ref: aliceClick.token, hits: Array.from({ length: 51 }, () => hit("visit", "/")) })).rejects.toThrow();
+    const before = await journeys.journeyReport(db, ws.ctx);
+    const legacy = { visitorId: "v_alice_visitor_01", sessionId: "s_old_snippet_0001", ref: aliceClick.token, events: [{ type: "page_view", url: `${SHOP}/course` }] };
+    expect(await journeys.ingestHits(db, ctx(), legacy)).toEqual({ accepted: 0, attributed: true, ref: { ttlSeconds: 14 * 86_400 }, dropped: "legacy" });
+    expect((await journeys.journeyReport(db, ws.ctx)).funnel).toEqual(before.funnel);
   });
 
-  it("a sale reported with the click token but no visitor id still lands on the journey through the click", async () => {
-    const result = await conversions.recordConversion(db, ws.ctx, { source: "webhook", externalOrderId: "J-101", offerId: ws.offer.id, amountMinor: 10_000, clickToken });
-    expect(result.conversion.affiliateId).toBe(aliceId);
-    const journey = await journeys.journeyForConversion(db, ws.ctx, result.conversion.id, result.attribution?.clickId ?? null);
-    expect(journey.visitorId).toBe(visitor);
-    expect(journey.events.filter((e) => e.type === "conversion").map((e) => e.name)).toEqual(["J-100", "J-101"]);
-    // a sale no affiliate can claim is not recorded, so it has no journey either
-    await expect(conversions.recordConversion(db, ws.ctx, { source: "api", externalOrderId: "J-102", offerId: ws.offer.id, amountMinor: 1_000 })).rejects.toBeInstanceOf(conversions.NoAffiliateError);
+  it("purchases in the funnel come from the sales a link earned; coupon-only sales are counted beside it, hand-entered ones not at all", async () => {
+    const alice = { id: aliceId };
+    const sale = await conversions.recordConversion(db, ws.ctx, { source: "webhook", externalOrderId: "J-1", offerId: ws.offer.id, amountMinor: 99_900, clickToken: aliceClick.token });
+    expect(sale.conversion.attributionSource).toBe("link");
+    await tracking.createCouponCode(db, ws.ctx, { affiliateId: alice.id, programId: ws.program.id, code: "ALICEJ" });
+    await conversions.recordConversion(db, ws.ctx, { source: "webhook", externalOrderId: "J-2", offerId: ws.offer.id, amountMinor: 50_000, couponCode: "ALICEJ" });
+    await conversions.recordConversion(db, ws.ctx, { source: "manual", externalOrderId: "J-3", offerId: ws.offer.id, amountMinor: 10_000, affiliateId: alice.id, programId: ws.program.id, reason: "phone order" });
+    const cancelled = await conversions.recordConversion(db, ws.ctx, { source: "webhook", externalOrderId: "J-4", offerId: ws.offer.id, amountMinor: 20_000, clickToken: bobToken });
+    await conversions.cancelConversion(db, ws.ctx, cancelled.conversion.id, "test order");
+
+    const report = await journeys.journeyReport(db, ws.ctx);
+    expect(report.funnel).toMatchObject({ purchases: 1, revenue: [{ currency: "USD", minor: 99_900 }] });
+    expect(report.couponOnlySales).toBe(1);
+    expect((await journeys.journeyReport(db, ws.ctx, { affiliateId: bobId })).funnel.purchases).toBe(0);
   });
 
-  it("a lead captured with the visitor id is attributed the same way and shows as a lead on the journey", async () => {
-    await programs.updateProgram(db, ws.ctx, ws.program.id, { leadsEnabled: true, leadCommissionMinor: 500, leadApproval: "manual", leadDedupeDays: 30 });
-    const lead = await leads.recordLead(db, ws.ctx, { source: "form", email: "buyer@example.com", visitorId: visitor, programId: ws.program.id });
-    expect(lead.lead.affiliateId).toBe(aliceId);
-    const journey = await journeys.journeyForConversion(db, ws.ctx, lead.lead.conversionId, null);
-    expect(journey.events.at(-1)).toMatchObject({ type: "lead", conversionId: lead.lead.conversionId, affiliateId: aliceId });
+  it("a sale or a lead that carries only the visitor id finds the click that visitor landed with", async () => {
+    expect(await journeys.visitorClickTokens(db, ws.ctx, "v_alice_visitor_01")).toEqual([aliceClick.token]);
+    expect(await journeys.visitorClickTokens(db, ws.ctx, "v_never_seen_00001")).toEqual([]);
+    const sale = await conversions.recordConversion(db, ws.ctx, { source: "woocommerce", externalOrderId: "J-5", offerId: ws.offer.id, amountMinor: 30_000, visitorId: "v_alice_visitor_01" });
+    expect(sale.conversion).toMatchObject({ affiliateId: aliceId, attributionSource: "link" });
+    expect(sale.attribution!.clickId).toBe(aliceClick.id);
+    // a second click by the same person is remembered too, and the most recent one wins last-touch
+    clock.advanceDays(1);
+    const again = await clickFor(db, ws, { id: bobId } as never, clock);
+    await journeys.ingestHits(db, ctx(), { visitorId: "v_alice_visitor_01", ref: again.token, hits: [hit("visit", "/course")] });
+    expect(await journeys.visitorClickTokens(db, ws.ctx, "v_alice_visitor_01")).toEqual([aliceClick.token, again.token]);
+    // a click keeps the first visitor who landed with it
+    await journeys.ingestHits(db, ctx(), { visitorId: "v_someone_else_001", ref: again.token, hits: [hit("visit", "/pricing", { page: true })] });
+    expect((await db.query.clicks.findFirst({ where: eq(clicks.id, again.click.id) }))!.visitorId).toBe("v_alice_visitor_01");
+
+    const programWithLeads = await createWorkspace(db, clock, { programOverrides: { leadsEnabled: true, leadCommissionMinor: 500, approvalMode: "auto" } });
+    const cara = await createActiveAffiliate(db, programWithLeads, "Cara");
+    const caraClick = await clickFor(db, programWithLeads, cara, clock);
+    await journeys.ingestHits(db, systemContext(programWithLeads.tenant.id, clock.now), { visitorId: "v_cara_visitor_001", ref: caraClick.token, hits: [hit("visit", "/demo")] });
+    const lead = await leads.recordLead(db, programWithLeads.ctx, { source: "form", programId: programWithLeads.program.id, email: "lead@example.com", visitorId: "v_cara_visitor_001" });
+    expect(lead.lead.affiliateId).toBe(cara.id);
+    expect((await journeys.journeyReport(db, programWithLeads.ctx)).funnel).toMatchObject({ visitors: 1, leads: 1, purchases: 0 });
   });
 
-  it("sessions are listed per visit with landing page, counts, outcome and affiliate name; summaries count visits", async () => {
-    const sessions = await journeys.listSessions(db, ws.ctx, { days: 30 });
-    expect(sessions.map((s) => s.sessionId)).toEqual(["s_second_session_1", "s_first_session_01"]);
-    expect(sessions[1]!).toMatchObject({ visitorId: visitor, affiliateId: aliceId, affiliateName: "Alice", pages: 2, events: 1, conversions: 0, leads: 0, landingPath: "/coaching?ref=" + clickToken + "&utm=x", referrer: "https://blog.partner.io/post", outcome: "engaged" });
-    expect(sessions[0]!).toMatchObject({ sessionId: "s_second_session_1", pages: 1, conversions: 2, leads: 1, outcome: "converted" });
-    expect(sessions[0]!.startedAt).toBeInstanceOf(Date);
-    expect(sessions[0]!).toMatchObject({ saleMinor: 60_000, currency: "USD" });
-    // filters
-    expect((await journeys.listSessions(db, ws.ctx, { converted: true })).map((s) => s.sessionId)).toEqual(["s_second_session_1"]);
-    expect((await journeys.listSessions(db, ws.ctx, { affiliateId: "aff_nobody" })).length).toBe(0);
-    // nobody else was recorded: every visit here came through an affiliate
-    expect(sessions.every((s) => s.affiliateId === aliceId)).toBe(true);
-    expect(await journeys.journeySummary(db, ws.ctx, 30)).toEqual({ visits: 2, sales: 1, leads: 0 });
-    const tracking = await journeys.getTracking(db, ws.ctx);
-    expect(tracking.lastEventHost).toBe("acme.example.com");
-    expect(tracking.visitors7d).toBe(1);
-    // a shorter window: only Alice's second visit, the one that bought
-    expect(await journeys.journeySummary(db, ws.ctx, 1)).toEqual({ visits: 1, sales: 1, leads: 0 });
+  it("the table stays bounded: past the day's page limit new pages fold into (other), and event names past theirs are dropped", async () => {
+    const big = await createWorkspace(db, clock);
+    const dee = await createActiveAffiliate(db, big, "Dee");
+    const { token } = await clickFor(db, big, dee, clock);
+    const bigCtx = systemContext(big.tenant.id, clock.now);
+    for (let batch = 0; batch < 7; batch++)
+      await journeys.ingestHits(db, bigCtx, { ref: token, hits: Array.from({ length: 50 }, (_, i) => hit("visit", `/p/page-${batch}-${i}`, { page: true })) });
+    const pages = new Set((await db.select({ page: journeyStats.page }).from(journeyStats).where(eq(journeyStats.tenantId, big.tenant.id))).map((r) => r.page));
+    expect(pages.size).toBe(301); // 300 pages and "(other)"
+    expect(pages.has(journeys.OTHER_PAGE)).toBe(true);
+    const [other] = await db.select().from(journeyStats).where(and(eq(journeyStats.tenantId, big.tenant.id), eq(journeyStats.page, journeys.OTHER_PAGE)));
+    expect(other!.count).toBe(50);
+    // a page already known today keeps counting under its own name
+    await journeys.ingestHits(db, bigCtx, { ref: token, hits: [hit("visit", "/p/page-0-0", { page: true })] });
+    expect((await journeys.journeyReport(db, big.ctx, { pageLimit: 300 })).pages.find((p) => p.page === "shop.example.com/p/page-0-0")!.visitors).toBe(2);
+
+    await journeys.ingestHits(db, bigCtx, { ref: token, hits: Array.from({ length: 40 }, (_, i) => ({ s: "event" as const, n: `event_${i}`, site: true })) });
+    expect((await journeys.journeyReport(db, big.ctx)).events).toHaveLength(30);
   });
 
-  it("another workspace sees nothing of these journeys, under RLS and through the service", async () => {
+  it("another workspace sees nothing of these counters, under RLS and through the service", async () => {
     const other = await createWorkspace(db, clock);
-    expect(await journeys.listSessions(db, other.ctx)).toEqual([]);
-    expect(await journeys.sessionEvents(db, other.ctx, visitor, "s_first_session_01")).toEqual([]);
-    const scoped = await withTenantScope(db, other.tenant.id, (tx) => journeys.visitorEvents(tx, other.ctx, visitor));
+    const report = await journeys.journeyReport(db, other.ctx);
+    expect(report.funnel).toMatchObject({ visitors: 0, half: 0, bottom: 0, checkout: 0, purchases: 0 });
+    expect(report.pages).toEqual([]);
+    const scoped = await withTenantScope(db, other.tenant.id, (tx) => tx.select().from(journeyStats));
     expect(scoped).toEqual([]);
+    // and a click token from one workspace counts nothing in another
+    expect(await journeys.ingestHits(db, systemContext(other.tenant.id, clock.now), { ref: aliceClick.token, hits: [hit("visit", "/course")] })).toMatchObject({ accepted: 0, dropped: "no_affiliate" });
   });
 
-  it("retention prunes journey rows older than journeyDays and the click they pointed at can go too", async () => {
+  it("retention prunes the daily totals older than journeyDays", async () => {
     const policy = { ...retention.RETENTION_DEFAULTS, journeyDays: 7, clicksDays: 30 };
     clock.advanceDays(10);
-    const ctx = { ...ws.ctx, now: clock.now };
-    const preview = await retention.previewPrune(db, ctx, policy);
+    const ctxNow = { ...ws.ctx, now: clock.now };
+    const preview = await retention.previewPrune(db, ctxNow, policy);
     expect(preview.journeyDays).toBeGreaterThan(0);
-    const counts = await retention.pruneTenant(db, ctx, policy);
+    const counts = await retention.pruneTenant(db, ctxNow, policy);
     expect(counts.journeyDays).toBe(preview.journeyDays);
-    expect(await journeys.visitorEvents(db, ws.ctx, visitor)).toEqual([]);
+    expect(await db.select().from(journeyStats).where(eq(journeyStats.tenantId, ws.tenant.id))).toEqual([]);
     expect(retention.RETENTION_BOUNDS.journeyDays).toEqual([7, 400]);
     await expect(retention.updateRetention(db, ws.ctx, { journeyDays: 3 })).rejects.toThrow();
     await retention.updateRetention(db, ws.ctx, { journeyDays: 14 });
@@ -196,7 +269,7 @@ describe("journey ingest and attribution", () => {
 });
 
 describe("consent mode", () => {
-  it("is a workspace setting carried on the install snippet; with it on, batches without consent are dropped and consented events are marked", async () => {
+  it("is a workspace setting; with it on, batches without consent are dropped and consented ones counted", async () => {
     const ws2 = await createWorkspace(db, clock);
     await journeys.enableTracking(db, ws2.ctx);
     expect((await journeys.getTracking(db, ws2.ctx)).consentMode).toBe("off");
@@ -204,21 +277,14 @@ describe("consent mode", () => {
     await expect(journeys.updateTracking(db, ws2.ctx, { consentMode: "maybe" as never })).rejects.toThrow();
     const ctx = systemContext(ws2.tenant.id, clock.now);
     const bea = await createActiveAffiliate(db, ws2, "Bea");
-    const { token } = await clickFor(db, ws2, bea, clock);
-    const batch = { visitorId: "v_eu_visitor_00001", sessionId: "s_eu_session_00001", ref: token, events: [{ type: "page_view" as const, url: "https://acme.example.com/" }] };
-    expect(await journeys.ingestEvents(db, ctx, batch, { consentRequired: true })).toEqual({ accepted: 0, attributed: false, ref: null, dropped: "consent_required" });
-    expect(await journeys.ingestEvents(db, ctx, { ...batch, consent: "not_required" }, { consentRequired: true })).toMatchObject({ accepted: 0, dropped: "consent_required" });
-    expect(await journeys.visitorEvents(db, ws2.ctx, batch.visitorId)).toEqual([]);
-    expect(await journeys.ingestEvents(db, ctx, { ...batch, consent: "granted" }, { consentRequired: true })).toEqual({ accepted: 1, attributed: true, ref: { ttlSeconds: 30 * 86_400 } });
-    const [ev] = await journeys.visitorEvents(db, ws2.ctx, batch.visitorId);
-    expect(ev!.consentState).toBe("granted");
-    // without consent mode the flag is simply recorded as not required
-    expect(await journeys.ingestEvents(db, ctx, batch)).toMatchObject({ accepted: 1 });
-    const rows = await journeys.visitorEvents(db, ws2.ctx, batch.visitorId);
-    expect(rows.map((r) => r.consentState)).toEqual(["granted", "not_required"]);
-    // a sale linked to this visitor inherits the latest consent state
-    const sale = await conversions.recordConversion(db, ws2.ctx, { source: "api", externalOrderId: "EU-1", offerId: ws2.offer.id, amountMinor: 1_000, visitorId: batch.visitorId });
-    const journey = await journeys.journeyForConversion(db, ws2.ctx, sale.conversion.id, null);
-    expect(journey.events.at(-1)).toMatchObject({ type: "conversion", consentState: "not_required" });
+    const { token, click } = await clickFor(db, ws2, bea, clock);
+    const batch = { visitorId: "v_eu_visitor_00001", ref: token, hits: [hit("visit", "/")] };
+    expect(await journeys.ingestHits(db, ctx, batch, { consentRequired: true })).toEqual({ accepted: 0, attributed: false, ref: null, dropped: "consent_required" });
+    expect(await journeys.ingestHits(db, ctx, { ...batch, consent: "not_required" }, { consentRequired: true })).toMatchObject({ accepted: 0, dropped: "consent_required" });
+    // nothing was counted and the click did not learn the visitor
+    expect((await journeys.journeyReport(db, ws2.ctx)).funnel.visitors).toBe(0);
+    expect((await db.query.clicks.findFirst({ where: eq(clicks.id, click.id) }))!.visitorId).toBeNull();
+    expect(await journeys.ingestHits(db, ctx, { ...batch, consent: "granted" }, { consentRequired: true })).toEqual({ accepted: 1, attributed: true, ref: { ttlSeconds: 30 * 86_400 } });
+    expect((await journeys.journeyReport(db, ws2.ctx)).funnel.visitors).toBe(1);
   });
 });

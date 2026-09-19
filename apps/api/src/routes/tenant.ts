@@ -117,8 +117,8 @@ export function tenantRoutes() {
     return {
       ...view,
       scriptUrl: `${base}/referly.js`,
-      install: view.siteKey ? installSnippet(base, view.siteKey, { consentMode: view.consentMode }) : null,
-      platforms: view.siteKey ? platformGuides(base, view.siteKey, { consentMode: view.consentMode }) : [],
+      install: view.siteKey ? installSnippet(base, view.siteKey, { consentMode: view.consentMode, checkoutPaths: view.checkoutPaths }) : null,
+      platforms: view.siteKey ? platformGuides(base, view.siteKey, { consentMode: view.consentMode, checkoutPaths: view.checkoutPaths }) : [],
       examples: SNIPPET_EXAMPLES,
     };
   }

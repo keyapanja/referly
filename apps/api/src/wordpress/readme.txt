@@ -2,7 +2,7 @@
 Tags: affiliate, referral, woocommerce, funnelkit, tracking
 Requires at least: 6.0
 Requires PHP: 7.4
-Stable tag: 1.1.0
+Stable tag: 1.2.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -48,6 +48,9 @@ On Settings, Referly, in the order's notes, and in WooCommerce, Status, Logs, un
 Exclude referly.js from any "delay JavaScript" feature. Otherwise visitors who leave without touching the page are not recorded.
 
 == Changelog ==
+
+= 1.2.0 =
+* Tells the tracking code which page is the checkout (FunnelKit checkouts included), so Referly's journey report counts the people who reached it without guessing from the address.
 
 = 1.1.0 =
 * Only orders that came through an affiliate, by link or coupon code, are sent to Referly.
