@@ -36,9 +36,11 @@ export function analyticsRoutes() {
   r.get("/sources", async (c) => c.json({ rows: await analytics.bySource(c.get("deps").db, c.get("ctx"), period(c, c.get("now")())) }));
 
   /** AN-07: async exports. Request → job builds the file → download while it is valid. */
-  r.post("/exports", async (c) => c.json({ export: await exportsSvc.requestExport(c.get("deps").db, c.get("ctx"), await c.req.json()) }, 202));
-  r.get("/exports", async (c) => c.json({ exports: await exportsSvc.listExports(c.get("deps").db, c.get("ctx")), entities: exportsSvc.EXPORT_ENTITIES }));
-  r.get("/exports/:id", async (c) => c.json({ export: await exportsSvc.getExport(c.get("deps").db, c.get("ctx"), c.req.param("id")) }));
+  r.post("/exports", async (c) => c.json({ export: exportsSvc.publicExport(await exportsSvc.requestExport(c.get("deps").db, c.get("ctx"), await c.req.json())) }, 202));
+  r.get("/exports", async (c) =>
+    c.json({ exports: (await exportsSvc.listExports(c.get("deps").db, c.get("ctx"))).map(exportsSvc.publicExport), entities: exportsSvc.EXPORT_ENTITIES, datasets: exportsSvc.EXPORT_DATASETS, ttlDays: exportsSvc.EXPORT_TTL_MS / 86_400_000 }),
+  );
+  r.get("/exports/:id", async (c) => c.json({ export: exportsSvc.publicExport(await exportsSvc.getExport(c.get("deps").db, c.get("ctx"), c.req.param("id"))) }));
   r.get("/exports/:id/download", async (c) => {
     const record = await exportsSvc.getExport(c.get("deps").db, c.get("ctx"), c.req.param("id"));
     if (record.status !== "done" || !record.storageKey) throw validation(`export is ${record.status}`);
@@ -47,7 +49,7 @@ export function analyticsRoutes() {
     if (!file) throw validation("export file is no longer available");
     const meta = exportsSvc.exportFileMeta(record.entity);
     return new Response(file.data as unknown as BodyInit, {
-      headers: { "content-type": meta.contentType, "content-disposition": `attachment; filename="${record.entity}-${record.createdAt.toISOString().slice(0, 10)}.${meta.extension}"`, "cache-control": "private, no-store" },
+      headers: { "content-type": meta.contentType, "content-disposition": `attachment; filename="${exportsSvc.exportFileName(record)}"`, "cache-control": "private, no-store" },
     });
   });
 

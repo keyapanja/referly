@@ -355,6 +355,34 @@ describe("MVP acceptance over HTTP", () => {
     expect((await call(`/v1/analytics/exports/${id}/download`, { token: affiliateToken })).status).toBe(403);
     expect((await call("/v1/analytics/exports", { method: "POST", token: ownerToken, json: { entity: "users" } })).status).toBe(400);
     expect((await call("/v1/analytics/exports", { token: ownerToken })).body.exports.map((e: any) => e.id)).toContain(id);
+
+    // the page builds its choices from the catalog: plain words, the format, and whether a period applies
+    const catalog = await call("/v1/analytics/exports", { token: ownerToken });
+    expect(catalog.body.ttlDays).toBe(7);
+    expect(catalog.body.datasets.map((d: any) => d.id)).toEqual(["performance", "conversions", "commissions", "payouts", "ledger", "affiliates", "clicks", "workspace"]);
+    expect(catalog.body.datasets.find((d: any) => d.id === "conversions")).toMatchObject({ label: "Sales and leads", format: "csv", period: "optional", ownerOnly: false });
+    expect(catalog.body.exports.find((e: any) => e.id === id)).toMatchObject({ label: "Sales and leads", fileName: "conversions-all-2026-04-10.csv" });
+
+    // a period narrows the file, and names it
+    const march = await call("/v1/analytics/exports", { method: "POST", token: ownerToken, json: { entity: "conversions", from: "2026-03-01T00:00:00Z", to: "2026-03-05T23:59:59Z" } });
+    expect(march.status).toBe(202);
+    expect(march.body.export.fileName).toBe("conversions-2026-03-01-to-2026-03-05.csv");
+    const none = await call("/v1/analytics/exports", { method: "POST", token: ownerToken, json: { entity: "conversions", from: "2025-01-01T00:00:00Z", to: "2025-01-31T23:59:59Z" } });
+    expect((await call("/v1/analytics/exports", { method: "POST", token: ownerToken, json: { entity: "conversions", from: "2026-03-01T00:00:00Z" } })).status).toBe(400);
+    // the affiliate performance report: the Affiliates table of the Analytics page, for the period, as a file
+    expect((await call("/v1/analytics/exports", { method: "POST", token: ownerToken, json: { entity: "performance" } })).status).toBe(400);
+    const report = await call("/v1/analytics/exports", { method: "POST", token: ownerToken, json: { entity: "performance", from: "2026-03-01T00:00:00Z", to: "2026-04-30T23:59:59Z" } });
+    expect(report.body.export).toMatchObject({ label: "Affiliate performance report", fileName: "performance-2026-03-01-to-2026-04-30.csv" });
+    await runOnce({ db: handle.db, email, storage, webUrl: "http://web.test", now });
+    const marchFile = String((await call(`/v1/analytics/exports/${march.body.export.id}/download`, { token: ownerToken })).body).trim().split("\n");
+    expect(marchFile).toHaveLength(3);
+    const emptyFile = await call(`/v1/analytics/exports/${none.body.export.id}`, { token: ownerToken });
+    expect(emptyFile.body.export).toMatchObject({ status: "done", rowCount: 0 });
+    const reportFile = await call(`/v1/analytics/exports/${report.body.export.id}/download`, { token: ownerToken });
+    expect(reportFile.headers.get("content-disposition")).toContain('filename="performance-2026-03-01-to-2026-04-30.csv"');
+    const reportLines = String(reportFile.body).trim().split("\n");
+    expect(reportLines[0]).toBe("affiliate,email,status,clicks,sales,conversionRate,revenue,commission,currency,periodFrom,periodTo");
+    expect(reportLines[1]).toBe("Sam Partner,sam@partner.io,active,1,2,200.0%,34000.00,5000.00,INR,2026-03-01,2026-04-30");
   });
 
   it("Assets: merchants can upload files; served with the right type; bad types and sizes rejected", async () => {

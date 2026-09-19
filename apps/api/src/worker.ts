@@ -176,9 +176,15 @@ export function createHandlers(deps: WorkerDeps): Record<string, jobs.JobHandler
             for (const row of page.rows) chunks.push(JSON.stringify({ table: page.table, row }) + "\n");
             rowCount += page.rows.length;
           }
+        } else if (record.entity === "performance") {
+          if (!record.periodFrom || !record.periodTo) throw new Error("the performance report needs a period");
+          const tenant = await tenantsSvc.getTenant(db, ctx);
+          const rows = await exportsSvc.performanceReportRows(db, ctx, { from: record.periodFrom, to: record.periodTo }, tenant.currency);
+          chunks.push(exportsSvc.toCsv(rows, exportsSvc.PERFORMANCE_COLUMNS));
+          rowCount = rows.length;
         } else {
           let columns: string[] | null = null;
-          for await (const page of exportsSvc.iterateExportRows(db, ctx, record.entity as exportsSvc.ExportEntity)) {
+          for await (const page of exportsSvc.iterateExportRows(db, ctx, record.entity as exportsSvc.ExportEntity, { from: record.periodFrom, to: record.periodTo })) {
             if (!columns) {
               columns = Object.keys(page[0]!);
               chunks.push(exportsSvc.toCsv(page, columns));

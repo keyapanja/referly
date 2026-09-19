@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { api, API_URL } from "@/lib/api";
+import { api } from "@/lib/api";
+import { EXPORT_FINISHED, downloadExport, watchExport } from "@/lib/exports";
 import { useAction, useApi } from "@/lib/hooks";
 import { dateTime } from "@/lib/format";
 import { Badge, Field, Table } from "@/components/ui";
@@ -35,17 +36,11 @@ export function DataRetentionCard() {
     return () => clearInterval(t);
   }, [pending, reloadExports]);
 
-  async function download(exp: any) {
-    const res = await fetch(`${API_URL}/v1/analytics/exports/${exp.id}/download`, { credentials: "include" });
-    if (!res.ok) return;
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `workspace-${String(exp.createdAt).slice(0, 10)}.jsonl`;
-    a.click();
-    URL.revokeObjectURL(url);
-  }
+  // The watcher in the app shell announces the finished file with a toast; refresh this list at the same moment.
+  useEffect(() => {
+    window.addEventListener(EXPORT_FINISHED, reloadExports);
+    return () => window.removeEventListener(EXPORT_FINISHED, reloadExports);
+  }, [reloadExports]);
 
   if (!data || !form) return null;
 
@@ -80,7 +75,15 @@ export function DataRetentionCard() {
       </form>
       <h3 style={{ marginTop: 20 }}>Export everything</h3>
       <p className="muted">One JSON Lines file with every record in this workspace (team, affiliates, programs, sales, commissions, payouts, messages, audit trail). Credentials and hashes are left out. Built in the background; downloadable for 7 days. Owners only.</p>
-      <button className="sm" disabled={busy || pending} onClick={() => run(() => api("/v1/analytics/exports", { method: "POST", json: { entity: "workspace" } }), "Export started.").then(reloadExports)}>
+      <button
+        className="sm"
+        disabled={busy || pending}
+        onClick={async () => {
+          const res = await run(() => api<any>("/v1/analytics/exports", { method: "POST", json: { entity: "workspace" } }), "Export started. You will be told when the file is ready.");
+          if (res) watchExport(res.export.id);
+          reloadExports();
+        }}
+      >
         {pending ? "Building…" : "Export workspace data"}
       </button>
       {workspaceExports.length ? (
@@ -91,7 +94,7 @@ export function DataRetentionCard() {
             { header: "Requested", cell: (e: any) => dateTime(e.createdAt) },
             { header: "Status", cell: (e: any) => <Badge value={e.status} /> },
             { header: "Rows", cell: (e: any) => e.rowCount ?? "—", num: true },
-            { header: "", cell: (e: any) => (e.status === "done" ? <button className="sm" onClick={() => download(e)}>Download</button> : e.error ? <span className="muted">{e.error}</span> : null) },
+            { header: "", cell: (e: any) => (e.status === "done" ? <button className="sm" onClick={() => void downloadExport(e)}>Download</button> : e.error ? <span className="muted">{e.error}</span> : null) },
           ]}
         />
       ) : null}

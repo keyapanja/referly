@@ -980,6 +980,9 @@ export const exports = pgTable(
     storageKey: text("storage_key"),
     error: text("error"),
     requestedByUserId: text("requested_by_user_id").references(() => users.id),
+    /** The period the export covers; both null means every record. */
+    periodFrom: ts("period_from"),
+    periodTo: ts("period_to"),
     createdAt: createdAt(),
     completedAt: ts("completed_at"),
     expiresAt: ts("expires_at"),

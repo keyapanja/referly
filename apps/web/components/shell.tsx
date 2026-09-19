@@ -8,6 +8,8 @@ import { useApi } from "@/lib/hooks";
 import { Icon, type IconName } from "./icons";
 import { brandStyle } from "@/lib/brand";
 import { NotificationBell } from "./notifications";
+import { ToastHost } from "./toast";
+import { ExportWatcher } from "./export-watcher";
 
 type NavItem = readonly [href: string, label: string, icon: IconName];
 
@@ -198,6 +200,8 @@ export function Shell({ mode, children }: { mode: "merchant" | "portal" | "platf
         ) : null}
         {children}
       </main>
+      <ToastHost />
+      {mode === "merchant" ? <ExportWatcher /> : null}
     </div>
   );
 }
